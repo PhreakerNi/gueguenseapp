@@ -1,7 +1,7 @@
 # 04 — MÁQUINA DE ESTADOS Y SUBSISTEMAS DE ENTREGA (DELIVERY STATE MACHINE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Matriz Formal de Transiciones de Estado con 11 Atributos, Inmutabilidad de Quote Consumido y Sub-sistema de Incidentes  
 
@@ -22,7 +22,7 @@ Güegüense diferencia el **Quote Lifecycle** del **Delivery Lifecycle**:
 
 | FROM | TO | ACTOR | TRIGGER | PRECONDITIONS | SERVER_VALIDATIONS | EVENTS | SIDE_EFFECTS | NOTIFICATIONS | IDEMPOTENCY | DOMAIN_ERRORS |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **DRAFT** | **QUOTED** | Business Member / System | Request Quote | Pickup & Dropoff valid coords. | Calculate distance/pricing version. | `QUOTE_CALCULATED` | Quote record created, `expires_at` set (5m initial default). | N/A | No | `INVALID_LOCATIONS`, `PRICING_UNAVAILABLE` |
+| **DRAFT** | **QUOTED** | Business Member / System | Request Quote | Pickup & Dropoff valid coords. | Calculate distance/pricing version. | `QUOTE_CALCULATED` | Quote record created, `expires_at` set (5m initial default / configurable policy). | N/A | No | `INVALID_LOCATIONS`, `PRICING_UNAVAILABLE` |
 | **QUOTED** | **CONSUMED** | Business Member | Confirm Quote | Quote status = `QUOTED` & not expired. | Idempotency Key checked, Balance/Credit valid. | `QUOTE_CONSUMED`, `DELIVERY_CREATED` | Delivery created in `SEARCHING_DRIVER`. | Driver Fleet Alert | Obligatoria | `QUOTE_EXPIRED`, `QUOTE_ALREADY_CONSUMED` |
 | **QUOTED** | **EXPIRED** | System | Expire Timeout | Quote status = `QUOTED` & `now() > expires_at`. | Background job checks timestamp. | `QUOTE_EXPIRED` | Quote disabled for consumption. | N/A | No | N/A |
 | **QUOTED** | **CANCELED** | Business Member | Cancel Draft | Quote status = `QUOTED`. | User owns quote. | `QUOTE_CANCELED` | Quote marked canceled. | N/A | Obligatoria | `INVALID_QUOTE_STATE` |
@@ -33,7 +33,7 @@ Güegüense diferencia el **Quote Lifecycle** del **Delivery Lifecycle**:
 | **ARRIVED_PICKUP** | **PICKED_UP** | Business Employee / Operator | Confirm Custody | Delivery = `ARRIVED_PICKUP`. | Digest matches `pickup_code_digest`, Member scope or Operator valid. | `CUSTODY_TRANSFERRED` | Custody transferred, `pickup_code` invalidated, OTP generated in `private.delivery_secrets`. | Driver Push/Socket | Obligatoria | `INVALID_PICKUP_CODE`, `UNAUTHORIZED_MEMBER` |
 | **PICKED_UP** | **TO_DROPOFF** | Driver | Iniciar Ruta Cliente | Delivery = `PICKED_UP`. | Driver matches `driver_id`. | `TO_DROPOFF_STARTED` | Navigation to dropoff loaded. | Customer SMS/Tracking | Opcional | `INVALID_DELIVERY_STATE` |
 | **TO_DROPOFF** | **ARRIVED_DROPOFF** | Driver | Avisar Llegada | Delivery = `TO_DROPOFF`. | Driver location within radius of dropoff location. | `ARRIVED_DROPOFF` | `DELIVERY_OTP` activated for customer tracking view. | Customer SMS/Push | Opcional | `LOCATION_OUT_OF_RANGE` |
-| **ARRIVED_DROPOFF** | **DELIVERED** | Driver | Verify OTP | Delivery = `ARRIVED_DROPOFF`. | Submitted OTP hash matches `otp_digest` & attempts < 3. | `OTP_VERIFIED`, `DELIVERY_COMPLETED` | Ledger transaction executed, Driver earning credited. | Business & Customer Push | Obligatoria | `INVALID_OTP`, `OTP_LOCKED`, `MAX_ATTEMPTS_EXCEEDED` |
+| **ARRIVED_DROPOFF** | **DELIVERED** | Driver | Verify OTP | Delivery = `ARRIVED_DROPOFF`. | Submitted OTP hash matches `otp_digest` & attempts < 3 (initial default / configurable policy). | `OTP_VERIFIED`, `DELIVERY_COMPLETED` | Ledger transaction executed, Driver earning credited. | Business & Customer Push | Obligatoria | `INVALID_OTP`, `OTP_LOCKED`, `MAX_ATTEMPTS_EXCEEDED` |
 | **DRIVER_ASSIGNED** | **SEARCHING_DRIVER** | Driver (Pre-Pickup) | Cancel Acceptance | Delivery status = `DRIVER_ASSIGNED`. | Physical custody NOT transferred. | `DRIVER_UNASSIGNED`, `SEARCH_STARTED` | Driver unassigned (`driver_id = NULL`), penalty logged. | Business Push/Socket | Obligatoria | `CUSTODY_ALREADY_TRANSFERRED` |
 | **TO_PICKUP** | **SEARCHING_DRIVER** | Driver (Pre-Pickup) | Cancel Acceptance | Delivery status = `TO_PICKUP`. | Physical custody NOT transferred. | `DRIVER_UNASSIGNED`, `SEARCH_STARTED` | Driver unassigned (`driver_id = NULL`), penalty logged. | Business Push/Socket | Obligatoria | `CUSTODY_ALREADY_TRANSFERRED` |
 | **ARRIVED_PICKUP** | **SEARCHING_DRIVER** | Driver (Pre-Pickup) | Cancel Acceptance | Delivery status = `ARRIVED_PICKUP`. | Physical custody NOT transferred (`PICKED_UP` not reached). | `DRIVER_UNASSIGNED`, `SEARCH_STARTED` | Driver unassigned (`driver_id = NULL`), penalty logged. | Business Push/Socket | Obligatoria | `CUSTODY_ALREADY_TRANSFERRED` |
@@ -46,7 +46,7 @@ Güegüense diferencia el **Quote Lifecycle** del **Delivery Lifecycle**:
 | **DRIVER_ASSIGNED** | **CANCELED** | Business / Operator | Cancel Pre-Pickup | Delivery = `DRIVER_ASSIGNED`. | Physical custody NOT transferred. | `DELIVERY_CANCELED` | Driver unassigned; quote status remains `CONSUMED`. | Driver Push/Socket | Obligatoria | `CANNOT_CANCEL_IN_TRANSIT` |
 | **TO_PICKUP** | **CANCELED** | Business / Operator | Cancel Pre-Pickup | Delivery = `TO_PICKUP`. | Physical custody NOT transferred. | `DELIVERY_CANCELED` | Driver unassigned; cancel fee evaluated. | Driver Push/Socket | Obligatoria | `CANNOT_CANCEL_IN_TRANSIT` |
 | **ARRIVED_PICKUP** | **CANCELED** | Business / Operator | Business Closed / Timeout | Delivery = `ARRIVED_PICKUP`. | Physical custody NOT transferred; local closed/timeout. | `DELIVERY_CANCELED` | Driver compensated; cancel fee logged. | Driver & Business Push | Obligatoria | `CUSTODY_ALREADY_TRANSFERRED` |
-| **SEARCHING_DRIVER** | **FAILED** | System | Terminal Failure | Max search rounds reached (2h initial default). | No drivers available after max retries. | `DELIVERY_FAILED` | Delivery marked failed, no pending custody. | Business Push | Obligatoria | `INVALID_DELIVERY_STATE` |
+| **SEARCHING_DRIVER** | **FAILED** | System | Terminal Failure | Max search rounds reached (2h initial default / configurable policy). | No drivers available after max retries. | `DELIVERY_FAILED` | Delivery marked failed, no pending custody. | Business Push | Obligatoria | `INVALID_DELIVERY_STATE` |
 
 ---
 

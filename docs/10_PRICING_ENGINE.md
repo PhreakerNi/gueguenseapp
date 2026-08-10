@@ -1,7 +1,7 @@
 # 10 — MOTOR DE PRECIOS Y AJUSTES (PRICING ENGINE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Tarificación Dinámica, Precios Cotizados vs. Finales, Umbrales Configurables y Resiliencia  
 

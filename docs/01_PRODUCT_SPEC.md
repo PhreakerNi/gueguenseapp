@@ -1,7 +1,7 @@
 # 01 — ESPECIFICACIÓN DE PRODUCTO (PRODUCT SPECIFICATION)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Especificación de Producto, 4 Aplicaciones Canónicas, KPIs e Invariantes  
 
@@ -35,7 +35,7 @@ El ecosistema de software está compuesto de forma exclusiva por 4 aplicaciones:
 * **App Güegüense Negocios (`business-mobile`):** Cotización instantánea (`QUOTED`), confirmación, seguimiento y gestión de sucursales.
 * **App Güegüense Motorizado (`driver-mobile`):** Recepción atómica de ofertas, navegación, verificación de custodia por `PICKUP_CODE` y confirmación por `DELIVERY_OTP`.
 * **Güegüense Admin (`admin-web`):** Mesa de control de operaciones en vivo, verificación de documentos, gestión de incidentes y devoluciones.
-* **Portal de Tracking Web (`tracking-web`):** Seguimiento mediante bearer token con acceso restringido al `DELIVERY_OTP` de 6 dígitos.
+* **Portal de Tracking Web (`tracking-web`):** Seguimiento mediante bearer token con acceso restringido al `DELIVERY_OTP` de 6 dígitos en `OTP_ALLOWED_STATES`.
 
 ### 3.2 Fuera del Alcance MVP (`MVP OUT OF SCOPE / POST-MVP`)
 * **Modalidad Catálogo / Menú Directo (Fase 9 Post-MVP):** Creación de tiendas públicas y menús digitales de productos.

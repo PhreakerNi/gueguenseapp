@@ -1,9 +1,9 @@
 # 11 — SISTEMA CONTABLE Y LEDGER FINANCIERO (FINANCIAL LEDGER)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Contabilidad Doble Entrada (Journal + Postings), Convención de Signos Firmados, Suma Cero y Moneda NIO  
+**Dominio:** Contabilidad Doble Entrada (Journal + Postings), Convención de Signos Firmados, Suma Cero, Ciclo Payouts y Moneda NIO  
 
 ---
 
@@ -19,7 +19,39 @@ Güegüense implementa una arquitectura de partida doble basada en **`ledger_tra
 
 ---
 
-## 2. Ejemplos Canónicos de Asientos Contables por `transaction_type`
+## 2. Ciclo de Vida Financiero de Payouts (Retiros Conductor)
+
+Para evitar ambigüedades entre la aprobación administrativa y la dispersión bancaria real:
+
+```text
+ ┌────────────────┐
+ │   REQUESTED    │ Conductor solicita retiro desde su app.
+ └───────┬────────┘
+         │
+         ▼
+ ┌────────────────┐
+ │  UNDER_REVIEW  │ En revisión por Admin (MFA / Cuatro Ojos si > C$5,000 policy).
+ └───────┬────────┘
+         │
+         ▼
+ ┌────────────────┐
+ │    APPROVED    │ Aprobado administrativamente por la plataforma.
+ └───────┬────────┘
+         │
+         ▼
+ ┌────────────────┐
+ │   PROCESSING   │ Transferencia emitida hacia el proveedor bancario.
+ └───────┬────────┘
+         │
+         ▼
+ ┌────────────────┐
+ │      PAID      │ Confirmación recibida vía webhook/callback verificado.
+ └────────────────┘
+```
+
+---
+
+## 3. Ejemplos Canónicos de Asientos Contables por `transaction_type`
 
 ### 1. Entrega Normal Liquidada (`transaction_type: DELIVERY_SETTLEMENT` - C$ 100.00)
 * **Postings:**
@@ -40,7 +72,7 @@ Güegüense implementa una arquitectura de partida doble basada en **`ledger_tra
   * `REVENUE_PLATFORM` $\rightarrow$ $+20.00 \text{ NIO}$ (Débito: Reversión de ingreso de plataforma)
   * `LIABILITY_DRIVER` $\rightarrow$ $+80.00 \text{ NIO}$ (Débito: Reversión de ganancia driver si aplica)
   * `ASSET_BUSINESS_REC` $\rightarrow$ $-100.00 \text{ NIO}$ (Crédito: Crédito a favor del negocio)
-  * **Suma:** $+20.00 + 80.00 - 100.00 = 0.00 \text{ NIO}$
+  * **Suma:** $+20.00 + 80.00 - 10.000 = 0.00 \text{ NIO}$
 
 ### 4. Ajuste Manual Administrativo (`transaction_type: MANUAL_ADJUSTMENT` - C$ 50.00)
 * **Postings:**
@@ -48,19 +80,7 @@ Güegüense implementa una arquitectura de partida doble basada en **`ledger_tra
   * `LIABILITY_DRIVER` $\rightarrow$ $-50.00 \text{ NIO}$ (Crédito: Compensación acreditada al conductor)
   * **Suma:** $+50.00 - 50.00 = 0.00 \text{ NIO}$
 
-### 5. Cobro de Efectivo en Mano por Conductor (`transaction_type: CASH_COLLECTION` - C$ 500.00)
-* **Postings:**
-  * `ASSET_DRIVER_CASH_RECEIVABLE` $\rightarrow$ $+500.00 \text{ NIO}$ (Débito: Efectivo en poder del motorizado)
-  * `ASSET_BUSINESS_REC` $\rightarrow$ $-500.00 \text{ NIO}$ (Crédito: Descarga de cuenta por cobrar negocio)
-  * **Suma:** $+500.00 - 500.00 = 0.00 \text{ NIO}$
-
-### 6. Rendición de Cuentas de Efectivo (`transaction_type: CASH_SETTLEMENT` - C$ 500.00)
-* **Postings:**
-  * `BANK_PLATFORM` $\rightarrow$ $+500.00 \text{ NIO}$ (Débito: Depósito en banco plataforma)
-  * `ASSET_DRIVER_CASH_RECEIVABLE` $\rightarrow$ $-500.00 \text{ NIO}$ (Crédito: Cancelación de responsabilidad conductor)
-  * **Suma:** $+500.00 - 500.00 = 0.00 \text{ NIO}$
-
-### 7. Retiro de Ganancias de Conductor (`transaction_type: DRIVER_PAYOUT` - C$ 1,000.00)
+### 5. Retiro de Ganancias de Conductor (`transaction_type: DRIVER_PAYOUT` - C$ 1,000.00)
 * **Postings:**
   * `LIABILITY_DRIVER` $\rightarrow$ $+1,000.00 \text{ NIO}$ (Débito: Cancelación de pasivo con conductor)
   * `BANK_PLATFORM` $\rightarrow$ $-1,000.00 \text{ NIO}$ (Crédito: Egreso de banco plataforma)

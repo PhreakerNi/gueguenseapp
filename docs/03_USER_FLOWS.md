@@ -1,7 +1,7 @@
 # 03 — FLUJOS DE USUARIO (USER FLOWS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Diagramación UX y Experiencia de Usuario Alineada 100% con la Máquina de Estados  
 

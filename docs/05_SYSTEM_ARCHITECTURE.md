@@ -1,9 +1,9 @@
 # 05 — ARQUITECTURA TÉCNICA DE SISTEMAS (SYSTEM ARCHITECTURE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Arquitectura de Software, Supabase CLI, Google Routes API y Tracking Web MVP  
+**Dominio:** Arquitectura de Software, Supabase CLI, Google Routes API e Ingesta Validada por Backend  
 
 ---
 
@@ -36,9 +36,9 @@ gueguenseapp/
 
 ---
 
-## 2. Ingesta GPS, Clasificación de Calidad y Tracking Web MVP
+## 2. Ingesta GPS Validada por Backend y RLS Restricted Writes
 
-### 2.1 Pipeline de Ingesta GPS Autenticada y Clasificación de Calidad
+### 2.1 Pipeline de Ingesta GPS Autenticada
 ```text
  ┌───────────────────────────┐
  │ App Driver (Sensor GPS)   │ Captura lat/lng, accuracy, heading, speed y timestamp.
@@ -47,16 +47,17 @@ gueguenseapp/
                ▼
  ┌───────────────────────────┐
  │ Ingesta Autenticada API   │ Endpoint REST/RPC `POST /api/v1/driver/location`.
- └─────────────┬─────────────┘ Validaciones: (1) JWT válido, (2) Clasificación de calidad
-               │              según accuracy y speed (No rechaza ciegamente > 50m).
+ └─────────────┬─────────────┘ (1) JWT válido, (2) RPC/Serverless validation logic,
+               │               (3) Clasificación de calidad (accuracy > 50m initial default).
                ▼
  ┌───────────────────────────┐
- │ DB Update (`driver_pres.`)│ Actualiza registro PostGIS + `delivery_tracking_points`.
- └───────────────────────────┘ Puntos con accuracy > 50m se marcan `location_quality = 'LOW'`.
+ │ DB Writes (Server-Side)   │ El servidor escribe en `driver_presence` y
+ └───────────────────────────┘ `delivery_tracking_points`. RLS bloquea escrituras directas.
 ```
 
-* **Política de Calidad y Anomalías GPS:** Puntos con baja precisión (`accuracy > 50m`) o velocidad anómala (> 120 km/h) no se rechazan automáticamente de la BD para conservar trazabilidad histórica; se clasifican como `location_quality = 'LOW'` o `anomaly_flag = true`, afectando la elegibilidad del despacho y la evaluación de frescura.
-* **Comportamiento App Terminated:** La captura en segundo plano depende de las políticas del SO. Si el usuario fuerza el cierre de la app (*kill app*), las transmisiones se detendrán. El servidor marcará la frescura de seguimiento como `STALE` o `UNAVAILABLE` y emitirá una alerta preventiva en Admin. Al reabrir la app, el motorizado resincroniza su estado vía REST (`GET /api/v1/driver/deliveries/active`).
+* **Restricción de Escritura Directa (RLS Protection):** La App Driver **NO escribe directamente** sobre `driver_presence.current_location` ni sobre `delivery_tracking_points` mediante clientes REST/Supabase directos. La actualización requiere atravesar el endpoint o procedimiento almacenado validado.
+* **Política de Calidad y Anomalías GPS:** Puntos con baja precisión (`accuracy > 50m initial default / configurable policy`) o velocidad anómala (> 120 km/h initial default) no se descartan de la BD; se clasifican como `location_quality = 'LOW'` o `anomaly_flag = true`.
+* **Comportamiento App Terminated:** Si el usuario liquida la app (*kill app*), las transmisiones GPS cesan. El servidor marca la frescura como `STALE` o `UNAVAILABLE` y emite una alerta en Admin.
 
 ### 2.2 Arquitectura del Tracking Web MVP (`tracking-web`)
 * **Transporte Primario MVP:**
@@ -64,11 +65,11 @@ gueguenseapp/
 Tracking Web (Sin Cuenta)
 ├── Utiliza Bearer Tracking Token de la URL
 ├── Backend valida hash SHA-256 en private.tracking_tokens + expiry/revocation
-├── GET /api/v1/tracking/{token} (Obtiene snapshot inicial)
+├── GET /api/v1/tracking/{token} (Obtiene snapshot inicial filtrado por backend DTO)
 ├── Adaptive Short Polling (Intervalo configurable mientras delivery está activa)
 └── Polling se detiene automáticamente en estado terminal (DELIVERED/RETURNED/CANCELED/FAILED)
 ```
-*(Nota: No se utiliza conexión directa a Supabase Realtime para usuarios anónimos en el MVP; las apps autenticadas Business, Driver y Admin sí utilizan canales privados Realtime).*
+*(Nota: El navegador anónimo/cliente tracking NO tiene acceso RLS directo a tablas GPS ni a `delivery_tracking_points`; consulta únicamente DTOs filtrados desde el backend).*
 
 ---
 

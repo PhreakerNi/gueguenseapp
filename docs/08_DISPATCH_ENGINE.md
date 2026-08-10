@@ -1,7 +1,7 @@
 # 08 — MOTOR DE DESPACHO Y ASIGNACIÓN (DISPATCH ENGINE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Algoritmo Completo de Despacho (13 Pasos), Motor de Scoring, Compute Route Matrix Top-N y Mutex `driver_presence`  
 
@@ -18,7 +18,7 @@ El **Dispatch Engine** ejecuta un pipeline optimizado para seleccionar al candid
                │
                ▼
  ┌───────────────────────────┐
- │ 2. PostGIS Candidate Disc.│ Búsqueda por radio espacial $R$ (ej. 5km) sobre `driver_presence`.
+ │ 2. PostGIS Candidate Disc.│ Búsqueda por radio espacial $R$ (ej. 5km initial default).
  └─────────────┬─────────────┘
                │
                ▼
@@ -33,7 +33,7 @@ El **Dispatch Engine** ejecuta un pipeline optimizado para seleccionar al candid
                │
                ▼
  ┌───────────────────────────┐
- │ 5. Selección Top-N        │ Se toman los Top-N mejores candidatos (ej. Top 5).
+ │ 5. Selección Top-N        │ Se toman los Top-N mejores candidatos (ej. Top 5 initial default).
  └─────────────┬─────────────┘
                │
                ▼
@@ -48,24 +48,24 @@ El **Dispatch Engine** ejecuta un pipeline optimizado para seleccionar al candid
                │
                ▼
  ┌───────────────────────────┐
- │ 8. Emisión de Oferta      │ Se inserta en `delivery_offers` con status `OPEN` (15s exp.).
+ │ 8. Emisión de Oferta      │ Se inserta en `delivery_offers` con status `OPEN` (15s exp. default).
  └───────────────────────────┘ (Rondas de expansión progresiva si no hay respuesta).
 ```
 
 ### 13 Pasos del Pipeline:
-1. **Eligibility Filter:** Filtra conductores en regla.
+1. **Eligibility Filter:** Filtra conductores en regla (`VERIFIED`, `ACTIVE`, `AVAILABLE`).
 2. **PostGIS Candidate Discovery:** Búsqueda espacial rápida en base de datos.
 3. **Freshness Filter:** Descarte de señales GPS desactualizadas.
-4. **Coarse Ranking:** Ordenamiento preliminar.
+4. **Coarse Ranking:** Ordenamiento preliminar por distancia geométrica.
 5. **Top-N Candidates:** Selección de un subconjunto acotado para minimizar costos API.
 6. **Google Compute Route Matrix:** Matriz de tiempos y rutas viales reales solo para el Top-N.
 7. **Final Scoring:** Matriz de puntuación ponderada.
 8. **Fairness / Workload Balancing:** Distribución equitativa entre conductores activos.
 9. **Dispatch Round:** Envío de oferta en rondas individuales.
-10. **Offer Expiration:** Expiración de oferta tras 15 segundos sin aceptar (`OFFER_EXPIRED`).
-11. **Radius Expansion:** Expansión del radio de búsqueda (+2km) si la primera ronda vence.
+10. **Offer Expiration:** Expiración de oferta tras 15 segundos sin aceptar (`OFFER_EXPIRED`, `initial default / configurable policy`).
+11. **Radius Expansion:** Expansión del radio de búsqueda (+2km `initial default`) si la primera ronda vence.
 12. **No-Driver Fallback:** Re-intentos programados tras alcanzar el radio máximo.
-13. **Operator Escalation:** Alerta sonora y visual en el panel de Admin si transcurren 10 minutos sin adjudicación.
+13. **Operator Escalation:** Alerta sonora y visual en el panel de Admin si transcurren 10 minutos (`initial default`) sin adjudicación.
 
 ---
 
@@ -121,9 +121,9 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'INVALID_OPERATIONAL_STATE', 'message', 'Conductor fuera de servicio o en estado no elegible.');
     END IF;
 
-    -- Validar frescura GPS del conductor (ej. máximo 3 minutos de antigüedad)
+    -- Validar frescura GPS del conductor (ej. máximo 3 minutos initial default / configurable policy)
     IF v_location_updated_at IS NULL OR v_location_updated_at < (NOW() - INTERVAL '3 minutes') THEN
-        RETURN jsonb_build_object('success', false, 'code', 'STALE_DRIVER_LOCATION', 'message', 'Señación GPS desactualizada. Por favor actualice su ubicación.');
+        RETURN jsonb_build_object('success', false, 'code', 'STALE_DRIVER_LOCATION', 'message', 'Señalización GPS desactualizada. Por favor actualice su ubicación.');
     END IF;
 
     -- Leer y verificar expediente drivers

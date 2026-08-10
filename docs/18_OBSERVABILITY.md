@@ -1,7 +1,7 @@
 # 18 — OBSERVABILIDAD, LOGS Y PRIVACIDAD (OBSERVABILITY)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Telemetría, Logs Estructurados, Redacción Recursiva de PII, Sanitización de URLs/Headers y Tracing  
 

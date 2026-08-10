@@ -1,9 +1,9 @@
 # GÜEGÜENSE — Plataforma Logística y Delivery B2B Bajo Demanda
 
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Auditoria_Cerebro_Fase0_v1_5.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Auditoria_Cerebro_Fase0_v1_6.md`
 
 ---
 
@@ -48,19 +48,19 @@ gueguenseapp/
 2. [02_USER_ROLES.md](docs/02_USER_ROLES.md) — Identidad `auth.users`, Roles de Plataforma, Membresías Comerciales (`business_member_locations` N:M) y Residencia de Custodia en Cuentas Suspendidas.
 3. [03_USER_FLOWS.md](docs/03_USER_FLOWS.md) — Flujos UX Alineados con Máquina de Estados (`ARRIVED_PICKUP` $\rightarrow$ `PICKED_UP` $\rightarrow$ `TO_DROPOFF`), Devolución y Custodia.
 4. [04_DELIVERY_STATE_MACHINE.md](docs/04_DELIVERY_STATE_MACHINE.md) — Matriz Formal de Transiciones con 11 Atributos por Transición, Inmutabilidad de Quote Consumido y Sub-sistema de Incidentes.
-5. [05_SYSTEM_ARCHITECTURE.md](docs/05_SYSTEM_ARCHITECTURE.md) — Arquitectura de Sistemas, Clasificación de Calidad GPS y Tracking Web MVP vía Adaptive Short Polling.
-6. [06_DATABASE_ARCHITECTURE.md](docs/06_DATABASE_ARCHITECTURE.md) — Esquema Relacional PostgreSQL Completo (Entidades MVP individualizadas, `idempotency_keys`, `custody_handoffs`, `notification_deliveries`, `driver_payout_methods`).
-7. [07_API_CONTRACTS.md](docs/07_API_CONTRACTS.md) — Contratos REST API Estructurados por Tabla de Acción, DTOs, Idempotencia y OTP Customer-Only.
-8. [08_DISPATCH_ENGINE.md](docs/08_DISPATCH_ENGINE.md) — Motor de Despacho (Algoritmo 13 Pasos, Scoring, Compute Route Matrix Top-N), Mutex `driver_presence` y Freshness GPS.
-9. [09_TRACKING_ARCHITECTURE.md](docs/09_TRACKING_ARCHITECTURE.md) — Rastreabilidad Adaptativa, Ingesta GPS, Polling, Headers `no-store` y Visibilidad de OTP en Estados Autorizados (`OTP_DISALLOWED_STATES`).
+5. [05_SYSTEM_ARCHITECTURE.md](docs/05_SYSTEM_ARCHITECTURE.md) — Arquitectura de Sistemas, Ingesta GPS Validada por Backend y Tracking Web MVP vía Adaptive Short Polling.
+6. [06_DATABASE_ARCHITECTURE.md](docs/06_DATABASE_ARCHITECTURE.md) — Esquema Relacional PostgreSQL Completo (37 Entidades MVP individualizadas con plantilla de 15 propiedades, `idempotency_keys` para Webhooks/System, `notification_deliveries`).
+7. [07_API_CONTRACTS.md](docs/07_API_CONTRACTS.md) — Contratos REST API Completos Especificados por Tablas de Mutación Crítica por Dominio.
+8. [08_DISPATCH_ENGINE.md](docs/08_DISPATCH_ENGINE.md) — Motor de Despacho (Algoritmo 13 Pasos, Scoring, Compute Route Matrix Top-N), Mutex `driver_presence`, Freshness GPS y Permisos Security Definer.
+9. [09_TRACKING_ARCHITECTURE.md](docs/09_TRACKING_ARCHITECTURE.md) — Rastreabilidad Adaptativa, Polling, Headers `no-store` / `no-referrer` y Visibilidad de OTP en `OTP_ALLOWED_STATES`.
 10. [10_PRICING_ENGINE.md](docs/10_PRICING_ENGINE.md) — Tarificación Quoted vs Final, Entidad `pricing_adjustments` (`MANUAL_ADJUSTMENT`) y Umbrales Configurables (`initial default`).
-11. [11_FINANCIAL_LEDGER.md](docs/11_FINANCIAL_LEDGER.md) — Contabilidad Doble Entrada (Journal + Postings), Convención `+` Débito / `-` Crédito, Suma Cero, Cuenta `ASSET_DRIVER_CASH_RECEIVABLE` y Ejemplos de Ajustes/Devoluciones.
-12. [12_SECURITY_ARCHITECTURE.md](docs/12_SECURITY_ARCHITECTURE.md) — Hardened Security Definer, Threat Model Evaluado (20 Amenazas) y Cifrado de OTP (`otp_digest` + `otp_ciphertext` en `private.delivery_secrets`).
+11. [11_FINANCIAL_LEDGER.md](docs/11_FINANCIAL_LEDGER.md) — Contabilidad Doble Entrada (Journal + Postings), Convención `+` Débito / `-` Crédito, Suma Cero, Cuenta `ASSET_DRIVER_CASH_RECEIVABLE` y Ejemplos por `transaction_type`.
+12. [12_SECURITY_ARCHITECTURE.md](docs/12_SECURITY_ARCHITECTURE.md) — Hardened Security Definer, Threat Model Evaluado (20 Amenazas) y Ciclo de Vida de Secretos en `private.delivery_secrets`.
 13. [13_NOTIFICATIONS.md](docs/13_NOTIFICATIONS.md) — Notificaciones Push Best-Effort, Outbox Pattern, Entidad `notification_deliveries` y Reintentos con Exponential Backoff + Jitter.
 14. [14_ADMIN_OPERATIONS.md](docs/14_ADMIN_OPERATIONS.md) — Panel de Control Administrativo (17 Módulos Operativos con Roles Mínimos, Justificación `reason` y Cuatro Ojos Configurable).
-15. [15_ERROR_AND_EDGE_CASES.md](docs/15_ERROR_AND_EDGE_CASES.md) — Catálogo Completo de Casos Límite (31 Casos con Estados Canónicos Exactos y Sin Wildcards en Devoluciones).
+15. [15_ERROR_AND_EDGE_CASES.md](docs/15_ERROR_AND_EDGE_CASES.md) — Catálogo Completo de Casos Límite (31 Casos con Estados Canónicos Exactos y Sin Pseudoestados).
 16. [16_DESIGN_SYSTEM.md](docs/16_DESIGN_SYSTEM.md) — Sistema de Diseño, Tokens Visuales, Layouts de Delivery Activo y Componentes UX.
-17. [17_TESTING_STRATEGY.md](docs/17_TESTING_STRATEGY.md) — Estrategia de Pruebas Unitarias, RLS, Concurrencia Dual, Custodia, Ledger e Invariantes Críticas.
+17. [17_TESTING_STRATEGY.md](docs/17_TESTING_STRATEGY.md) — Estrategia de Pruebas Unitarias, RLS, Concurrencia Dual, Ingesta GPS Validada, Idempotencia Webhooks y Payout States.
 18. [18_OBSERVABILITY.md](docs/18_OBSERVABILITY.md) — Logs Estructurados, Redacción Recursiva de PII, Sanitización de URLs/Headers, Omisión de Bearer Tokens en Access Logs y Reducción de Precisión GPS.
 19. [19_DEPLOYMENT_ARCHITECTURE.md](docs/19_DEPLOYMENT_ARCHITECTURE.md) — Pipeline CI/CD, Promoción Dev $\rightarrow$ Staging $\rightarrow$ Prod, Secrets Ownership, Restore Drills, Drift Check y Forced Upgrade.
 20. [20_DEVELOPMENT_ROADMAP.md](docs/20_DEVELOPMENT_ROADMAP.md) — Hoja de Ruta (Estado: `FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN`).
@@ -70,4 +70,4 @@ gueguenseapp/
 
 ## 🚫 Regla de Ejecución (Fase 0)
 
-Durante la **Fase 0 (EN REVISIÓN)**, queda estrictamente prohibida la inicialización de frameworks, instalación de dependencias npm o creación de migraciones de base de datos. Toda implementación técnica iniciará únicamente tras la aprobación formal del Cerebro/usuario.
+Durante la **Fase 0 (EN REVISIÓN)**, queda strictly prohibida la inicialización de frameworks, instalación de dependencias npm o creación de migraciones de base de datos. Toda implementación técnica iniciará únicamente tras la aprobación formal del Cerebro/usuario.

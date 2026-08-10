@@ -1,7 +1,7 @@
 # 21 — MATRIZ CANÓNICA DE ENUMS Y DICCIONARIO DE ESTADOS (CANONICAL ENUMS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Matriz Canónica de Estados, Tipos y Enumeradores de Dominio Nombres Completos Sin Abreviaciones  
 
@@ -22,7 +22,7 @@ Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) y est
 │ `DRAFT`         │ Formulario de cotización en edición                  │
 │ `QUOTED`        │ Cotización activa calculada con precio y expiración  │
 │ `CONSUMED`      │ Cotización confirmada utilizada para crear delivery  │
-│ `EXPIRED`       │ Cotización vencida tras 5 minutos sin confirmar      │
+│ `EXPIRED`       │ Cotización vencida al superar expires_at/policy      │
 │ `CANCELED`      │ Cotización invalidada pre-consumo                    │
 └─────────────────┴──────────────────────────────────────────────────────┘
 
@@ -70,7 +70,7 @@ Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) y est
 │ `OPEN`          │ Oferta emitida y vigente                             │
 │ `ACCEPTED`      │ Oferta aceptada por el conductor                     │
 │ `REJECTED`      │ Oferta rechazada explícitamente por el conductor     │
-│ `EXPIRED`       │ Oferta expirada tras 15 segundos sin respuesta       │
+│ `EXPIRED`       │ Oferta expirada tras superar policy configurada      │
 │ `CANCELED`      │ Oferta cancelada porque otra oferta ganó o expiró    │
 └─────────────────┴──────────────────────────────────────────────────────┘
 
@@ -111,21 +111,27 @@ Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) y est
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 14. EVENT_TYPE (Nombres Completos Canónicos)                           │
+│ 14. EVENT_TYPE (Nombres Completos Canónicos Incluyendo Eventos API)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │ `DELIVERY_CREATED`, `SEARCH_STARTED`, `OFFER_CREATED`, `OFFER_ACCEPTED`,│
 │ `DRIVER_ASSIGNED`, `TO_PICKUP_STARTED`, `ARRIVED_PICKUP`,              │
 │ `CUSTODY_TRANSFERRED`, `TO_DROPOFF_STARTED`, `ARRIVED_DROPOFF`,        │
 │ `OTP_VERIFIED`, `DELIVERY_COMPLETED`, `RETURN_REQUIRED`,               │
 │ `RETURN_STARTED`, `RETURN_COMPLETED`, `HANDOFF_STARTED`,               │
-│ `HANDOFF_COMPLETED`, `INCIDENT_OPENED`, `INCIDENT_RESOLVED`,           │
-│ `DRIVER_UNASSIGNED`, `DELIVERY_CANCELED`, `DELIVERY_FAILED`,           │
-│ `QUOTE_CALCULATED`, `QUOTE_CONSUMED`, `QUOTE_EXPIRED`, `QUOTE_CANCELED`,│
-│ `OFFER_EXPIRED`, `OFFER_REJECTED`, `OFFER_CANCELED`,                   │
-│ `SEARCH_EXPANDED`, `MAPS_FALLBACK_USED`, `WAITING_STARTED`,            │
-│ `OTP_ATTEMPT_FAILED`, `OTP_LOCKED`, `PAYMENT_FAILED`,                  │
+│ `HANDOFF_CONFIRMED_FROM`, `HANDOFF_COMPLETED`, `HANDOFF_ABORTED`,      │
+│ `INCIDENT_OPENED`, `INCIDENT_RESOLVED`, `DRIVER_UNASSIGNED`,           │
+│ `DELIVERY_CANCELED`, `DELIVERY_FAILED`, `QUOTE_CALCULATED`,            │
+│ `QUOTE_CONSUMED`, `QUOTE_EXPIRED`, `QUOTE_CANCELED`, `OFFER_EXPIRED`,  │
+│ `OFFER_REJECTED`, `OFFER_CANCELED`, `SEARCH_EXPANDED`,                 │
+│ `MAPS_FALLBACK_USED`, `WAITING_STARTED`, `OTP_ATTEMPT_FAILED`,         │
+│ `OTP_LOCKED`, `PAYMENT_INITIATED`, `PAYMENT_AUTHORIZED`,               │
+│ `PAYMENT_CAPTURED`, `PAYMENT_FAILED`, `PAYMENT_REFUNDED`,              │
 │ `DRIVER_SUSPENDED`, `BUSINESS_SUSPENDED`, `RETURN_AUTHORIZED`,         │
-│ `CUSTODY_RETURNED`, `HANDOFF_ABORTED`.                                 │
+│ `CUSTODY_RETURNED`, `DRIVER_REGISTERED`, `DOCUMENT_SUBMITTED`,         │
+│ `VEHICLE_REGISTERED`, `AVAILABILITY_CHANGED`, `PAYOUT_METHOD_ADDED`,   │
+│ `PAYOUT_REQUESTED`, `PAYOUT_APPROVED`, `CASH_SETTLED`,                 │
+│ `BUSINESS_CREATED`, `LOCATION_ADDED`, `MEMBER_ADDED`, `MEMBER_REMOVED`,│
+│ `SUPPORT_TICKET_CREATED`, `PRICING_VERSION_ACTIVATED`.                 │
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐

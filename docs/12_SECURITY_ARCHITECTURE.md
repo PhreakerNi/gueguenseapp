@@ -1,9 +1,9 @@
 # 12 — ARQUITECTURA DE SEGURIDAD Y THREAT MODEL (SECURITY ARCHITECTURE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Hardened Security Definer (`SET search_path = ''`), Threat Model Evaluado (20 Amenazas) y Verificación en Vivo  
+**Dominio:** Hardened Security Definer (`SET search_path = ''`), Threat Model Evaluado (20 Amenazas) y Ciclo de Vida de Secretos  
 
 ---
 
@@ -18,7 +18,31 @@
 
 ---
 
-## 2. Threat Model Canónico Evaluado (20 Amenazas)
+## 2. Ciclo de Vida Completo de Secretos (`private.delivery_secrets`)
+
+```text
+ ┌────────────────┐
+ │ ARRIVED_PICKUP │ `pickup_code_digest` activo en private.delivery_secrets.
+ └───────┬────────┘ Campos de OTP (digest, ciphertext, expires_at) permanecen NULL.
+         │
+         ▼
+ ┌────────────────┐
+ │   PICKED_UP    │ `pickup_code_digest` se marca inactivo/usado.
+ └───────┬────────┘ `otp_digest`, `otp_ciphertext` y `otp_expires_at` se generan.
+         │
+         ▼
+ ┌────────────────┐
+ │   DELIVERED    │ `otp_verified_at` registrado en private.delivery_secrets.
+ └────────────────┘ OTP deja de ser retornable.
+
+ ┌────────────────┐
+ │RETURN_REQUIRED │ OTP invalidad/inaccesible.
+ └────────────────┘
+```
+
+---
+
+## 3. Threat Model Canónico Evaluado (20 Amenazas)
 
 | Activo (Asset) | Amenaza (Threat) | Vector de Ataque | Control Preventivo | Control Detectivo | Respuesta | Riesgo Residual |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |

@@ -1,7 +1,7 @@
 # 16 — SISTEMA DE DISEÑO E IDENTIDAD VISUAL (DESIGN SYSTEM)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Identidad de Marca, Design Tokens, UI Scale, Componentes y Layouts de Delivery Activo  
 

@@ -1,7 +1,7 @@
 # 02 — MODELO DE ROLES Y MEMBRESÍAS (USER ROLES & PERMISSIONS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.5.0-phase0  
+**Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Control de Acceso, Identidad `auth.users`, Roles de Plataforma, Membresías Comerciales (N:M Sucursales), RBAC y Custodia en Cuentas Suspendidas  
 
