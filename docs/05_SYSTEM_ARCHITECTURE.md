@@ -1,9 +1,9 @@
 # 05 — ARQUITECTURA TÉCNICA DE SISTEMAS (SYSTEM ARCHITECTURE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.2.0-phase0  
+**Versión:** 1.3.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Arquitectura de Software, Estructura Supabase CLI, Google Routes API y Realtime  
+**Dominio:** Arquitectura de Software, Estructura Supabase CLI, Google Routes API y Realtime Autorizado  
 
 ---
 
@@ -36,11 +36,9 @@ gueguenseapp/
 
 ---
 
-## 2. Ingesta de Ubicación GPS y Canales Privados de Realtime
+## 2. Ingesta GPS y Estrategia de Realtime Autorizado
 
 ### 2.1 Pipeline de Ingesta GPS Autenticada
-Para evitar que clientes maliciosos emitan posiciones GPS falsas directamente vía Realtime, el sistema implementa un pipeline de ingesta autenticado y validado:
-
 ```text
  ┌───────────────────────────┐
  │ App Driver (Sensor GPS)   │ Captura lat/lng, accuracy, heading, speed y timestamp.
@@ -49,8 +47,8 @@ Para evitar que clientes maliciosos emitan posiciones GPS falsas directamente v�
                ▼
  ┌───────────────────────────┐
  │ Ingesta Autenticada API   │ Endpoint REST/RPC `POST /api/v1/driver/location`.
- └─────────────┬─────────────┘ Validaciones: (1) JWT válido, (2) Velocidad físicamente
-               │              posible (<120 km/h), (3) Accuracy < 50m.
+ └─────────────┬─────────────┘ Validaciones: (1) JWT válido, (2) Velocidad dentro de
+               │              rango configurable, (3) Accuracy < 50m.
                ▼
  ┌───────────────────────────┐
  │ DB Update (`driver_pres.`)│ Actualiza registro en PostgreSQL PostGIS.
@@ -62,14 +60,14 @@ Para evitar que clientes maliciosos emitan posiciones GPS falsas directamente v�
  └───────────────────────────┘
 ```
 
-### 2.2 Canales Privados de Realtime (`private_channels`)
-* `delivery:{delivery_id}`: Canal privado con autorización por JWT para el negocio emisor y el conductor asignado.
-* `driver:{driver_id}:offers`: Canal privado para emisión de ofertas de viaje entrantes.
-* **Tracking Web Token:** El token de la URL de tracking no autoriza directamente un canal Supabase sin pasar por una sesión realtime mediada por el servidor backend con scope restringido.
+### 2.2 Canales Privados de Realtime y Sesión Scoped para Tracking Web
+* `delivery:{delivery_id}`: Canal privado con autorización JWT para el negocio emisor y el conductor asignado.
+* `driver:{driver_id}:offers`: Canal privado para emisión atómica de ofertas.
+* **Tracking Web Transport Strategy:** El token de la URL de tracking **NUNCA autoriza directamente un canal Supabase**. El cliente llama a `POST /api/v1/tracking/{token}/realtime-session`, donde el backend valida el token hash y le otorga un canal temporal con scope restringido a esa entrega. Se cuenta con fallback de **Short Polling** en caso de desconexión.
 
 ---
 
 ## 3. Separación Estricta de API Keys de Mapas
 
-1. **Client Maps SDK Key:** Restringida por Application ID (Android) / Bundle Identifier (iOS) / HTTP Referrer (Web). Utilizada exclusivamente para renderizado gráfico de mapas en las aplicaciones clientes.
-2. **Server Routes API Key:** Restringida por dirección IP / Servicio de Servidor. Utilizada **EXCLUSIVAMENTE** desde Supabase Edge Functions para calcular matrices de rutas y ETAs reales (`Compute Route Matrix`). NUNCA se expone en las apps móviles ni web públicas.
+1. **Client Maps SDK Key:** Restringida por Application ID / Bundle ID / HTTP Referrer. Renderizado de mapas gráficos.
+2. **Server Routes API Key:** Restringida por IP de servidor. Utilizada exclusivamente desde Supabase Edge Functions para `Compute Route Matrix`. NUNCA expuesta a clientes.

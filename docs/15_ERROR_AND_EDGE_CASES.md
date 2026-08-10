@@ -1,38 +1,51 @@
 # 15 — CATÁLOGO DE CASOS LÍMITE Y MANEJO DE ERRORES (ERROR & EDGE CASES)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.2.0-phase0  
+**Versión:** 1.3.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Resiliencia, Custodia de Paquetes y Mitigación de Errores Operativos  
+**Dominio:** Catálogo Completo de Casos Límite (31 Casos), Resiliencia y Mitigación Operativa  
 
 ---
 
-## 1. Catálogo Obligatorio de Casos Límite y Mitigación
+## 1. Reglas Globales de Resiliencia Operativa
 
-### 1. NO_DRIVERS_AVAILABLE
-* **Detección:** El Dispatch Engine no encuentra conductores elegibles en el radio inicial $R$.
-* **Mitigación:** Ejecuta expansión progresiva de radio en rondas (+2km). Si tras 3 rondas (2 min) nadie acepta, la entrega pasa a espera y se genera una alerta visual/sonora en Admin para intervención telefónica. El negocio puede cancelar libremente sin cobro.
+1. **Push Best-Effort:** NUNCA se aplica una penalización automática a un conductor únicamente por no responder una notificación Push perdida.
+2. **Custodia Protegida Post-Pickup:** Una vez alcanzado el estado `PICKED_UP`, queda **ESTRICTAMENTE PROHIBIDA** la desasignación directa del viaje. Se exige sub-ciclo `RETURN` o `CONTROLLED_HANDOFF`.
 
-### 2. ALL_OFFERS_EXPIRED
-* **Detección:** Los candidatos seleccionados dejan vencer la oferta (15s) sin responder.
-* **Mitigación:** La oferta cambia a `EXPIRED`. El motorizado sufre una penalización leve de prioridad. El motor pasa al siguiente candidato en el ranking.
+---
 
-### 3. DRIVER_CANCELS_PRE_PICKUP
-* **Detección:** El conductor desiste antes de llegar a la sucursal (`TO_PICKUP`).
-* **Mitigación:** El `driver_id` se establece en `NULL`, la entrega regresa automáticamente a `SEARCHING_DRIVER` y se notifica al negocio sin detener la operación.
+## 2. Catálogo Canónico Completo de Casos Límite (31 Casos)
 
-### 4. DRIVER_ISSUE_POST_PICKUP (Custodia Protegida)
-* **Detección:** El conductor sufre una avería u ostenta una emergencia con el paquete en su poder (`PICKED_UP` / `TO_DROPOFF`).
-* **Mitigación:** **PROHIBIDA LA DESASIGNACIÓN DIRECTA.** Se crea un incidente `OPEN` en `incidents`. El operador autoriza la devolución (`RETURN_REQUIRED`) o un traspaso presencial supervisado con firma de custodia (`RESOLVED_HANDOFF`).
-
-### 5. OTP_WRONG & OTP_LOCKED
-* **Detección:** Inserción de código OTP erróneo.
-* **Mitigación:** Límite de 3 intentos (`otp_attempt_count`). Al tercer fallo, se bloquea la verificación por 2 minutos (`otp_locked_until`).
-
-### 6. CUSTOMER_UNREACHABLE & RECIPIENT_REFUSED
-* **Detección:** El cliente no responde tras 10 minutos de gracia en el destino o rechaza el paquete.
-* **Mitigación:** La entrega cambia a `RETURN_REQUIRED`. El conductor inicia el viaje de retorno a la sucursal origen (`RETURNING`) para la entrega final del paquete (`RETURNED`).
-
-### 7. DUPLICATE_REQUEST (Idempotencia)
-* **Detección:** Re-envío de la misma petición con el mismo `Idempotency-Key`.
-* **Mitigación:** El backend no procesa un nuevo cobro ni crea un nuevo registro; retorna la misma respuesta almacenada de la primera transacción.
+| Caso Límite | Detección | Comportamiento Backend | Impacto UX | Transición | Evento Emitido | Impacto Financiero | Recuperación / Escalación |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **1. NO_DRIVERS_AVAILABLE** | 0 candidatos en radio initial $R$. | Expande radio progresivamente (+2km, 3 rondas). | Alerta de búsqueda extendida. | Permanece `SEARCHING_DRIVER` | `SEARCH_EXPANDED` | Sin cargo al comercio. | Escalación sonora a Admin. |
+| **2. ALL_OFFERS_EXPIRED** | Expiración de ofertas (15s). | Ofertas cambian a `EXPIRED`. pasa a sig. ranking. | Re-emisión a siguiente driver. | Permanece `SEARCHING_DRIVER` | `OFFER_EXPIRED` | Sin impacto. | Re-intento en siguiente ronda. |
+| **3. DRIVER_REJECTS** | Clic en "Rechazar". | Oferta pasa a `REJECTED`, emite a sig. candidato. | Driver regresa a `AVAILABLE`. | Permanece `SEARCHING_DRIVER` | `OFFER_REJECTED` | Sin impacto. | Algoritmo pasa a sig. driver. |
+| **4. DRIVER_CANCELS_PRE_PICKUP**| Clic desistir pre-pickup. | Limpia `driver_id = NULL`, busca nuevo driver. | Comercio notificado del cambio. | `DRIVER_ASSIGNED` $\rightarrow$ `SEARCHING` | `DRIVER_UNASSIGNED` | Penalización leve a conductor. | Re-búsqueda automática. |
+| **5. BUSINESS_CANCELS** | Clic cancelar en Negocio. | Valida si no hay custodia (`status` < `PICKED_UP`). | Driver notificado de cancelación. | `*` $\rightarrow$ `CANCELED` | `DELIVERY_CANCELED` | Cobro `CANCEL_FEE` si aplica. | Proceso cerrado. |
+| **6. CUSTOMER_CANCELS_IF_ALLOWED**| Solicitud vía soporte. | Evaluado manualmente por Operador. | Destinatario notificado. | `*` $\rightarrow$ `CANCELED` / `RETURN` | `INCIDENT_OPENED` | Según política comercial. | Intervención operador. |
+| **7. GPS_LOST** | > 60s sin pings GPS. | Marca estado de señal como `DELAYED`/`STALE`. | Advertencia en mapa Admin. | Sin cambio de estado delivery. | `INCIDENT_OPENED` | Sin impacto inmediato. | Re-conexión app driver. |
+| **8. LOCATION_STALE** | > 3 min sin pings GPS. | Marca presencia como `UNAVAILABLE`. | Alerta en mapa live. | Incidente en `incidents`. | `INCIDENT_OPENED` | Alerta preventiva. | Contacto telefónico Admin. |
+| **9. NETWORK_LOST** | Desconexión Socket. | Retiene estado en DB backend. | App driver en modo offline. | Sin cambio de estado delivery. | N/A | Sin impacto. | Re-sincronización REST al volver. |
+| **10. APP_TERMINATED** | SO liquida app driver. | Tareas background persisten estado local. | Banner al reabrir app. | Sin cambio de estado delivery. | N/A | Sin impacto. | Polling al abrir app (`GET /active`). |
+| **11. PUSH_LOST** | Falla de red FCM/APNs. | La oferta sigue vigente en DB. | Driver sincroniza en polling. | Sin cambio de estado delivery. | N/A | Sin impacto. | Sincronización REST. |
+| **12. REALTIME_LOST** | WebSocket caído. | Caída de conexión detectada por cliente. | Fallback a Short Polling (15s). | Sin cambio de estado delivery. | N/A | Sin impacto. | Re-conexión automática socket. |
+| **13. MAPS_PROVIDER_FAILURE**| Error 5xx Google API. | Fallback a cálculo de distancia Haversine. | Estimación basada en recta. | N/A | `MAPS_FALLBACK_USED` | Tarifa base asegurada. | Log de alerta infraestructura. |
+| **14. BUSINESS_CLOSED** | Llegada a local cerrado. | Driver reporta incidente `BUSINESS_CLOSED`. | Operador verifica local. | `ARRIVED_PICKUP` $\rightarrow$ `CANCELED` | `INCIDENT_OPENED` | Pago de traslado a conductor. | Cancelación por operador. |
+| **15. PACKAGE_NOT_READY** | Demora en preparación. | Driver inicia contador de espera (> 5 min). | Negocio notificado de espera. | Permanece `ARRIVED_PICKUP` | `WAITING_STARTED` | Genera `WAITING_FEE`. | Acreditación al conductor. |
+| **16. WAITING_TIMEOUT** | Espera > 15 min en local. | Conductor puede solicitar cancelación. | Operador contacta al negocio. | `ARRIVED_PICKUP` $\rightarrow$ `CANCELED` | `INCIDENT_OPENED` | Cobro `CANCEL_FEE` + espera. | Cancelación autorizada. |
+| **17. CUSTOMER_UNREACHABLE**| 10 min en destino sin res.| Driver activa aviso de ausencia. | Cliente recibe SMS/Alerta. | `ARRIVED_DROPOFF` $\rightarrow$ `RETURN` | `INCIDENT_OPENED` | Genera `RETURN_FEE`. | Retorno obligatorio a sucursal. |
+| **18. WRONG_ADDRESS** | Dirección errónea. | Driver notifica incoherencia de mapa. | Negocio ajusta dirección. | Incidente `ADDRESS_PROBLEM` | `INCIDENT_OPENED` | Re-cotización o Devolución. | Re-cálculo de tarifa. |
+| **19. RECIPIENT_REFUSED** | Cliente rechaza paquete. | Driver reporta rechazo de entrega. | Negocio notificado de rechazo. | `ARRIVED_DROPOFF` $\rightarrow$ `RETURN` | `RETURN_REQUIRED` | Genera `RETURN_FEE`. | Retorno obligatorio a sucursal. |
+| **20. PACKAGE_DAMAGED** | Paquete dañado en ruta. | Driver reporta avería con foto. | Incidente `PACKAGE_DAMAGED`. | Incidente en `incidents` | `INCIDENT_OPENED` | Seguro / Arbitraje. | Intervención mesa de ayuda. |
+| **21. OTP_WRONG** | Código OTP erróneo. | Incrementa `otp_attempt_count`. | Muestra intento fallido (x/3). | Sin cambio de estado. | `OTP_ATTEMPT_FAILED` | Sin impacto. | Re-ingreso por cliente. |
+| **22. OTP_LOCKED** | 3er intento OTP fallido. | Activa `otp_locked_until` (2 min). | Conductor bloqueado 2 min. | Permanece `ARRIVED_DROPOFF` | `OTP_LOCKED` | Sin impacto. | Espera de tiempo de bloqueo. |
+| **23. CASH_MISMATCH** | Descalce de efectivo. | Conductor reporta monto diferente. | Operador ajusta liquidación. | Incidente `CASH_MISMATCH` | `INCIDENT_OPENED` | Ajuste contable manual. | Conciliación en Admin. |
+| **24. PAYMENT_FAILED** | Recompra/saldo insuf. | Pago de comercio rechazado. | Suspensión de solicitudes. | `QUOTED` no se consume. | `PAYMENT_FAILED` | Sin saldo debitado. | Recarga de saldo prepago. |
+| **25. DUPLICATE_REQUEST** | Mismo `Idempotency-Key`| Backend retorna respuesta previa. | Transparente para usuario. | Retorna estado existente. | N/A | 1 solo cobro. | Resuelto por idempotencia. |
+| **26. DUPLICATE_WEBHOOK** | Re-emisión de webhook. | Descarte por `idempotency_keys`. | Sin efecto repetido. | N/A | N/A | 1 sola transacción. | Resuelto por idempotencia. |
+| **27. DRIVER_SUSPENDED_MID**| Conductor suspendido. | Operaciones críticas rebotan 42501. | Conductor deshabilitado. | Incidente `OPERATOR_ACTION` | `DRIVER_SUSPENDED` | Liquidación retenida. | Operador ordena retorno/handoff |
+| **28. BIZ_SUSPENDED_MID** | Comercio suspendido. | Entregas activas concluyen. | Bloqueo de nuevos envíos. | Entregas activas terminan. | `BUSINESS_SUSPENDED` | Saldo congelado. | Arbitraje administrativo. |
+| **29. RETURN_REQUIRED** | Devolución obligatoria. | Inicia flujo de retorno a sucursal. | Negocio notificado de regreso. | `*` $\rightarrow$ `RETURN_REQUIRED` | `RETURN_REQUIRED` | Genera `RETURN_FEE`. | Conductor navega a origen. |
+| **30. CONTROLLED_HANDOFF** | Avería de moto en ruta. | Operador asigna 2do conductor. | Ambos firman `custody_handoffs`| Permanece `TO_DROPOFF` | `HANDOFF_STARTED` | Split de tarifa de servicio. | Traspaso presencial de paquete |
+| **31. DB_TEMP_FAILURE** | Caída temporal DB. | Retry con backoff en Edge Func. | Mensaje de reintento. | Transacciones rollback. | N/A | Sin corrupción de saldo. | Resiliencia infraestructura. |

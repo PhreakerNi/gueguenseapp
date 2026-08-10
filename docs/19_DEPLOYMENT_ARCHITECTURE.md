@@ -1,13 +1,13 @@
 # 19 — ARQUITECTURA DE DESPLIEGUE Y CI/CD (DEPLOYMENT ARCHITECTURE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.2.0-phase0  
+**Versión:** 1.3.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Pipeline CI/CD, Entornos, Secretos y Estrategia Expand/Contract en DB  
+**Dominio:** Pipeline CI/CD, Entornos, Estrategia Expand/Contract y Control de Versión Mínima de Apps  
 
 ---
 
-## 1. Ambientes de Entorno y Control de Cambios
+## 1. Ambientes de Entorno y Separación de Proyectos
 
 1. **Local:** Supabase CLI local (`supabase start`) + Expo Go / Simuladores.
 2. **Development:** Proyecto Supabase Dev + EAS Build Preview.
@@ -16,7 +16,7 @@
 
 ---
 
-## 2. Pipeline Completo de CI/CD (GitHub Actions)
+## 2. Pipeline Completo de CI/CD (GitHub Actions) y Gates de Aprobación
 
 ```text
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌────────────────────┐
@@ -32,9 +32,8 @@
 
 ---
 
-## 3. Estrategia Expand/Contract para Base de Datos
+## 3. Estrategia de Actualización Forzada de Apps (Minimum Supported Version)
 
-Las migraciones de base de datos aplican el patrón **Expand/Contract**:
-* **Expand:** Se añaden nuevas columnas/tablas sin eliminar estructuras anteriores.
-* **Transition:** La aplicación escribe en ambas estructuras.
-* **Contract:** Tras verificar la migración completa de los clientes, una migración posterior elimina la columna obsoleta.
+Para prevenir fallos cuando la API sufre breaking changes o migraciones de esquema:
+* Las aplicaciones móviles evalúan en cada inicio el endpoint `GET /api/v1/config/app-version`.
+* Si la versión instalada es inferior a `min_supported_version`, la app bloquea la navegación e instruye al usuario a actualizar desde Google Play Store / Apple App Store (**Forced Upgrade Banner**).

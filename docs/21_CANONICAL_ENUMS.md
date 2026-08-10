@@ -1,19 +1,19 @@
 # 21 — MATRIZ CANÓNICA DE ENUMS Y DICCIONARIO DE ESTADOS (CANONICAL ENUMS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.2.0-phase0  
+**Versión:** 1.3.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Matriz Canónica de Estados, Tipos y Enumeradores de Dominio  
+**Dominio:** Matriz Canónica de Estados, Tipos y Enumeradores de Dominio Nombres Completos Sin Abreviaciones  
 
 ---
 
 ## 1. Propósito
 
-Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) utilizados en la base de datos, APIs, lógica de negocio y aplicaciones clientes de Güegüense, garantizando 0% de contradicciones entre componentes.
+Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) utilizados en la base de datos, APIs, lógica de negocio y aplicaciones clientes de Güegüense, garantizando 0% de contradicciones y **CERO ABREVIACIONES EN LOS VALORES DE ENUM**.
 
 ---
 
-## 2. Diccionario Canónico de Enumeradores
+## 2. Diccionario Canónico de Enumeradores (Valores Nombres Completos)
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -27,17 +27,17 @@ Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) utili
 └─────────────────┴──────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 2. DELIVERY_STATUS (Ciclo de Entrega)                                  │
+│ 2. DELIVERY_STATUS (Ciclo de Entrega - Nombres Completos Sin Abreviar)  │
 ├─────────────────┬──────────────────────────────────────────────────────┤
-│ `SEARCHING_DR.` │ Solicitud buscando motorizados elegibles             │
-│ `DRIVER_ASSIGNED│ Conductor adjudicado atómicamente a la entrega       │
+│ `SEARCHING_DRIVER` │ Solicitud buscando motorizados elegibles            │
+│ `DRIVER_ASSIGNED` │ Conductor adjudicado atómicamente a la entrega      │
 │ `TO_PICKUP`     │ Conductor desplazándose a la sucursal del comercio   │
 │ `ARRIVED_PICKUP`│ Conductor presente en la sucursal del comercio       │
 │ `PICKED_UP`     │ Custodia transferida y confirmada por PICKUP_CODE    │
 │ `TO_DROPOFF`    │ Conductor en ruta hacia el cliente final             │
-│ `ARRIVED_DROPOFF│ Conductor en la puerta del destinatario              │
+│ `ARRIVED_DROPOFF`│ Conductor en la puerta del destinatario             │
 │ `DELIVERED`     │ Entrega completada mediante validación de OTP (Term.)│
-│ `RETURN_REQ.`   │ Devolución de paquete ordenada por operador/sistema  │
+│ `RETURN_REQUIRED`│ Devolución de paquete ordenada por operador/sistema │
 │ `RETURNING`     │ Conductor en ruta de regreso a la sucursal           │
 │ `RETURNED`      │ Paquete devuelto al negocio y custodia cerrada (Term)│
 │ `CANCELED`      │ Operación cancelada autorizadamente pre-pickup (Term)│
@@ -45,15 +45,15 @@ Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) utili
 └─────────────────┴──────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 3. INCIDENT_STATUS (Estado del Incidente Desacoplado)                 │
-├─────────────────┬──────────────────────────────────────────────────────┤
-│ `OPEN`          │ Incidente registrado recién reportado                │
-│ `UNDER_INVEST.` │ Incidente en revisión por un operador de Admin       │
-│ `RESOLVED_CONT.`│ Incidente resuelto permitiendo continuar entrega     │
-│ `RESOLVED_RET.` │ Incidente resuelto ordenando devolución de paquete   │
-│ `RESOLVED_HAND.`│ Incidente resuelto mediante traspaso presencial      │
-│ `CLOSED`        │ Incidente formalmente cerrado                        │
-└─────────────────┴──────────────────────────────────────────────────────┘
+│ 3. INCIDENT_STATUS (Estado del Incidente Desacoplado - Nombres Comp.)  │
+├───────────────────────┬────────────────────────────────────────────────┤
+│ `OPEN`                │ Incidente registrado recién reportado          │
+│ `UNDER_INVESTIGATION` │ Incidente en revisión por un operador de Admin │
+│ `RESOLVED_CONTINUE`   │ Incidente resuelto permitiendo continuar       │
+│ `RESOLVED_RETURN`     │ Incidente resuelto ordenando devolución        │
+│ `RESOLVED_HANDOFF`    │ Incidente resuelto mediante traspaso presencial│
+│ `CLOSED`              │ Incidente formalmente cerrado                  │
+└───────────────────────┴────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
 │ 4. INCIDENT_TYPE (Tipos de Incidentes Operativos)                      │
@@ -104,21 +104,22 @@ Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) utili
 └──────────────────────────┴─────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 13. PRICING_ADJUSTMENT_TYPE                                            │
+│ 13. PRICING_ADJUSTMENT_TYPE (Estandarizado)                            │
 ├────────────────────────────────────────────────────────────────────────┤
 │ `WAITING_FEE`, `RETURN_FEE`, `CANCEL_FEE`, `DISCOUNT`, `SUBSIDY`,      │
 │ `MANUAL_ADJUSTMENT`.                                                   │
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 14. EVENT_TYPE                                                         │
+│ 14. EVENT_TYPE (Nombres Completos)                                     │
 ├────────────────────────────────────────────────────────────────────────┤
 │ `DELIVERY_CREATED`, `SEARCH_STARTED`, `OFFER_CREATED`, `OFFER_ACCEPTED`,│
 │ `DRIVER_ASSIGNED`, `TO_PICKUP_STARTED`, `ARRIVED_PICKUP`,              │
 │ `CUSTODY_TRANSFERRED`, `TO_DROPOFF_STARTED`, `ARRIVED_DROPOFF`,        │
 │ `OTP_VERIFIED`, `DELIVERY_COMPLETED`, `RETURN_REQUIRED`,               │
-│ `RETURN_STARTED`, `RETURN_COMPLETED`, `INCIDENT_OPENED`,               │
-│ `INCIDENT_RESOLVED`, `DRIVER_UNASSIGNED`, `DELIVERY_CANCELED`,         │
-│ `DELIVERY_FAILED`.                                                     │
+│ `RETURN_STARTED`, `RETURN_COMPLETED`, `HANDOFF_STARTED`,               │
+│ `HANDOFF_COMPLETED`, `INCIDENT_OPENED`, `INCIDENT_RESOLVED`,           │
+│ `DRIVER_UNASSIGNED`, `DELIVERY_CANCELED`, `DELIVERY_FAILED`,           │
+│ `QUOTE_CONSUMED`, `OFFER_EXPIRED`, `OFFER_REJECTED`.                   │
 └────────────────────────────────────────────────────────────────────────┘
 ```

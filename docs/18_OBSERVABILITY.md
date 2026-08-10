@@ -1,36 +1,32 @@
 # 18 — OBSERVABILIDAD, LOGS Y PRIVACIDAD (OBSERVABILITY)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.2.0-phase0  
+**Versión:** 1.3.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Telemetría, Logs Estructurados, Correlation IDs y Redacción de PII  
+**Dominio:** Telemetría, Logs Estructurados, Redacción Recursiva de PII y Tracing  
 
 ---
 
-## 1. Política Estricta de Redacción de PII y Secretos
+## 1. Política Estricta de Redacción Recursiva de PII
 
-Queda **ESTRICTAMENTE PROHIBIDO** registrar en consolas o servicios de telemetría los siguientes datos:
-
-* `DELIVERY_OTP` (Plano o Hash).
-* Tokens JWT o Tokens de Tracking Web.
-* Números de Cédula de Identidad y Licencias de Conducir.
-* Fotografías de documentos o rostros.
-* Número telefónico completo (Mascarar siempre: `+505 88****77`).
-* Texto completo de direcciones de domicilio.
+Queda **ESTRICTAMENTE PROHIBIDO** registrar en consolas o servicios de telemetría:
+* `DELIVERY_OTP` (Plano, Digest o Ciphertext).
+* Tokens JWT, API Secrets o Tokens de Tracking Web.
+* Coordenadas GPS exactas en logs generales (se aplica reducción de precisión a 2 decimales en logs de telemetría).
+* Cédulas de Identidad, Licencias o Fotografías.
+* Números telefónicos completos y direcciones de casa.
 
 ---
 
-## 2. Sanitizador Recursivo de Logs
-
-Los serializadores aplican sanitización recursiva profunda en headers, query params y bodies:
+## 2. Middleware de Sanitización Recursiva y Allowlist
 
 ```typescript
-function sanitizeRecursive(data: any): any {
+function sanitizeLogPayload(data: any): any {
   if (!data || typeof data !== 'object') return data;
-  const SENSITIVE_KEYS = ['otp', 'token', 'national_id', 'license_number', 'phone', 'password', 'jwt', 'authorization'];
+  const SENSITIVE_KEYS = ['otp', 'token', 'national_id', 'license_number', 'phone', 'password', 'jwt', 'authorization', 'secret', 'pickup_code'];
   
   if (Array.isArray(data)) {
-    return data.map(sanitizeRecursive);
+    return data.map(sanitizeLogPayload);
   }
 
   const sanitized: Record<string, any> = {};
@@ -38,12 +34,12 @@ function sanitizeRecursive(data: any): any {
     if (SENSITIVE_KEYS.some(k => key.toLowerCase().includes(k))) {
       sanitized[key] = '[REDACTED]';
     } else {
-      sanitized[key] = sanitizeRecursive(value);
+      sanitized[key] = sanitizeLogPayload(value);
     }
   }
   return sanitized;
 }
 ```
 
-### IDs Permitidos para Correlación Tracing:
+### Correlation IDs Permitidos para Tracing:
 `request_id`, `correlation_id`, `delivery_id`, `offer_id`, `business_id`, `driver_id`, `incident_id`, `transaction_id`.

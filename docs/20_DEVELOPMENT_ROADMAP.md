@@ -1,9 +1,9 @@
 # 20 — HOJA DE RUTA Y ROADMAP DE DESARROLLO (DEVELOPMENT ROADMAP)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.2.0-phase0  
+**Versión:** 1.3.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Planificación por Fases, Entregables y Definition of Done (DoD)  
+**Dominio:** Planificación por Fases, Entregables y Definition of Done (DoD v1.3)  
 
 ---
 
@@ -45,5 +45,5 @@ El proyecto Güegüense se ejecutará en **11 Fases Secuenciales Estrictas** (Fa
 
 ### 🟡 Fase 0 — Especificación y Arquitectura (EN REVISIÓN / CANDIDATA A APROBACIÓN)
 * **Objetivo:** Definir la totalidad del producto, roles, máquina de estados, arquitectura de datos, API, dispatch, seguridad y diseño antes de escribir una sola línea de código ejecutable.
-* **Entregables:** 20 Documentos técnicos oficiales en `/docs` + `README.md` alineados al 100% con `Gueguense_Directiva_Cerebro_Fase0_v1_2.md`.
-* **Definition of Done (DoD):** Documentación revisada, auditada y aprobada formalmente por el Cerebro/usuario. **Queda expresamente prohibido avanzar a la Fase 1 sin esta aprobación.**
+* **Entregables:** 21 Documentos técnicos oficiales en `/docs` + `README.md` alineados al 100% con `Gueguense_Auditoria_Cerebro_Fase0_v1_3.md`.
+* **Definition of Done (DoD v1.3):** Documentación revisada, auditada y aprobada formalmente por el Cerebro/usuario. **Queda expresamente prohibido avanzar a la Fase 1 sin esta aprobación.**
