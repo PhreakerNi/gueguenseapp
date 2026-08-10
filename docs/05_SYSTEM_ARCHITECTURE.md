@@ -1,7 +1,7 @@
 # 05 — ARQUITECTURA TÉCNICA DE SISTEMAS (SYSTEM ARCHITECTURE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.4.0-phase0  
+**Versión:** 1.5.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Arquitectura de Software, Supabase CLI, Google Routes API y Tracking Web MVP  
 
@@ -36,9 +36,9 @@ gueguenseapp/
 
 ---
 
-## 2. Ingesta GPS, Comportamiento App Terminated y Tracking Web MVP
+## 2. Ingesta GPS, Clasificación de Calidad y Tracking Web MVP
 
-### 2.1 Pipeline de Ingesta GPS Autenticada y Manejo App Terminated
+### 2.1 Pipeline de Ingesta GPS Autenticada y Clasificación de Calidad
 ```text
  ┌───────────────────────────┐
  │ App Driver (Sensor GPS)   │ Captura lat/lng, accuracy, heading, speed y timestamp.
@@ -47,14 +47,16 @@ gueguenseapp/
                ▼
  ┌───────────────────────────┐
  │ Ingesta Autenticada API   │ Endpoint REST/RPC `POST /api/v1/driver/location`.
- └─────────────┬─────────────┘ Validaciones: (1) JWT válido, (2) Velocidad dentro de
-               │              rango configurable, (3) Accuracy < 50m.
+ └─────────────┬─────────────┘ Validaciones: (1) JWT válido, (2) Clasificación de calidad
+               │              según accuracy y speed (No rechaza ciegamente > 50m).
                ▼
  ┌───────────────────────────┐
- │ DB Update (`driver_pres.`)│ Actualiza registro en PostgreSQL PostGIS.
- └───────────────────────────┘
+ │ DB Update (`driver_pres.`)│ Actualiza registro PostGIS + `delivery_tracking_points`.
+ └───────────────────────────┘ Puntos con accuracy > 50m se marcan `location_quality = 'LOW'`.
 ```
-* **Comportamiento App Terminated:** La captura de localización en segundo plano depende de las políticas del SO del dispositivo. Si el usuario fuerza el cierre de la app (*kill app*), las transmisiones GPS se detendrán. El servidor marcará la frescura de señal como `STALE` o `UNAVAILABLE` y emitirá una alerta preventiva en Admin. Al reabrir la app, el motorizado resincroniza su estado vía REST (`GET /api/v1/driver/deliveries/active`).
+
+* **Política de Calidad y Anomalías GPS:** Puntos con baja precisión (`accuracy > 50m`) o velocidad anómala (> 120 km/h) no se rechazan automáticamente de la BD para conservar trazabilidad histórica; se clasifican como `location_quality = 'LOW'` o `anomaly_flag = true`, afectando la elegibilidad del despacho y la evaluación de frescura.
+* **Comportamiento App Terminated:** La captura en segundo plano depende de las políticas del SO. Si el usuario fuerza el cierre de la app (*kill app*), las transmisiones se detendrán. El servidor marcará la frescura de seguimiento como `STALE` o `UNAVAILABLE` y emitirá una alerta preventiva en Admin. Al reabrir la app, el motorizado resincroniza su estado vía REST (`GET /api/v1/driver/deliveries/active`).
 
 ### 2.2 Arquitectura del Tracking Web MVP (`tracking-web`)
 * **Transporte Primario MVP:**

@@ -1,7 +1,7 @@
 # 01 — ESPECIFICACIÓN DE PRODUCTO (PRODUCT SPECIFICATION)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.4.0-phase0  
+**Versión:** 1.5.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Especificación de Producto, 4 Aplicaciones Canónicas, KPIs e Invariantes  
 
@@ -45,13 +45,13 @@ El ecosistema de software está compuesto de forma exclusiva por 4 aplicaciones:
 
 ## 4. Indicadores Clave de Rendimiento (`KPIs`) y Criterios de Éxito
 
-### 4.1 KPIs del Sistema (Métricas de Operación):
+### 4.1 KPIs del Sistema (Métricas de Operación con Umbrales Configurables):
 * **Assignment Time:** Tiempo promedio desde `SEARCHING_DRIVER` hasta `DRIVER_ASSIGNED`.
 * **Acceptance Rate:** Porcentaje de ofertas aceptadas por conductores en la primera ronda.
 * **Successful Delivery Rate:** Porcentaje de entregas que concluyen exitosamente en `DELIVERED`.
-* **Cancellation Rate:** Porcentaje de solicitudes canceladas pre-pickup y post-pickup.
+* **Pre-Pickup Cancellation Rate:** Porcentaje de solicitudes canceladas exclusivamente en etapa pre-pickup (las situaciones post-custodia no constituyen cancelaciones simples, sino sub-ciclos de `RETURN_REQUIRED` o `CONTROLLED_HANDOFF`).
 * **Average Pickup Wait:** Tiempo transcurrido entre `ARRIVED_PICKUP` y `PICKED_UP`.
-* **Stale Tracking Rate:** Frecuencia de pérdida de señal GPS (> 60 segundos sin actualización).
+* **Stale Tracking Rate:** Frecuencia de pérdida de señal GPS (> 60s `initial default / configurable policy`).
 * **Incident Rate:** Porcentaje de entregas con registros de incidencias en `incidents`.
 
 ---
@@ -64,4 +64,4 @@ El ecosistema de software está compuesto de forma exclusiva por 4 aplicaciones:
    * **Invariante B:** Máximo 1 entrega comprometida por conductor (`DRIVER_ASSIGNED`, `TO_PICKUP`, `ARRIVED_PICKUP`, `PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`, `RETURN_REQUIRED`, `RETURNING`).
 3. **Resguardo Criptográfico de Códigos:**
    * **`PICKUP_CODE`:** Mostrado exclusivamente en la app del Driver al estar en `ARRIVED_PICKUP`. El despachador del negocio lo introduce en su app. Guardado en `private.delivery_secrets.pickup_code_digest`.
-   * **`DELIVERY_OTP`:** 6 dígitos. Resguardado como `otp_digest` y `otp_ciphertext` (cifrado con clave server-only). **NUNCA se expone por API al Driver, Negocio ni Admin.** Solo es retreadable por el cliente destinatario desde su sesión de tracking web.
+   * **`DELIVERY_OTP`:** 6 dígitos. Resguardado como `otp_digest` y `otp_ciphertext` (cifrado con clave server-only) en `private.delivery_secrets` (los campos de OTP se generan tras confirmarse `PICKED_UP`). **NUNCA se expone por API al Driver, Negocio ni Admin.** Solo es retreadable por el cliente destinatario desde su sesión de tracking web en estados autorizados (`PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`).

@@ -1,9 +1,9 @@
 # 02 — MODELO DE ROLES Y MEMBRESÍAS (USER ROLES & PERMISSIONS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.4.0-phase0  
+**Versión:** 1.5.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Control de Acceso, Identidad `auth.users`, Roles de Plataforma, Membresías Comerciales (N:M Sucursales) y RBAC  
+**Dominio:** Control de Acceso, Identidad `auth.users`, Roles de Plataforma, Membresías Comerciales (N:M Sucursales), RBAC y Custodia en Cuentas Suspendidas  
 
 ---
 
@@ -36,12 +36,21 @@ Güegüense basa su autenticación en **Supabase Auth (`auth.users`)**, separand
 Para evitar ambigüedades en gerentes que administran múltiples sucursales, el alcance de permisos se modela mediante la tabla intermedia N:M **`public.business_member_locations`**:
 
 * **`business_owner`:** Alcance global implícito sobre todas las sucursales pasadas, presentes y futuras del comercio.
-* **`business_manager`:** Gerente de sucursal. Asociado a 1 o N sucursales en `business_member_locations`. Puede crear/cancelar entregas y gestionar personal dentro de sus sucursales asignadas.
+* **`business_manager`:** Gerente de sucursal. Asociado a 1 o N sucursales en `business_member_locations`. Puede crear/cancelar entregas pre-pickup y gestionar personal dentro de sus sucursales asignadas.
 * **`business_employee`:** Despachador de caja. Asociado a 1 o N sucursales específicas. Crea envíos y confirma la transferencia de custodia en sucursal.
 
 ---
 
-## 3. Matriz Canónica de Permisos por Recurso (RBAC & RLS)
+## 3. Política de Residencia de Custodia en Cuentas Suspendidas
+
+Si el perfil de un conductor o comercio cambia a `SUSPENDED` o `BLOCKED`:
+
+1. **Operaciones Nuevas Bloqueadas:** Se prohíbe recibir u aceptar nuevas ofertas de viaje (`accept_delivery_offer` rebota con `DRIVER_NOT_AUTHORIZED`), así como crear nuevas cotizaciones o entregas.
+2. **Custodia Preservada (Garantía de Paquete en Ruta):** Si el motorizado **ya posee la custodia física de un paquete activo** (`PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`), el sistema **NO bloquea a ciegas el paquete**. El conductor conserva acceso restringido **únicamente para ejecutar acciones de resolución de custodia** autorizadas por el operador o backend (`RETURN_REQUIRED` $\rightarrow$ `RETURNING` $\rightarrow$ `RETURNED` o `CONTROLLED_HANDOFF`).
+
+---
+
+## 4. Matriz Canónica de Permisos por Recurso (RBAC & RLS)
 
 | Recurso / Operación | super_admin | admin | operator | verification_agent | business_owner | business_manager | business_employee | driver | Tracking Token Holder |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -52,6 +61,6 @@ Para evitar ambigüedades en gerentes que administran múltiples sucursales, el 
 | **Validar `PICKUP_CODE` (Custodia)**| ✅ | ✅ | ✅ | ❌ | ✅ | ✅ (Scope N:M) | ✅ (Scope N:M) | ❌ | ❌ |
 | **Ver `DELIVERY_OTP` (Plano)** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (Endpoint Customer) |
 | **Ingresar `DELIVERY_OTP`** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| **Aceptar Oferta Delivery** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| **Aceptar Oferta Delivery** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (Solo Active) | ❌ |
 | **Aprobar Controlled Handoff** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Ver Documentos Cifrados** | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ (Propios) | ❌ |

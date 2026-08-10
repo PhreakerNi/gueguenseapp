@@ -1,7 +1,7 @@
 # 21 — MATRIZ CANÓNICA DE ENUMS Y DICCIONARIO DE ESTADOS (CANONICAL ENUMS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.4.0-phase0  
+**Versión:** 1.5.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Matriz Canónica de Estados, Tipos y Enumeradores de Dominio Nombres Completos Sin Abreviaciones  
 
@@ -9,11 +9,11 @@
 
 ## 1. Propósito
 
-Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) utilizados en la base de datos, APIs, lógica de negocio y aplicaciones clientes de Güegüense, garantizando 0% de contradicciones y **CERO ABREVIACIONES EN LOS VALORES DE ENUM**.
+Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) y estados auxiliares (`CHECK-backed statuses`) utilizados en la base de datos, APIs, lógica de negocio y aplicaciones clientes de Güegüense, garantizando 0% de contradicciones y **CERO ABREVIACIONES EN LOS VALORES DE ENUM**.
 
 ---
 
-## 2. Diccionario Canónico de Enumeradores (Valores Nombres Completos)
+## 2. Diccionario Canónico de Enumeradores y Statuses Auxiliares
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -23,7 +23,7 @@ Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) utili
 │ `QUOTED`        │ Cotización activa calculada con precio y expiración  │
 │ `CONSUMED`      │ Cotización confirmada utilizada para crear delivery  │
 │ `EXPIRED`       │ Cotización vencida tras 5 minutos sin confirmar      │
-│ `CANCELED`      │ Cotización invalidada                                │
+│ `CANCELED`      │ Cotización invalidada pre-consumo                    │
 └─────────────────┴──────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -126,5 +126,28 @@ Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) utili
 │ `OTP_ATTEMPT_FAILED`, `OTP_LOCKED`, `PAYMENT_FAILED`,                  │
 │ `DRIVER_SUSPENDED`, `BUSINESS_SUSPENDED`, `RETURN_AUTHORIZED`,         │
 │ `CUSTODY_RETURNED`, `HANDOFF_ABORTED`.                                 │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ 15. STATUSES AUXILIARES CANÓNICOS (`CHECK-backed Statuses`)             │
+├────────────────────────────────────────────────────────────────────────┤
+│ • BUSINESS_MEMBER_STATUS: `ACTIVE`, `INVITED`, `SUSPENDED`             │
+│ • DOCUMENT_VERIFICATION_STATUS: `PENDING`, `UNDER_REVIEW`, `VERIFIED`,  │
+│   `REJECTED`, `EXPIRED`                                                │
+│ • HANDOFF_STATUS: `INITIATED`, `CONFIRMED_FROM`, `CONFIRMED_TO`,       │
+│   `COMPLETED`, `ABORTED`                                               │
+│ • PAYOUT_METHOD_VERIFICATION_STATUS: `PENDING`, `VERIFIED`, `REJECTED`,│
+│   `DISABLED`                                                           │
+│ • PAYOUT_STATUS: `REQUESTED`, `UNDER_REVIEW`, `APPROVED`, `PROCESSING`,│
+│   `PAID`, `REJECTED`, `FAILED`                                         │
+│ • PAYMENT_STATUS: `PENDING`, `AUTHORIZED`, `CAPTURED`, `FAILED`,       │
+│   `REFUNDED`                                                           │
+│ • CASH_SETTLEMENT_STATUS: `PENDING`, `UNDER_REVIEW`, `SETTLED`,       │
+│   `DISCREPANCY`, `REJECTED`                                            │
+│ • NOTIFICATION_STATUS: `QUEUED`, `SENDING`, `DELIVERED`,              │
+│   `FAILED_RETRYABLE`, `FAILED_PERMANENT`                               │
+│ • TRACKING_FRESHNESS: `FRESH`, `DELAYED`, `STALE`, `UNAVAILABLE`       │
+│ • PROOF_TYPE: `PICKUP_CUSTODY`, `DELIVERY_PHOTO`, `DELIVERY_SIGNATURE`,│
+│   `RETURN_PROOF`, `HANDOFF_PROOF`                                      │
 └────────────────────────────────────────────────────────────────────────┘
 ```

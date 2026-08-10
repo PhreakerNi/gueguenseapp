@@ -1,7 +1,7 @@
 # 18 — OBSERVABILIDAD, LOGS Y PRIVACIDAD (OBSERVABILITY)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.4.0-phase0  
+**Versión:** 1.5.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Telemetría, Logs Estructurados, Redacción Recursiva de PII, Sanitización de URLs/Headers y Tracing  
 
@@ -12,14 +12,19 @@
 Queda **ESTRICTAMENTE PROHIBIDO** registrar en consolas, servidores de logs o herramientas de analítica:
 * `DELIVERY_OTP` (Plano, Digest o Ciphertext).
 * Tokens JWT, API Secrets, Bearer Tokens de Tracking Web o Encabezados `Authorization` / `Cookie`.
-* Tokens Bearer de Tracking Web en URLs/Query Strings (`tracking-web` omitirá el token en los logs de acceso).
+* Tokens Bearer de Tracking Web en URLs/Query Strings (`tracking-web` omitirá el token de la URL en los logs de acceso web).
 * Coordenadas GPS exactas en logs generales (se aplica reducción de precisión a 2 decimales en logs de telemetría).
 * Cédulas de Identidad, Licencias o Fotografías.
 * Cuerpos de respuestas sensibles en el registro de `idempotency_keys`.
 
 ---
 
-## 2. Middleware de Sanitización Recursiva y Allowlist de Atributos
+## 2. Encabezados HTTP de Seguridad y Middleware de Sanitización
+
+```text
+Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate
+Referrer-Policy: no-referrer
+```
 
 ```typescript
 function sanitizeLogPayload(data: any): any {

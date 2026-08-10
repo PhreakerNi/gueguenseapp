@@ -1,7 +1,7 @@
 # 10 — MOTOR DE PRECIOS Y AJUSTES (PRICING ENGINE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.4.0-phase0  
+**Versión:** 1.5.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Tarificación Dinámica, Precios Cotizados vs. Finales, Umbrales Configurables y Resiliencia  
 
@@ -19,11 +19,14 @@ $$\text{final\_price} = \text{quoted\_price} + \sum \text{pricing\_adjustments}$
 ## 2. Umbrales Operativos Configurables (`Configurable Policies / Initial Defaults`)
 
 Los siguientes valores representan parámetros de configuración iniciales del sistema (no invariantes hardcoded):
-* **Quote Expiry:** 5 minutos (`initial default`).
-* **Offer Timeout:** 15 segundos (`initial default`).
-* **Waiting Grace Period:** 5 minutos (`initial default`).
-* **Waiting Timeout:** 15 minutos (`initial default`).
-* **Four-Eyes Approval Threshold:** C$ 5,000.00 NIO (`initial default`).
+* **Quote Expiry:** 5 minutos (`initial default / configurable policy`).
+* **Offer Timeout:** 15 segundos (`initial default / configurable policy`).
+* **Waiting Grace Period:** 5 minutos (`initial default / configurable policy`).
+* **Waiting Timeout:** 15 minutos (`initial default / configurable policy`).
+* **Customer Unreachable Timeout:** 10 minutos (`initial default / configurable policy`).
+* **GPS Delayed / Stale Threshold:** 60s / 3 min (`initial default / configurable policy`).
+* **OTP Max Attempts / Lock Duration:** 3 intentos / 2 min (`initial default / configurable policy`).
+* **Four-Eyes Approval Threshold:** C$ 5,000.00 NIO (`initial default / configurable policy`).
 
 ---
 

@@ -1,29 +1,79 @@
 # 08 — MOTOR DE DESPACHO Y ASIGNACIÓN (DISPATCH ENGINE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.4.0-phase0  
+**Versión:** 1.5.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Algoritmo de Despacho, Doble Invariante de Concurrencia, Mutex `driver_presence` y Hardened Security Definer  
+**Dominio:** Algoritmo Completo de Despacho (13 Pasos), Motor de Scoring, Compute Route Matrix Top-N y Mutex `driver_presence`  
 
 ---
 
-## 1. Mutex Operacional y Doble Invariante de Concurrencia
+## 1. Algoritmo Canónico de Búsqueda, Filtrado y Scoring (13 Pasos)
 
-El **Dispatch Engine** utiliza la fila en `public.driver_presence` como **mutex operacional único del conductor** (garantizado por la relación 1:1 por `driver_id`).
+El **Dispatch Engine** ejecuta un pipeline optimizado para seleccionar al candidato ideal evitando llamadas masivas e innecesarias a APIs de mapas externas:
 
-### Doble Invariante Absoluta:
-1. **Invariante A (1 Delivery $\rightarrow$ 1 Driver):** Máximo 1 conductor activo por entrega.
-2. **Invariante B (1 Driver $\rightarrow$ 1 Delivery):** Máximo 1 entrega comprometida por conductor (`DRIVER_ASSIGNED`, `TO_PICKUP`, `ARRIVED_PICKUP`, `PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`, `RETURN_REQUIRED`, `RETURNING`).
+```text
+ ┌───────────────────────────┐
+ │ 1. Solicitud de Entrega   │ Delivery pasa a `SEARCHING_DRIVER`.
+ └─────────────┬─────────────┘
+               │
+               ▼
+ ┌───────────────────────────┐
+ │ 2. PostGIS Candidate Disc.│ Búsqueda por radio espacial $R$ (ej. 5km) sobre `driver_presence`.
+ └─────────────┬─────────────┘
+               │
+               ▼
+ ┌───────────────────────────┐
+ │ 3. Filtros Elegibilidad   │ (1) `verification_status = VERIFIED`, (2) `account_status = ACTIVE`,
+ └─────────────┬─────────────┘ (3) `operational_state = AVAILABLE`, (4) GPS Freshness valid,
+               │               (5) 0 entregas comprometidas en curso (Invariante B).
+               ▼
+ ┌───────────────────────────┐
+ │ 4. Coarse Ranking (Dist.) │ Ordenamiento rápido por distancia Haversine/PostGIS.
+ └─────────────┬─────────────┘
+               │
+               ▼
+ ┌───────────────────────────┐
+ │ 5. Selección Top-N        │ Se toman los Top-N mejores candidatos (ej. Top 5).
+ └─────────────┬─────────────┘
+               │
+               ▼
+ ┌───────────────────────────┐
+ │ 6. Google Compute Route   │ Se invoca Google Routes API **ÚNICAMENTE para el Top-N**.
+ └─────────────┬─────────────┘
+               │
+               ▼
+ ┌───────────────────────────┐
+ │ 7. Final Scoring & Weights│ Cálculo de puntuación combinando ETA vial, distancia real,
+ └─────────────┬─────────────┘ frescura GPS, rating y balance de equidad (*fairness*).
+               │
+               ▼
+ ┌───────────────────────────┐
+ │ 8. Emisión de Oferta      │ Se inserta en `delivery_offers` con status `OPEN` (15s exp.).
+ └───────────────────────────┘ (Rondas de expansión progresiva si no hay respuesta).
+```
+
+### 13 Pasos del Pipeline:
+1. **Eligibility Filter:** Filtra conductores en regla.
+2. **PostGIS Candidate Discovery:** Búsqueda espacial rápida en base de datos.
+3. **Freshness Filter:** Descarte de señales GPS desactualizadas.
+4. **Coarse Ranking:** Ordenamiento preliminar.
+5. **Top-N Candidates:** Selección de un subconjunto acotado para minimizar costos API.
+6. **Google Compute Route Matrix:** Matriz de tiempos y rutas viales reales solo para el Top-N.
+7. **Final Scoring:** Matriz de puntuación ponderada.
+8. **Fairness / Workload Balancing:** Distribución equitativa entre conductores activos.
+9. **Dispatch Round:** Envío de oferta en rondas individuales.
+10. **Offer Expiration:** Expiración de oferta tras 15 segundos sin aceptar (`OFFER_EXPIRED`).
+11. **Radius Expansion:** Expansión del radio de búsqueda (+2km) si la primera ronda vence.
+12. **No-Driver Fallback:** Re-intentos programados tras alcanzar el radio máximo.
+13. **Operator Escalation:** Alerta sonora y visual en el panel de Admin si transcurren 10 minutos sin adjudicación.
 
 ---
 
-## 2. ORDEN ÚNICO DE LOCKS PESIMISTAS
-
-Para prevenir deadlocks y serializar la concurrencia, todas las funciones de despacho aplican el **mismo orden estricto de bloqueos pesimistas (`FOR UPDATE`)**:
+## 2. Mutex Operacional y ORDEN ÚNICO DE LOCKS PESIMISTAS
 
 ```text
 1. Bloquear mutex operacional en `public.driver_presence` (FOR UPDATE).
-2. Leer y verificar estado en `public.drivers`.
+2. Leer y verificar `drivers.verification_status`, `drivers.account_status` y `location_updated_at`.
 3. Bloquear registro de entrega en `public.deliveries` (FOR UPDATE).
 4. Bloquear registro de oferta en `public.delivery_offers` (FOR UPDATE).
 ```
@@ -52,6 +102,7 @@ DECLARE
     v_driver_verif_status TEXT;
     v_driver_acct_status TEXT;
     v_operational_state TEXT;
+    v_location_updated_at TIMESTAMPTZ;
 BEGIN
     -- 1. Identidad REAL desde la sesión autenticada
     v_driver_id := auth.uid();
@@ -60,13 +111,19 @@ BEGIN
     END IF;
 
     -- 2. LOCK 1: Bloquear mutex operacional del conductor (driver_presence)
-    SELECT operational_state INTO v_operational_state
+    SELECT operational_state, location_updated_at 
+    INTO v_operational_state, v_location_updated_at
     FROM public.driver_presence
     WHERE driver_id = v_driver_id
     FOR UPDATE;
 
     IF v_operational_state NOT IN ('AVAILABLE', 'OFFERED') THEN
         RETURN jsonb_build_object('success', false, 'code', 'INVALID_OPERATIONAL_STATE', 'message', 'Conductor fuera de servicio o en estado no elegible.');
+    END IF;
+
+    -- Validar frescura GPS del conductor (ej. máximo 3 minutos de antigüedad)
+    IF v_location_updated_at IS NULL OR v_location_updated_at < (NOW() - INTERVAL '3 minutes') THEN
+        RETURN jsonb_build_object('success', false, 'code', 'STALE_DRIVER_LOCATION', 'message', 'Señación GPS desactualizada. Por favor actualice su ubicación.');
     END IF;
 
     -- Leer y verificar expediente drivers
@@ -125,4 +182,9 @@ EXCEPTION
         RETURN jsonb_build_object('success', false, 'code', 'DRIVER_ALREADY_BUSY', 'message', 'Violación de concurrencia: Ya posees una entrega comprometida.');
 END;
 $$;
+
+-- Permisos de Ejecución Restringidos
+REVOKE EXECUTE ON FUNCTION public.accept_delivery_offer(UUID) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.accept_delivery_offer(UUID) FROM anon;
+GRANT EXECUTE ON FUNCTION public.accept_delivery_offer(UUID) TO authenticated;
 ```

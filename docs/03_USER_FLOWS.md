@@ -1,7 +1,7 @@
 # 03 — FLUJOS DE USUARIO (USER FLOWS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.4.0-phase0  
+**Versión:** 1.5.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Diagramación UX y Experiencia de Usuario Alineada 100% con la Máquina de Estados  
 
@@ -15,7 +15,7 @@ Los flujos de interfaz de usuario (**UX Flows**) representan punto por punto las
 ```text
 ┌─────────────────────────┐      ┌─────────────────────────┐      ┌─────────────────────────┐
 │     Formulario App      │─────►│    Cálculo Backend      │─────►│   Cotización Activa     │
-│ (Sucursal / Destinatario)│      │  (Quote Motor Tarifas)  │      │(QUOTED - Valida 5 min)  │
+│ (Sucursal / Destinatario)│      │  (Quote Motor Tarifas)  │      │(QUOTED - Policy Config) │
 └─────────────────────────┘      └─────────────────────────┘      └────────────┬────────────┘
                                                                                │ (Confirmar Envío)
                                                                   ┌────────────▼────────────┐
@@ -51,7 +51,7 @@ Los flujos de interfaz de usuario (**UX Flows**) representan punto por punto las
 1. **Onboarding & Registro:** Registro de empresa, sucursales y miembros con asignación N:M en `business_member_locations`.
 2. **Creación de Solicitud:** Selección de sucursal origen, dirección de destino, contacto y paquete.
 3. **Cotización & Confirmación:** Visualización del desglose de `QUOTED`. Confirmación idempotente (`CONSUMED`) para iniciar la entrega en `SEARCHING_DRIVER`.
-4. **Validación de Custodia en Pickup:** El despachador del negocio recibe al motorizado en `ARRIVED_PICKUP`, observa el `PICKUP_CODE` en la pantalla del motorizado y lo introduce en la App Business para pasar a `PICKED_UP`.
+4. **Validación de Custodia en Pickup (Flujo Normal):** El despachador del negocio recibe al motorizado en `ARRIVED_PICKUP`, observa el `PICKUP_CODE` en la pantalla del motorizado y lo introduce en la App Business para pasar a `PICKED_UP`.
 5. **Historial & Detalle:** Seguimiento en vivo de entregas activas y consulta del historial.
 
 ### 2.2 Flujo Conductor (`apps/driver-mobile`)
@@ -63,10 +63,11 @@ Los flujos de interfaz de usuario (**UX Flows**) representan punto por punto las
 
 ### 2.3 Flujo Cliente Destinatario (`apps/tracking-web`)
 1. **Acceso Seguro por Bearer Token:** Apertura de enlace con token de alta entropía (`https://gueguense.app/t/<TOKEN>`).
-2. **Visualización de OTP:** El cliente observa en pantalla su **`DELIVERY_OTP` de 6 dígitos** para dictárselo al motorizado.
+2. **Visualización de OTP:** El cliente observa en pantalla su **`DELIVERY_OTP` de 6 dígitos** para dictárselo al motorizado (visible únicamente en estados autorizados: `PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`).
 3. **Estado en Vivo:** Visualización del estado del paquete y posición del motorizado durante el tránsito vía short polling adaptativo.
 4. **Cierre de Sesión:** Tras pasar a `DELIVERED`, la posición GPS se desvincula y solo se muestra la confirmación del servicio.
 
-### 2.4 Flujo Administrador (`apps/admin-web`)
+### 2.4 Flujo Administrador y Operaciones Extraordinarias (`apps/admin-web`)
 1. **Mapa de Operaciones:** Monitoreo global de la flota en tiempo real.
-2. **Mesa de Incidentes & Devoluciones:** Autorización de retornos (`RETURN_REQUIRED`) o traspasos presenciales de custodia (`RESOLVED_HANDOFF`).
+2. **Intervención Extraordinaria en Pickup:** En situaciones excepcionales (fallo de dispositivo en comercio), un operador de Admin autoriza la confirmación de custodia tras verificación telefónica, registrando `reason` obligatorio y log de auditoría.
+3. **Mesa de Incidentes & Devoluciones:** Autorización de retornos (`RETURN_REQUIRED`) o traspasos presenciales de custodia (`RESOLVED_HANDOFF`).

@@ -1,7 +1,7 @@
 # 12 — ARQUITECTURA DE SEGURIDAD Y THREAT MODEL (SECURITY ARCHITECTURE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.4.0-phase0  
+**Versión:** 1.5.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Hardened Security Definer (`SET search_path = ''`), Threat Model Evaluado (20 Amenazas) y Verificación en Vivo  
 
@@ -11,9 +11,10 @@
 
 1. **Ruta de Búsqueda Vacía (`SET search_path = ''`):** Previene hijacking de esquemas en Stored Procedures.
 2. **Referencias Calificadas por Esquema:** Invocaciones explícitas (`public.deliveries`, `private.delivery_secrets`).
-3. **Verificación de Estado de Cuenta en Vivo (Backend Session Validation):**
-   * Debido a que los tokens JWT de acceso pueden permanecer técnicamente válidos hasta su tiempo de expiración, **las operaciones críticas NO confían únicamente en la validez del token**.
-   * Las funciones almacenadas verifican en vivo `drivers.account_status = 'ACTIVE'` y `businesses.account_status = 'ACTIVE'`. Si la cuenta está suspendida, la transacción rebota con excepción `42501 FORBIDDEN`.
+3. **Verificación de Estado de Cuenta y Custodia:**
+   * Las funciones almacenadas verifican en vivo `drivers.account_status = 'ACTIVE'` y `businesses.account_status = 'ACTIVE'`.
+   * Si la cuenta está suspendida, se bloquea la creación de nuevas entregas o la aceptación de nuevas ofertas (`42501 FORBIDDEN`).
+   * **Excepción de Custodia Activa:** Si el motorizado ya posee un paquete en custodia física (`PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`), se permiten **exclusivamente las acciones de resolución de custodia** (`RETURN_REQUIRED` $\rightarrow$ `RETURNING` $\rightarrow$ `RETURNED` o `CONTROLLED_HANDOFF`) autorizadas por el operador.
 
 ---
 
