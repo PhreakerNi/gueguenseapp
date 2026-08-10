@@ -1,7 +1,7 @@
 # 08 — MOTOR DE DESPACHO Y ASIGNACIÓN (DISPATCH ENGINE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.6.0-phase0  
+**Versión:** 1.8.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Algoritmo Completo de Despacho (13 Pasos), Motor de Scoring, Compute Route Matrix Top-N y Mutex `driver_presence`  
 
@@ -18,7 +18,7 @@ El **Dispatch Engine** ejecuta un pipeline optimizado para seleccionar al candid
                │
                ▼
  ┌───────────────────────────┐
- │ 2. PostGIS Candidate Disc.│ Búsqueda por radio espacial $R$ (ej. 5km initial default).
+ │ 2. PostGIS Candidate Disc.│ Búsqueda por radio espacial $R$ (ej. 5km initial default / configurable policy).
  └─────────────┬─────────────┘
                │
                ▼
@@ -33,7 +33,7 @@ El **Dispatch Engine** ejecuta un pipeline optimizado para seleccionar al candid
                │
                ▼
  ┌───────────────────────────┐
- │ 5. Selección Top-N        │ Se toman los Top-N mejores candidatos (ej. Top 5 initial default).
+ │ 5. Selección Top-N        │ Se toman los Top-N mejores candidatos (ej. Top 5 initial default / configurable policy).
  └─────────────┬─────────────┘
                │
                ▼
@@ -48,8 +48,8 @@ El **Dispatch Engine** ejecuta un pipeline optimizado para seleccionar al candid
                │
                ▼
  ┌───────────────────────────┐
- │ 8. Emisión de Oferta      │ Se inserta en `delivery_offers` con status `OPEN` (15s exp. default).
- └───────────────────────────┘ (Rondas de expansión progresiva si no hay respuesta).
+ │ 8. Emisión de Oferta      │ Se inserta en `delivery_offers` con status `OPEN`
+ └───────────────────────────┘ (15s initial default / configurable policy).
 ```
 
 ### 13 Pasos del Pipeline:
@@ -62,10 +62,10 @@ El **Dispatch Engine** ejecuta un pipeline optimizado para seleccionar al candid
 7. **Final Scoring:** Matriz de puntuación ponderada.
 8. **Fairness / Workload Balancing:** Distribución equitativa entre conductores activos.
 9. **Dispatch Round:** Envío de oferta en rondas individuales.
-10. **Offer Expiration:** Expiración de oferta tras 15 segundos sin aceptar (`OFFER_EXPIRED`, `initial default / configurable policy`).
-11. **Radius Expansion:** Expansión del radio de búsqueda (+2km `initial default`) si la primera ronda vence.
+10. **Offer Expiration:** Expiración de oferta tras superar timeout (`OFFER_EXPIRED`, `15s initial default / configurable policy`).
+11. **Radius Expansion:** Expansión del radio de búsqueda (+2km `initial default / configurable policy`) si la primera ronda vence.
 12. **No-Driver Fallback:** Re-intentos programados tras alcanzar el radio máximo.
-13. **Operator Escalation:** Alerta sonora y visual en el panel de Admin si transcurren 10 minutos (`initial default`) sin adjudicación.
+13. **Operator Escalation:** Alerta sonora y visual en el panel de Admin si transcurren 10 minutos (`initial default / configurable policy`) sin adjudicación.
 
 ---
 
@@ -121,7 +121,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'INVALID_OPERATIONAL_STATE', 'message', 'Conductor fuera de servicio o en estado no elegible.');
     END IF;
 
-    -- Validar frescura GPS del conductor (ej. máximo 3 minutos initial default / configurable policy)
+    -- Validar frescura GPS del conductor (máximo 3 minutos initial default / configurable policy)
     IF v_location_updated_at IS NULL OR v_location_updated_at < (NOW() - INTERVAL '3 minutes') THEN
         RETURN jsonb_build_object('success', false, 'code', 'STALE_DRIVER_LOCATION', 'message', 'Señalización GPS desactualizada. Por favor actualice su ubicación.');
     END IF;

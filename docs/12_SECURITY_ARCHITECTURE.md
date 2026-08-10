@@ -1,7 +1,7 @@
 # 12 — ARQUITECTURA DE SEGURIDAD Y THREAT MODEL (SECURITY ARCHITECTURE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.6.0-phase0  
+**Versión:** 1.8.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Hardened Security Definer (`SET search_path = ''`), Threat Model Evaluado (20 Amenazas) y Ciclo de Vida de Secretos  
 
@@ -36,7 +36,7 @@
  └────────────────┘ OTP deja de ser retornable.
 
  ┌────────────────┐
- │RETURN_REQUIRED │ OTP invalidad/inaccesible.
+ │RETURN_REQUIRED │ OTP invalidada/inaccesible.
  └────────────────┘
 ```
 
@@ -51,9 +51,9 @@
 | **Ubicación GPS**| `FORGED_GPS` | App de GPS Falso | Validación de velocidad y `anomaly_flag`. | Monitoreo en `delivery_tracking_points`. | Inactivación de asignación automática. | Medio |
 | **Recursos API** | `IDOR` | Modificar `delivery_id` ajeno | Políticas RLS por `auth.uid()` y membresía. | Logs 403 Forbidden. | Auditoría y deshabilitación de cuenta. | Bajo |
 | **Tracking Web** | `TRACKING_TOKEN_LEAK` | URL compartida públicamente | Token hash SHA-256 + Expiración terminal. | Logs de acceso por User-Agent. | Revocación manual/automática del token. | Bajo |
-| **Entrega** | `OTP_BRUTE_FORCE` | Fuerza bruta a 6 dígitos | Lockout de 2 min tras 3 fallos (`otp_digest`). | Alerta por `otp_attempt_count >= 3`. | Bloqueo temporal de la entrega. | Bajo |
+| **Entrega** | `OTP_BRUTE_FORCE` | Fuerza bruta a 6 dígitos | OTP lock: 3 intentos / 2 min = initial default / configurable security policy. | Alerta por `otp_attempt_count >= 3`. | Bloqueo temporal de la entrega. | Bajo |
 | **Custodia** | `PICKUP_CODE_ABUSE` | Conductor auto-confirma pickup | `pickup_code_digest` validado por Negocio. | Auditoría de tiempo `ARRIVED` a `PICKED`. | Inhabilitación del motorizado. | Bajo |
-| **Documentos** | `DOCUMENT_EXPOSURE` | Lectura de cédula/licencia | Bucket 100% privado + Signed URLs 15m. | Audit log de URLs firmadas. | Revocación de clave de firma. | Bajo |
+| **Documentos** | `DOCUMENT_EXPOSURE` | Lectura de cédula/licencia | Bucket 100% privado + Signed URL lifetime: 15 min = initial default / configurable security policy. | Audit log de URLs firmadas. | Revocación de clave de firma. | Bajo |
 | **Cotización** | `PRICE_MANIPULATION` | Modificar precio en frontend | Cotización calculada 100% en backend (`QUOTED`). | Invariante `quoted_total` vs Quote. | Rechazo de consumo de la cotización. | Bajo |
 | **Custodia** | `FAKE_PICKUP` | Marcar entrega sin paquete | Exigencia de validación por empleado negocio. | Reclamos del negocio en incidentes. | Retención de ganancias y suspensión. | Medio |
 | **Custodia** | `FAKE_DELIVERY_COMPLETION`| Confirmar sin entregar | Exigencia estricta de `DELIVERY_OTP`. | Impugnación por cliente en tracking. | Devolución obligatoria o arbitraje. | Bajo |

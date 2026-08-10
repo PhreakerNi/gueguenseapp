@@ -1,18 +1,55 @@
 # 07 — CONTRATOS DE API Y ENDPOINTS (API CONTRACTS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.7.0-phase0  
+**Versión:** 1.8.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Especificación de Interfaces REST, Tablas de Especificación por Mutación Crítica por Dominio (12 Columnas Estrictas por Fila)  
+**Dominio:** Especificación de Interfaces REST, Tablas de Especificación por Mutación Crítica por Dominio (12 Columnas Estrictas por Fila) y Semántica de Procesamiento Interno de Payouts  
 
 ---
 
-## 1. Estándares Globales de la API
+## 1. Estándares Globales de la API y Semántica de Payouts
 
 * **Autenticación:** `Authorization: Bearer <SUPABASE_JWT_TOKEN>`.
 * **Idempotencia Obligatoria:** Encabezado `Idempotency-Key: <UUID-V4>` en todas las mutaciones críticas. Soporta actores `USER`, `SYSTEM`, `WEBHOOK` y `BACKGROUND_JOB`.
 * **Regla Canónica de OTP:** El `DELIVERY_OTP` **NUNCA se retorna a Driver, Negocio ni Admin.** Solamente se expone al destinatario en `GET /api/v1/tracking/{token}/otp` descifrando `otp_ciphertext` durante estados de entrega autorizados ($\text{OTP\_ALLOWED\_STATES} = \{\text{PICKED\_UP}, \text{TO\_DROPOFF}, \text{ARRIVED\_DROPOFF}\}$).
-* **Consolidación Handoff MVP:** No existe endpoint `/authorize` separado en MVP porque la creación por Operator/Admin (`POST /api/v1/admin/handoffs`) constituye su autorización explícita auditable. No existe endpoint `/complete` separado; `POST /api/v1/handoffs/{id}/confirm-to` es la mutación atómica que finaliza el traspaso transitándolo a estado `COMPLETED`.
+* **Consolidación Handoff MVP:** No existe endpoint `/authorize` separado en MVP porque la creación por Operator/Admin (`POST /api/v1/admin/handoffs`) constituye su autorización explícita auditable. No existe endpoint `/complete` separado; `POST /api/v1/handoffs/{id}/confirm-to` es la acción atómica que finaliza el traspaso transitándolo a estado `COMPLETED`.
+
+### 1.1 Semántica Interna de Procesamiento de Payout (Retiros Conductor)
+
+```text
+ ┌────────────────┐
+ │   REQUESTED    │ Conductor solicita retiro desde su aplicación.
+ └───────┬────────┘
+         │
+         ▼
+ ┌────────────────┐
+ │  UNDER_REVIEW  │ En revisión por Admin (MFA / Four-Eyes configurable si supera threshold policy).
+ └───────┬────────┘
+         │
+         ▼
+ ┌────────────────┐
+ │    APPROVED    │ Aprobado exclusivamente por la acción POST /admin/payouts/{id}/approve.
+ └───────┬────────┘
+         │ (Worker autorizado / Transición asíncrona backend)
+         ▼
+ ┌────────────────┐
+ │   PROCESSING   │ Transferencia emitida hacia el proveedor bancario/procesador.
+ └───────┬────────┴──────────────────────────────┐
+         │ (Confirmación válida de pasarela)     │ (Fallo terminal de pasarela)
+         ▼                                       ▼
+ ┌────────────────┐                     ┌────────────────┐
+ │      PAID      │                     │     FAILED     │
+ └────────────────┘                     └────────────────┘
+```
+
+#### Reglas Inviolables de Procesamiento de Payout:
+1. El endpoint administrativo `POST /api/v1/admin/payouts/{id}/approve` termina **exclusivamente en el estado `APPROVED`** (NUNCA salta directamente a `PAID`).
+2. Un worker/backend autorizado recoge periódicamente las solicitudes en estado `APPROVED` y las transita a `PROCESSING` al emitir la instrucción al proveedor bancario.
+3. El estado final **`PAID`** solo puede ser establecido tras recibir y validar una confirmación auténtica del proveedor, banco o procesador financiero.
+4. Si el proveedor rechaza la transacción de forma irrecuperable, la solicitud transita al estado `FAILED` y se restituyen los fondos retenidos al saldo del conductor.
+5. Los callbacks/webhooks del proveedor bancario verifican firma criptográfica/autenticidad, son estrictamente idempotentes por `provider_reference` y NUNCA confían en estados enviados desde clientes móviles o web.
+6. Ningún conductor tiene permiso para marcar su propia solicitud como `PROCESSING`, `PAID` o `FAILED`.
+7. Ningún endpoint administrativo de aprobación directa tiene permitido saltar el ciclo a `PAID` sin confirmación bancaria.
 
 ---
 
@@ -94,7 +131,7 @@
 | **`POST /api/v1/admin/deliveries/{id}/force-cancel`** | Operator / Admin | JWT (Operator/Admin) | `SEARCHING_DRIVER`, `DRIVER_ASSIGNED`, `TO_PICKUP`, `ARRIVED_PICKUP` | `{"reason": "OPERATIONAL_EMERGENCY"}` | `{"status": "CANCELED"}` | `CANCELED` (Solo pre-custodia) | Obligatoria | `CANNOT_CANCEL_IN_TRANSIT`, `REASON_REQUIRED` | `DELIVERY_FORCE_CANCELED` | Push a Involucrados y Audit | Reversión de Fondos |
 | **`POST /api/v1/admin/pricing/versions/activate`** | Admin | JWT (Rol Admin + MFA) | N/A | `{"pricing_version_id": "<UUID>"}` | `{"is_active": true}` | Activado | Obligatoria | `INVALID_PRICING_VERSION` | `PRICING_VERSION_ACTIVATED` | Audit log | Tarifa Global Cambiada |
 | **`GET /api/v1/admin/payouts/{id}`** | Admin | JWT (Rol Admin) | N/A | N/A | `{"payout": {...}}` | N/A | No | `PAYOUT_NOT_FOUND` | N/A | N/A | N/A |
-| **`POST /api/v1/admin/payouts/{id}/approve`** | Admin | JWT (Rol Admin + MFA si > C$5,000 policy) | `REQUESTED` / `UNDER_REVIEW` | `{"reason": "AUDITED_PAYOUT"}` | `{"status": "APPROVED"}` | `status = APPROVED` (No salta a PAID) | Obligatoria | `PAYOUT_ALREADY_PROCESSED` | `PAYOUT_APPROVED` | Push a Conductor | N/A |
+| **`POST /api/v1/admin/payouts/{id}/approve`** | Admin | JWT (Rol Admin + MFA / four-eyes según threshold financiero configurable, initial default ilustrativo: C$5,000, sujeto a policy) | `REQUESTED` / `UNDER_REVIEW` | `{"reason": "AUDITED_PAYOUT"}` | `{"status": "APPROVED"}` | `status = APPROVED` (NUNCA salta directamente a PAID) | Obligatoria | `PAYOUT_ALREADY_PROCESSED` | `PAYOUT_APPROVED` | Push a Conductor | N/A |
 | **`POST /api/v1/admin/payouts/{id}/reject`** | Admin | JWT (Rol Admin + MFA) | `REQUESTED` / `UNDER_REVIEW` | `{"reason": "INVALID_BANK_DETAILS"}` | `{"status": "REJECTED"}` | `status = REJECTED` | Obligatoria | `PAYOUT_ALREADY_PROCESSED` | `PAYOUT_REJECTED` | Push a Conductor | Libera Hold en Saldo |
 | **`POST /api/v1/admin/cash-settlements`** | Admin | JWT (Rol Admin) | N/A | `{"driver_id": "<UUID>", "settled_amount": 500.00}` | `{"status": "SETTLED"}` | `status = SETTLED` (en `cash_settlements`) | Obligatoria | `CASH_DISCREPANCY_UNRESOLVED` | `CASH_SETTLED` | Email a Conductor | Journal Entry Cash |
 | **`GET /api/v1/admin/audit`** | SuperAdmin | JWT (Rol SuperAdmin) | N/A | N/A | `{"audit_logs": [...]}` | N/A | No | N/A | N/A | N/A | N/A |

@@ -1,9 +1,9 @@
 # GÜEGÜENSE — Plataforma Logística y Delivery B2B Bajo Demanda
 
-**Versión:** 1.7.0-phase0  
+**Versión:** 1.8.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase0_v1_7.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase0_v1_8.md`
 
 ---
 
@@ -50,15 +50,15 @@ gueguenseapp/
 4. [04_DELIVERY_STATE_MACHINE.md](docs/04_DELIVERY_STATE_MACHINE.md) — Matriz Formal de Transiciones con 11 Atributos por Transición, Inmutabilidad de Quote Consumido y Sub-sistema de Incidentes.
 5. [05_SYSTEM_ARCHITECTURE.md](docs/05_SYSTEM_ARCHITECTURE.md) — Arquitectura de Sistemas, Ingesta GPS Validada por Backend y Tracking Web MVP vía Adaptive Short Polling.
 6. [06_DATABASE_ARCHITECTURE.md](docs/06_DATABASE_ARCHITECTURE.md) — Esquema Relacional PostgreSQL Completo (37 Entidades MVP individualizadas con plantilla de 15 propiedades, `idempotency_keys` para Webhooks/System, `notification_deliveries`).
-7. [07_API_CONTRACTS.md](docs/07_API_CONTRACTS.md) — Contratos REST API Completos Especificados por Tablas de Mutación Crítica por Dominio (12 columnas estrictas por fila).
+7. [07_API_CONTRACTS.md](docs/07_API_CONTRACTS.md) — Contratos REST API Completos Especificados por Tablas de Mutación Crítica por Dominio (12 columnas estrictas por fila) y Semántica de Procesamiento Interno de Payout (`REQUESTED` $\rightarrow$ `APPROVED` $\rightarrow$ `PROCESSING` $\rightarrow$ `PAID`/`FAILED`).
 8. [08_DISPATCH_ENGINE.md](docs/08_DISPATCH_ENGINE.md) — Motor de Despacho (Algoritmo 13 Pasos, Scoring, Compute Route Matrix Top-N), Mutex `driver_presence`, Freshness GPS y Permisos Security Definer.
 9. [09_TRACKING_ARCHITECTURE.md](docs/09_TRACKING_ARCHITECTURE.md) — Rastreabilidad Adaptativa, Polling, Headers `no-store` / `no-referrer` y Visibilidad de OTP en `OTP_ALLOWED_STATES`.
-10. [10_PRICING_ENGINE.md](docs/10_PRICING_ENGINE.md) — Tarificación Quoted vs Final, Entidad `pricing_adjustments` (`MANUAL_ADJUSTMENT`) y Umbrales Configurables (`initial default`).
+10. [10_PRICING_ENGINE.md](docs/10_PRICING_ENGINE.md) — Tarificación Quoted vs Final, Entidad `pricing_adjustments` (`MANUAL_ADJUSTMENT`) y Umbrales Configurables (`initial default / configurable policy`).
 11. [11_FINANCIAL_LEDGER.md](docs/11_FINANCIAL_LEDGER.md) — Contabilidad Doble Entrada (Journal + Postings), Convención `+` Débito / `-` Crédito, Suma Cero, Ciclo Payouts (`REQUESTED` $\rightarrow$ `APPROVED` $\rightarrow$ `PROCESSING` $\rightarrow$ `PAID`) y Ejemplos por `transaction_type`.
 12. [12_SECURITY_ARCHITECTURE.md](docs/12_SECURITY_ARCHITECTURE.md) — Hardened Security Definer, Threat Model Evaluado (20 Amenazas) y Ciclo de Vida de Secretos en `private.delivery_secrets`.
 13. [13_NOTIFICATIONS.md](docs/13_NOTIFICATIONS.md) — Notificaciones Push Best-Effort, Outbox Pattern, Entidad `notification_deliveries` y Reintentos con Exponential Backoff + Jitter.
 14. [14_ADMIN_OPERATIONS.md](docs/14_ADMIN_OPERATIONS.md) — Panel de Control Administrativo (17 Módulos Operativos con Roles Mínimos, Justificación `reason` y Cuatro Ojos Configurable).
-15. [15_ERROR_AND_EDGE_CASES.md](docs/15_ERROR_AND_EDGE_CASES.md) — Catálogo Completo de Casos Límite (31 Casos con Estados Canónicos Exactos y Sin Pseudoestados).
+15. [15_ERROR_AND_EDGE_CASES.md](docs/15_ERROR_AND_EDGE_CASES.md) — Catálogo Completo de Casos Límite (31 Casos con Estados Canónicos Exactos y Sin Pseudoestados Operativos).
 16. [16_DESIGN_SYSTEM.md](docs/16_DESIGN_SYSTEM.md) — Sistema de Diseño, Tokens Visuales, Layouts de Delivery Activo y Componentes UX.
 17. [17_TESTING_STRATEGY.md](docs/17_TESTING_STRATEGY.md) — Estrategia de Pruebas Unitarias, RLS, Concurrencia Dual, Ingesta GPS Validada, Idempotencia No Humana y Payout States.
 18. [18_OBSERVABILITY.md](docs/18_OBSERVABILITY.md) — Logs Estructurados, Redacción Recursiva de PII, Sanitización de URLs/Headers, Omisión de Bearer Tokens en Access Logs y Reducción de Precisión GPS.

@@ -1,9 +1,9 @@
 # 15 — CATÁLOGO DE CASOS LÍMITE Y MANEJO DE ERRORES (ERROR & EDGE CASES)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.7.0-phase0  
+**Versión:** 1.8.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Catálogo Completo de Casos Límite (31 Casos con Estados Canónicos Exactos y Sin Pseudoestados)  
+**Dominio:** Catálogo Completo de Casos Límite (31 Casos con Estados Canónicos Exactos y Sin Pseudoestados Operativos)  
 
 ---
 
@@ -40,13 +40,13 @@
 | **19. RECIPIENT_REFUSED** | Cliente rechaza paquete. | Driver reporta rechazo de entrega. | Negocio notificado de rechazo. | `ARRIVED_DROPOFF` $\rightarrow$ `RETURN_REQUIRED` | `RETURN_REQUIRED` | Genera `RETURN_FEE`. | Retorno obligatorio a sucursal. |
 | **20. PACKAGE_DAMAGED** | Paquete dañado en ruta. | Driver reporta avería con foto. | Incidente `PACKAGE_DAMAGED`. | Incidente en `incidents` | `INCIDENT_OPENED` | Seguro / Arbitraje. | Intervención mesa de ayuda. |
 | **21. OTP_WRONG** | Código OTP erróneo. | Incrementa `otp_attempt_count`. | Muestra intento fallido (x/3 initial default). | Sin cambio de estado. | `OTP_ATTEMPT_FAILED` | Sin impacto. | Re-ingreso por cliente. |
-| **22. OTP_LOCKED** | 3er intento OTP fallido (initial default / configurable policy). | Activa `otp_locked_until` (2 min initial default / configurable policy). | Conductor bloqueado 2 min. | Permanece `ARRIVED_DROPOFF` | `OTP_LOCKED` | Sin impacto. | Espera de tiempo de bloqueo. |
+| **22. OTP_LOCKED** | 3er intento OTP fallido (initial default / configurable policy). | Activa `otp_locked_until` (2 min initial default / configurable policy). | Conductor bloqueado durante `otp_lock_duration` (initial default: 2 min / configurable policy). | Permanece `ARRIVED_DROPOFF` | `OTP_LOCKED` | Sin impacto. | Espera de tiempo de bloqueo. |
 | **23. CASH_MISMATCH** | Descalce de efectivo. | Conductor reporta monto diferente. | Operador ajusta liquidación. | Incidente `CASH_MISMATCH` | `INCIDENT_OPENED` | Ajuste contable manual. | Conciliación en Admin. |
 | **24. PAYMENT_FAILED** | Recompra/saldo insuf. | Pago de comercio rechazado. | Suspensión de solicitudes. | `QUOTED` no se consume. | `PAYMENT_FAILED` | Sin saldo debitado. | Recarga de saldo prepago. |
 | **25. DUPLICATE_REQUEST** | Mismo `Idempotency-Key`| Backend retorna respuesta previa. | Transparente para usuario. | Retorna estado existente. | N/A | 1 solo cobro. | Resuelto por idempotencia. |
 | **26. DUPLICATE_WEBHOOK** | Re-emisión de webhook. | Descarte por `idempotency_keys` (actor `WEBHOOK`).| Sin efecto repetido. | N/A | N/A | 1 sola transacción. | Resuelto por idempotencia. |
-| **27. DRIVER_SUSPENDED_MID**| Conductor suspendido. | Rebotan nuevas ofertas; custodia se preserva.| Conductor deshabilitado. | Operador ordena RETURN o inicia `custody_handoffs` | `DRIVER_SUSPENDED` | Liquidación retenida. | Operador ordena RETURN o HANDOFF |
+| **27. DRIVER_SUSPENDED_MID**| Conductor suspendido. | Rebotan nuevas ofertas; custodia se preserva.| Conductor deshabilitado. | Si existe custodia física, el operador: A) autoriza la transición canónica a `RETURN_REQUIRED`, o B) inicia una operación de `custody_handoffs`. No existe un DELIVERY_STATUS llamado RETURN ni HANDOFF. | `DRIVER_SUSPENDED` | Liquidación retenida. | Operador ordena RETURN_REQUIRED o custodia de handoff |
 | **28. BIZ_SUSPENDED_MID** | Comercio suspendido. | Entregas activas concluyen. | Bloqueo de nuevos envíos. | Entregas activas terminan. | `BUSINESS_SUSPENDED` | Saldo congelado. | Arbitraje administrativo. |
 | **29. RETURN_REQUIRED** | Devolución obligatoria. | Inicia flujo de retorno a sucursal. | Negocio notificado de regreso. | `PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF` $\rightarrow$ `RETURN_REQUIRED` | `RETURN_REQUIRED` | Genera `RETURN_FEE`. | Conductor navega a origen. |
-| **30. CONTROLLED_HANDOFF** | Avería de moto en ruta. | Operador asigna 2do conductor (`custody_handoffs`).| Ambos firman traspaso. | El DELIVERY_STATUS no cambia por el handoff (conserva estado previo; autorizable desde `PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`) | `HANDOFF_STARTED` | Split de tarifa de servicio. | Traspaso presencial de paquete |
+| **30. CONTROLLED_HANDOFF** | Avería de moto en ruta. | Operador asigna 2do conductor (`custody_handoffs`).| Ambos firman traspaso. | El DELIVERY_STATUS no cambia por el handoff (conserva estado previo; autorizable desde `PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`). CONTROLLED_HANDOFF no es DELIVERY_STATUS. | `HANDOFF_STARTED` | Split de tarifa de servicio. | Traspaso presencial de paquete |
 | **31. DB_TEMP_FAILURE** | Caída temporal DB. | Retry con backoff en Edge Func. | Mensaje de reintento. | Transacciones rollback. | N/A | Sin corrupción de saldo. | Resiliencia infraestructura. |
