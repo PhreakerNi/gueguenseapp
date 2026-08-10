@@ -1,13 +1,13 @@
 # 05 — ARQUITECTURA TÉCNICA DE SISTEMAS (SYSTEM ARCHITECTURE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Arquitectura de Software, Estructura Supabase CLI, Google Routes API y Realtime Autorizado  
+**Dominio:** Arquitectura de Software, Supabase CLI, Google Routes API y Tracking Web MVP  
 
 ---
 
-## 1. Estructura Canónica del Repositorio (Monorepo & Supabase CLI)
+## 1. Estructura Canónica del Monorepo
 
 ```text
 gueguenseapp/
@@ -15,7 +15,7 @@ gueguenseapp/
 │   ├── business-mobile/    # App móvil React Native (Expo) para comercios
 │   ├── driver-mobile/      # App móvil React Native (Expo) para motorizados
 │   ├── admin-web/          # Panel administrativo Web Next.js (Supabase SSR)
-│   └── tracking-web/       # Portal web de seguimiento público de entregas
+│   └── tracking-web/       # Portal web de seguimiento (Protegido por Bearer Token)
 │
 ├── packages/
 │   ├── types/              # Definiciones TypeScript globales
@@ -36,9 +36,9 @@ gueguenseapp/
 
 ---
 
-## 2. Ingesta GPS y Estrategia de Realtime Autorizado
+## 2. Ingesta GPS, Comportamiento App Terminated y Tracking Web MVP
 
-### 2.1 Pipeline de Ingesta GPS Autenticada
+### 2.1 Pipeline de Ingesta GPS Autenticada y Manejo App Terminated
 ```text
  ┌───────────────────────────┐
  │ App Driver (Sensor GPS)   │ Captura lat/lng, accuracy, heading, speed y timestamp.
@@ -52,22 +52,25 @@ gueguenseapp/
                ▼
  ┌───────────────────────────┐
  │ DB Update (`driver_pres.`)│ Actualiza registro en PostgreSQL PostGIS.
- └─────────────┬─────────────┘
-               │
-               ▼
- ┌───────────────────────────┐
- │ Broadcast Autorizado      │ Emisión en Canales Privados (`delivery:{id}`).
  └───────────────────────────┘
 ```
+* **Comportamiento App Terminated:** La captura de localización en segundo plano depende de las políticas del SO del dispositivo. Si el usuario fuerza el cierre de la app (*kill app*), las transmisiones GPS se detendrán. El servidor marcará la frescura de señal como `STALE` o `UNAVAILABLE` y emitirá una alerta preventiva en Admin. Al reabrir la app, el motorizado resincroniza su estado vía REST (`GET /api/v1/driver/deliveries/active`).
 
-### 2.2 Canales Privados de Realtime y Sesión Scoped para Tracking Web
-* `delivery:{delivery_id}`: Canal privado con autorización JWT para el negocio emisor y el conductor asignado.
-* `driver:{driver_id}:offers`: Canal privado para emisión atómica de ofertas.
-* **Tracking Web Transport Strategy:** El token de la URL de tracking **NUNCA autoriza directamente un canal Supabase**. El cliente llama a `POST /api/v1/tracking/{token}/realtime-session`, donde el backend valida el token hash y le otorga un canal temporal con scope restringido a esa entrega. Se cuenta con fallback de **Short Polling** en caso de desconexión.
+### 2.2 Arquitectura del Tracking Web MVP (`tracking-web`)
+* **Transporte Primario MVP:**
+```text
+Tracking Web (Sin Cuenta)
+├── Utiliza Bearer Tracking Token de la URL
+├── Backend valida hash SHA-256 en private.tracking_tokens + expiry/revocation
+├── GET /api/v1/tracking/{token} (Obtiene snapshot inicial)
+├── Adaptive Short Polling (Intervalo configurable mientras delivery está activa)
+└── Polling se detiene automáticamente en estado terminal (DELIVERED/RETURNED/CANCELED/FAILED)
+```
+*(Nota: No se utiliza conexión directa a Supabase Realtime para usuarios anónimos en el MVP; las apps autenticadas Business, Driver y Admin sí utilizan canales privados Realtime).*
 
 ---
 
-## 3. Separación Estricta de API Keys de Mapas
+## 3. Configuración de API Keys de Mapas
 
-1. **Client Maps SDK Key:** Restringida por Application ID / Bundle ID / HTTP Referrer. Renderizado de mapas gráficos.
-2. **Server Routes API Key:** Restringida por IP de servidor. Utilizada exclusivamente desde Supabase Edge Functions para `Compute Route Matrix`. NUNCA expuesta a clientes.
+1. **Client Maps SDK Key:** Restringida por Application ID / Bundle ID / HTTP Referrer. Utilizada en apps cliente para renderizar mapas gráficos.
+2. **Server Routes API Key:** Key server-only restringida a Google Routes API. Almacenada en secrets del runtime serverless (Edge Functions). NUNCA se expone a aplicaciones cliente ni en código Expo.

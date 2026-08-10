@@ -1,9 +1,9 @@
 # 02 — MODELO DE ROLES Y MEMBRESÍAS (USER ROLES & PERMISSIONS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Control de Acceso, Identidad `auth.users`, Roles de Plataforma, Membresías Comerciales y Permisos RBAC  
+**Dominio:** Control de Acceso, Identidad `auth.users`, Roles de Plataforma, Membresías Comerciales (N:M Sucursales) y RBAC  
 
 ---
 
@@ -21,25 +21,23 @@ Güegüense basa su autenticación en **Supabase Auth (`auth.users`)**, separand
 ┌────────▼─────────┐                ┌─────────▼─────────┐                ┌─────────▼─────────┐
 │ public.profiles  │                │ business_members  │                │   public.drivers  │
 │ (Platform Roles) │                │(Business Roles)   │                │ (Driver Profile)  │
-└──────────────────┘                └───────────────────┘                └───────────────────┘
+└──────────────────┘                └─────────┬─────────┘                └───────────────────┘
+                                              │ (1:N)
+                                    ┌─────────▼──────────────────┐
+                                    │business_member_locations   │
+                                    │ (Scope N:M de Sucursales)  │
+                                    └────────────────────────────┘
 ```
 
 ---
 
-## 2. Definición Canónica de Roles y Alcance de Sucursal (`location_scope`)
+## 2. Membresías Comerciales y Alcance N:M de Sucursales (`business_member_locations`)
 
-### 2.1 Roles de Plataforma (`PLATFORM_ROLE`)
-Definidos en `public.profiles.platform_role`:
-* **`super_admin`:** Control total del sistema, variables globales, MFA obligatorio y auditoría contable.
-* **`admin`:** Gestión operativa, aprobación de retiros, configuración de tarifas y disputas.
-* **`operator`:** Monitoreo en vivo, soporte e intervención en incidentes/devoluciones/traspasos.
-* **`verification_agent`:** Auditoría de la cola de revisión de documentos de conductores (`driver_documents`).
+Para evitar ambigüedades en gerentes que administran múltiples sucursales, el alcance de permisos se modela mediante la tabla intermedia N:M **`public.business_member_locations`**:
 
-### 2.2 Roles de Membresía Comercial (`BUSINESS_MEMBER_ROLE`) y `location_scope`
-Definidos en `public.business_members.role`:
-* **`business_owner`:** Propietario legal de la empresa. Acceso total a todas las sucursales, facturación, cuentas de ledger y miembros.
-* **`business_manager`:** Gerente de sucursal. Restringido por `location_scope` (UUID de `business_locations`). Puede crear/cancelar entregas y gestionar empleados de sus sucursales asignadas.
-* **`business_employee`:** Despachador de caja. Restringido por `location_scope`. Solicita envíos y confirma la transferencia de custodia entregando el paquete al motorizado.
+* **`business_owner`:** Alcance global implícito sobre todas las sucursales pasadas, presentes y futuras del comercio.
+* **`business_manager`:** Gerente de sucursal. Asociado a 1 o N sucursales en `business_member_locations`. Puede crear/cancelar entregas y gestionar personal dentro de sus sucursales asignadas.
+* **`business_employee`:** Despachador de caja. Asociado a 1 o N sucursales específicas. Crea envíos y confirma la transferencia de custodia en sucursal.
 
 ---
 
@@ -50,8 +48,8 @@ Definidos en `public.business_members.role`:
 | **Gestionar Roles Admin** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Aprobar Documentos Driver** | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Configurar Tarifas/Zonas** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Crear Cotización / Delivery** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ (Scope) | ✅ (Scope) | ❌ | ❌ |
-| **Validar `PICKUP_CODE` (Custodia)**| ✅ | ✅ | ✅ | ❌ | ✅ | ✅ (Scope) | ✅ (Scope) | ❌ | ❌ |
+| **Crear Cotización / Delivery** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ (Scope N:M) | ✅ (Scope N:M) | ❌ | ❌ |
+| **Validar `PICKUP_CODE` (Custodia)**| ✅ | ✅ | ✅ | ❌ | ✅ | ✅ (Scope N:M) | ✅ (Scope N:M) | ❌ | ❌ |
 | **Ver `DELIVERY_OTP` (Plano)** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (Endpoint Customer) |
 | **Ingresar `DELIVERY_OTP`** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
 | **Aceptar Oferta Delivery** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |

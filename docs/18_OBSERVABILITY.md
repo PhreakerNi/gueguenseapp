@@ -1,29 +1,30 @@
 # 18 — OBSERVABILIDAD, LOGS Y PRIVACIDAD (OBSERVABILITY)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Telemetría, Logs Estructurados, Redacción Recursiva de PII y Tracing  
+**Dominio:** Telemetría, Logs Estructurados, Redacción Recursiva de PII, Sanitización de URLs/Headers y Tracing  
 
 ---
 
-## 1. Política Estricta de Redacción Recursiva de PII
+## 1. Política Estricta de Redacción y Sanitización de PII
 
-Queda **ESTRICTAMENTE PROHIBIDO** registrar en consolas o servicios de telemetría:
+Queda **ESTRICTAMENTE PROHIBIDO** registrar en consolas, servidores de logs o herramientas de analítica:
 * `DELIVERY_OTP` (Plano, Digest o Ciphertext).
-* Tokens JWT, API Secrets o Tokens de Tracking Web.
+* Tokens JWT, API Secrets, Bearer Tokens de Tracking Web o Encabezados `Authorization` / `Cookie`.
+* Tokens Bearer de Tracking Web en URLs/Query Strings (`tracking-web` omitirá el token en los logs de acceso).
 * Coordenadas GPS exactas en logs generales (se aplica reducción de precisión a 2 decimales en logs de telemetría).
 * Cédulas de Identidad, Licencias o Fotografías.
-* Números telefónicos completos y direcciones de casa.
+* Cuerpos de respuestas sensibles en el registro de `idempotency_keys`.
 
 ---
 
-## 2. Middleware de Sanitización Recursiva y Allowlist
+## 2. Middleware de Sanitización Recursiva y Allowlist de Atributos
 
 ```typescript
 function sanitizeLogPayload(data: any): any {
   if (!data || typeof data !== 'object') return data;
-  const SENSITIVE_KEYS = ['otp', 'token', 'national_id', 'license_number', 'phone', 'password', 'jwt', 'authorization', 'secret', 'pickup_code'];
+  const SENSITIVE_KEYS = ['otp', 'token', 'national_id', 'license_number', 'phone', 'password', 'jwt', 'authorization', 'secret', 'pickup_code', 'bearer'];
   
   if (Array.isArray(data)) {
     return data.map(sanitizeLogPayload);
@@ -43,3 +44,12 @@ function sanitizeLogPayload(data: any): any {
 
 ### Correlation IDs Permitidos para Tracing:
 `request_id`, `correlation_id`, `delivery_id`, `offer_id`, `business_id`, `driver_id`, `incident_id`, `transaction_id`.
+
+---
+
+## 3. Retención de Logs, Roles de Acceso y Routing de Alertas de Seguridad
+
+* **Nivel de Log en Producción:** `INFO` (producción) / `WARN` / `ERROR`.
+* **Retención de Telemetría:** 30 días para logs operativos generales; 365 días para `audit_logs` inmutables.
+* **Acceso a Logs:** Restringido a roles `super_admin` e ingenieros de infraestructura autorizados.
+* **Routing de Alertas de Seguridad:** Errores `42501 FORBIDDEN` masivos o fallas de integridad en `private.delivery_secrets` enrutan alertas de alta prioridad a canales de seguridad.

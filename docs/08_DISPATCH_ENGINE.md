@@ -1,35 +1,36 @@
 # 08 — MOTOR DE DESPACHO Y ASIGNACIÓN (DISPATCH ENGINE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Algoritmo de Despacho, Doble Invariante de Concurrencia, Google Routes API y Hardened Security Definer  
+**Dominio:** Algoritmo de Despacho, Doble Invariante de Concurrencia, Mutex `driver_presence` y Hardened Security Definer  
 
 ---
 
-## 1. Misión y Doble Invariante de Concurrencia
+## 1. Mutex Operacional y Doble Invariante de Concurrencia
 
-El **Dispatch Engine** garantiza simultáneamente:
+El **Dispatch Engine** utiliza la fila en `public.driver_presence` como **mutex operacional único del conductor** (garantizado por la relación 1:1 por `driver_id`).
+
+### Doble Invariante Absoluta:
 1. **Invariante A (1 Delivery $\rightarrow$ 1 Driver):** Máximo 1 conductor activo por entrega.
 2. **Invariante B (1 Driver $\rightarrow$ 1 Delivery):** Máximo 1 entrega comprometida por conductor (`DRIVER_ASSIGNED`, `TO_PICKUP`, `ARRIVED_PICKUP`, `PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`, `RETURN_REQUIRED`, `RETURNING`).
 
 ---
 
-## 2. ORDEN ÚNICO DE LOCKS CONTRA DEADLOCKS (TEXTO Y CÓDIGO UNIFICADOS)
+## 2. ORDEN ÚNICO DE LOCKS PESIMISTAS
 
 Para prevenir deadlocks y serializar la concurrencia, todas las funciones de despacho aplican el **mismo orden estricto de bloqueos pesimistas (`FOR UPDATE`)**:
 
 ```text
-1. Bloquear registro en `public.driver_presence` / `public.drivers`.
-2. Bloquear registro en `public.deliveries`.
-3. Bloquear registro en `public.delivery_offers`.
+1. Bloquear mutex operacional en `public.driver_presence` (FOR UPDATE).
+2. Leer y verificar estado en `public.drivers`.
+3. Bloquear registro de entrega en `public.deliveries` (FOR UPDATE).
+4. Bloquear registro de oferta en `public.delivery_offers` (FOR UPDATE).
 ```
 
 ---
 
 ## 3. BORRADOR DE DISEÑO / PSEUDOCÓDIGO NO EJECUTABLE (`accept_delivery_offer`)
-
-*(Nota: La función PL/pgSQL ejecutable definitiva se compondrá y probará formalmente en la Fase 4).*
 
 ```sql
 -- BORRADOR DE DISEÑO / PSEUDOCÓDIGO NO EJECUTABLE
@@ -52,26 +53,28 @@ DECLARE
     v_driver_acct_status TEXT;
     v_operational_state TEXT;
 BEGIN
-    -- 1. Determinar identidad REAL desde la sesión autenticada
+    -- 1. Identidad REAL desde la sesión autenticada
     v_driver_id := auth.uid();
     IF v_driver_id IS NULL THEN
         RAISE EXCEPTION 'UNAUTHORIZED: Usuario no autenticado.' USING ERRCODE = '42501';
     END IF;
 
-    -- 2. LOCK 1: Bloquear presencia y conductor (DRIVER / DRIVER_PRESENCE)
-    SELECT d.verification_status, d.account_status, dp.operational_state
-    INTO v_driver_verif_status, v_driver_acct_status, v_operational_state
-    FROM public.drivers d
-    JOIN public.driver_presence dp ON dp.driver_id = d.id
-    WHERE d.id = v_driver_id
-    FOR UPDATE OF dp;
+    -- 2. LOCK 1: Bloquear mutex operacional del conductor (driver_presence)
+    SELECT operational_state INTO v_operational_state
+    FROM public.driver_presence
+    WHERE driver_id = v_driver_id
+    FOR UPDATE;
+
+    IF v_operational_state NOT IN ('AVAILABLE', 'OFFERED') THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_OPERATIONAL_STATE', 'message', 'Conductor fuera de servicio o en estado no elegible.');
+    END IF;
+
+    -- Leer y verificar expediente drivers
+    SELECT verification_status, account_status INTO v_driver_verif_status, v_driver_acct_status
+    FROM public.drivers WHERE id = v_driver_id;
 
     IF v_driver_verif_status != 'VERIFIED' OR v_driver_acct_status != 'ACTIVE' THEN
         RETURN jsonb_build_object('success', false, 'code', 'DRIVER_NOT_AUTHORIZED', 'message', 'Conductor no verificado o inactivo.');
-    END IF;
-
-    IF v_operational_state NOT IN ('AVAILABLE', 'OFFERED') THEN
-        RETURN jsonb_build_object('success', false, 'code', 'INVALID_OPERATIONAL_STATE', 'message', 'Estado operacional no disponible para aceptar viajes.');
     END IF;
 
     -- INVARIANTE B: Verificar entregas comprometidas del conductor
@@ -92,9 +95,7 @@ BEGIN
 
     -- 3. LOCK 2: Bloquear entrega (DELIVERY)
     SELECT status, driver_id INTO v_delivery_status, v_assigned_driver
-    FROM public.deliveries
-    WHERE id = v_delivery_id
-    FOR UPDATE;
+    FROM public.deliveries WHERE id = v_delivery_id FOR UPDATE;
 
     IF v_delivery_status != 'SEARCHING_DRIVER' OR v_assigned_driver IS NOT NULL THEN
         RETURN jsonb_build_object('success', false, 'code', 'DELIVERY_ALREADY_TAKEN', 'message', 'La entrega ya fue adjudicada a otro conductor.');
@@ -102,9 +103,7 @@ BEGIN
 
     -- 4. LOCK 3: Bloquear oferta (OFFER)
     SELECT status, expires_at INTO v_offer_status, v_offer_expires_at
-    FROM public.delivery_offers
-    WHERE id = p_offer_id AND driver_id = v_driver_id
-    FOR UPDATE;
+    FROM public.delivery_offers WHERE id = p_offer_id AND driver_id = v_driver_id FOR UPDATE;
 
     IF v_offer_status IS NULL OR v_offer_status != 'OPEN' OR v_offer_expires_at <= NOW() THEN
         RETURN jsonb_build_object('success', false, 'code', 'OFFER_INVALID_OR_EXPIRED', 'message', 'La oferta ha expirado o no es válida.');
@@ -116,11 +115,14 @@ BEGIN
     UPDATE public.delivery_offers SET status = 'ACCEPTED' WHERE id = p_offer_id;
     UPDATE public.delivery_offers SET status = 'CANCELED' WHERE delivery_id = v_delivery_id AND id != p_offer_id;
 
-    -- 6. Logs de Eventos Auditarles (OFFER_ACCEPTED + DRIVER_ASSIGNED)
+    -- 6. Logs de Eventos Auditables
     INSERT INTO public.delivery_events (delivery_id, actor_type, actor_user_id, event_type) VALUES (v_delivery_id, 'USER', v_driver_id, 'OFFER_ACCEPTED');
     INSERT INTO public.delivery_events (delivery_id, actor_type, actor_user_id, event_type) VALUES (v_delivery_id, 'USER', v_driver_id, 'DRIVER_ASSIGNED');
 
     RETURN jsonb_build_object('success', true, 'code', 'ASSIGNMENT_SUCCESSFUL', 'message', 'Entrega adjudicada con éxito.', 'delivery_id', v_delivery_id);
+EXCEPTION
+    WHEN unique_violation THEN
+        RETURN jsonb_build_object('success', false, 'code', 'DRIVER_ALREADY_BUSY', 'message', 'Violación de concurrencia: Ya posees una entrega comprometida.');
 END;
 $$;
 ```

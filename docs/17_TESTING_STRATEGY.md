@@ -1,36 +1,37 @@
 # 17 — ESTRATEGIA DE PRUEBAS Y CALIDAD (TESTING STRATEGY)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Estrategia de Pruebas Ampliada, Concurrencia Dual, RLS, Custodia, Ledger y Resiliencia  
 
 ---
 
-## 1. Cobertura Mínima Exigida
+## 1. Cobertura y Foco de Calidad
 
-| Capa | Herramienta | Cobertura | Foco Principal |
-| :--- | :--- | :--- | :--- |
-| **Lógica de Dominio** | **Jest / Vitest** | **95%** | Máquina de estados, scoring, precios y ledger. |
-| **Base de Datos & RLS** | **pgTAP (Supabase CLI)**| **90%** | Políticas RLS, aislamiento de membresías y esquemas `private`. |
-| **Funciones Atómicas DB**| **pgTAP / PL/pgSQL Test** | **100%** | Test de Concurrencia Dual `accept_delivery_offer` con identidades autenticadas. |
+* **Lógica Crítica de Dominio:** Cobertura exhaustiva de máquina de estados, scoring de despacho, motor de precios y ledger contable.
+* **Invariantes Arquitectónicas Absolutas:** Cobertura del **100% de los escenarios e invariantes críticas de seguridad, concurrencia y custodia**.
 
 ---
 
-## 2. Catálogo Ampliado de Casos de Prueba
+## 2. Catálogo Ampliado de Escenarios de Prueba Obligatorios
 
-### 2.1 Pruebas de Máquina de Estados y Despacho
-* **Valid/Forbidden Transitions:** Verificar que una entrega en `TO_PICKUP` no pueda saltar directamente a `DELIVERED`.
-* **Concurrencia Invariante A:** Dos `auth.uid()` distintos aceptan la misma oferta simultáneamente (`1 success`, `1 409 Conflict`).
-* **Concurrencia Invariante B:** El mismo `auth.uid()` acepta dos ofertas simultáneas (`1 success`, `1 DRIVER_ALREADY_BUSY`).
-* **Conductor Suspendido / GPS Stale:** Rechazo de adjudicación a conductores inactivos o con GPS no actualizado.
+### 2.1 Pruebas de Seguridad y Privacidad de Secretos
+* **Business cannot retrieve OTP:** Verificar que las APIs de comercio no retornen el OTP en ningún DTO.
+* **Admin cannot retrieve OTP:** Verificar que las vistas/APIs administrativas no retornen el OTP.
+* **Driver cannot retrieve OTP:** Verificar que los endpoints del motorizado reboten cualquier intento de lectura de OTP.
+* **Customer OTP Access:** Validar que `GET /api/v1/tracking/{token}/otp` sea el único punto que descifre el OTP durante estados autorizados (`PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`).
+* **Payout Method Privacy:** Verificar que los métodos de retiro bancario no expongan cuentas en texto plano (`driver_payout_methods`).
 
-### 2.2 Pruebas de RLS & Esquemas Privados
-* **Aislamiento Multi-Comercio:** Un usuario de Empresa A no puede leer entregas de Empresa B.
-* **Inaccesibilidad de `private`:** Peticiones directas con token anon/authenticated a `private.delivery_secrets` son rebotadas por la API REST.
-* **Scope de Sucursal:** `business_manager` solo accede a entregas de su `location_scope`.
+### 2.2 Pruebas de Custodia y Concurrencia Dual
+* **Pickup Business Confirmation:** Verificar que la transferencia de custodia a `PICKED_UP` solo ocurra cuando un miembro del negocio valide `pickup_code_digest`.
+* **Driver cannot self-confirm pickup:** Verificar que los endpoints del conductor rechacen autopromociones a `PICKED_UP`.
+* **Same driver two deliveries:** Verificar rechazo (`DRIVER_ALREADY_BUSY`) al intentar adjudicar una 2da entrega activa al mismo conductor.
+* **Two drivers same delivery:** Verificar resolución atómica (`1 200 OK`, `1 409 Conflict`) cuando dos conductores aceptan la misma oferta en paralelo.
+* **RETURNING blocks new offer:** Verificar que un conductor en estado `RETURNING` sea bloqueado de recibir/aceptar nuevas ofertas.
+* **Suspended driver in custody:** Verificar que un conductor suspendido post-pickup solo pueda ejecutar el flujo de resolución de custodia (Devolución/Handoff).
 
-### 2.3 Pruebas de Custodia, OTP y Ledger
-* **Resguardo de OTP:** `GET /api/v1/tracking/{token}/otp` es el único endpoint que retorna el OTP. Verificación de bloqueo de 2 min tras 3 fallos en `verify-otp`.
-* **Invariante Zero-Sum:** Validar que todo asiento contable cumpla $\sum \text{postings.amount} = 0$.
-* **Reutilización de Idempotency Key:** Verificar error `422 IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD` al cambiar el payload.
+### 2.3 Pruebas de Cotización, Ledger y Resiliencia
+* **Request 1:N Quotes:** Validar que una solicitud pueda generar múltiples cotizaciones pero solo la consumida cree la entrega.
+* **Ledger Sign Convention & Zero Sum:** Validar que todos los asientos cumplan la convención `+` Débito / `-` Crédito y $\sum \text{amount} = 0$.
+* **App Killed / Location Stale:** Verificar marcado de frescura `STALE/UNAVAILABLE` y emisión de alerta en Admin cuando cesan pings GPS.

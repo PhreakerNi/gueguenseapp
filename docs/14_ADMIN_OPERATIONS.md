@@ -1,42 +1,34 @@
 # 14 — OPERACIONES ADMINISTRATIVAS (ADMIN OPERATIONS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Panel de Control Administrativo (17 Módulos), Auditoría y Cuatro Ojos  
+**Dominio:** Panel de Control Administrativo (17 Módulos Especificados), Permisos y Cuatro Ojos Configurable  
 
 ---
 
 ## 1. Misión del Panel Güegüense Admin
 
-El panel **Güegüense Admin** (`/apps/admin-web`) es la consola operativa para la supervisión global, resolución de incidencias, control de devoluciones, traspasos de custodia y auditoría financiera.
+El panel **Güegüense Admin** (`apps/admin-web`) es la consola operativa para la supervisión global, resolución de incidencias, control de devoluciones, traspasos de custodia y auditoría financiera.
 
 ---
 
-## 2. Catálogo Canónico de Módulos Operativos (17 Módulos)
+## 2. Especificación Completa por Módulo Operativo (17 Módulos)
 
-1. **Dashboard KPIs (`/admin/dashboard`):** Métricas en tiempo real de asignación, tasa de éxito y volumen.
-2. **Live Operations Map (`/admin/map`):** Mapa interactivo de presencia de conductores (`AVAILABLE`, `BUSY`, `PAUSED`).
-3. **Gestión de Entregas (`/admin/deliveries`):** Vista en detalle de entregas activas, filtros y trazabilidad de eventos.
-4. **Gestión de Conductores (`/admin/drivers`):** Control de expediente, estado de verificación y estado de cuenta.
-5. **Gestión de Comercios (`/admin/businesses`):** Administración de empresas, sucursales y miembros.
-6. **Verification Queue (`/admin/verifications`):** Auditoría de documentos presentados con URLs firmadas temporales (15 min).
-7. **Incident Queue (`/admin/incidents`):** Mesa de control para atender e investigar registros en `incidents`.
-8. **Control de Devoluciones (`/admin/returns`):** Supervisión de paquetes en ruta de retorno (`RETURNING`) a la sucursal.
-9. **Controlled Handoffs (`/admin/handoffs`):** Autorización de traspasos presenciales de custodia entre motorizados (`custody_handoffs`).
-10. **Centro de Soporte (`/admin/support`):** Atención de tickets operativos de comercios y motorizados (`support_tickets`).
-11. **Pricing & Zonas (`/admin/pricing`):** Configuración de tarifas base, recargos y polígonos geoespaciales PostGIS.
-12. **Gestión de Pagos (`/admin/payments`):** Control de recargas de saldo prepagado de negocios.
-13. **Vistas de Ledger (`/admin/ledger`):** Inspección de partida doble (`ledger_transactions` y `ledger_postings`).
-14. **Aprobación de Payouts (`/admin/payouts`):** Autorización de retiros de ganancias de conductores con regla de **Cuatro Ojos** para montos elevados.
-15. **Cash Settlements (`/admin/cash`):** Rendición de cuentas de efectivo recaudado en mano (`cash_settlements`).
-16. **Módulo de Suspensiones (`/admin/suspensions`):** Bloqueo/desbloqueo justificado de cuentas con requisito de motivo (`reason`).
-17. **Logs de Auditoría (`/admin/audit`):** Log inmutable de acciones administrativas registradas en `audit_logs`.
-
----
-
-## 3. Protocolo de Seguridad para Acciones Sensibles
-
-* **Justificación Obligatoria (`reason`):** Toda acción destructiva o de modificación de estado requiere ingresar una justificación escrita guardada en `audit_logs`.
-* **Aprobación de Cuatro Ojos (Four-Eyes Approval):** Ajustes financieros manuales (`MANUAL_ADJUSTMENT`) o Payouts mayores a C$ 5,000.00 NIO requieren la aprobación de un segundo administrador.
-* **Autenticación Step-Up (MFA):** Requerida para cambios de configuración de tarifas globales o suspensiones de comercios.
+1. **Dashboard KPIs (`/admin/dashboard`):** Rol Mínimo: `operator`. Acciones: Lectura de métricas. Audit: N/A.
+2. **Live Operations Map (`/admin/map`):** Rol Mínimo: `operator`. Acciones: Monitoreo de presencia (`AVAILABLE`, `BUSY`, `PAUSED`). Audit: N/A.
+3. **Gestión de Entregas (`/admin/deliveries`):** Rol Mínimo: `operator`. Acciones: Ver detalle y eventos. Destructiva: Cancelación forzada (`reason` obligatorio, Audit log).
+4. **Gestión de Conductores (`/admin/drivers`):** Rol Mínimo: `operator`. Acciones: Ver perfil. Destructiva: Suspensión (`reason` obligatorio, Audit log).
+5. **Gestión de Comercios (`/admin/businesses`):** Rol Mínimo: `admin`. Acciones: Ver empresas/sucursales. Destructiva: Suspensión comercial (`reason` obligatorio, MFA).
+6. **Verification Queue (`/admin/verifications`):** Rol Mínimo: `verification_agent`. Acciones: Aprobar/Rechazar expedientes con URLs firmadas (15 min). Audit log.
+7. **Incident Queue (`/admin/incidents`):** Rol Mínimo: `operator`. Acciones: Resolver incidentes (`RESOLVED_CONTINUE`, `RESOLVED_RETURN`, `RESOLVED_HANDOFF`). Audit log.
+8. **Control de Devoluciones (`/admin/returns`):** Rol Mínimo: `operator`. Acciones: Autorizar y supervisar devoluciones (`RETURN_REQUIRED`). Audit log.
+9. **Controlled Handoffs (`/admin/handoffs`):** Rol Mínimo: `operator`. Acciones: Autorizar traspasos presenciales (`custody_handoffs`). Audit log.
+10. **Centro de Soporte (`/admin/support`):** Rol Mínimo: `operator`. Acciones: Responder tickets de soporte. Audit log.
+11. **Pricing & Zonas (`/admin/pricing`):** Rol Mínimo: `admin`. Acciones: Configurar matrices y polígonos PostGIS. MFA requerido. Audit log.
+12. **Gestión de Pagos (`/admin/payments`):** Rol Mínimo: `admin`. Acciones: Aprobar saldo prepagado. Audit log.
+13. **Vistas de Ledger (`/admin/ledger`):** Rol Mínimo: `admin`. Acciones: Consulta de partida doble. Audit log.
+14. **Aprobación de Payouts (`/admin/payouts`):** Rol Mínimo: `admin`. Acciones: Aprobar retiros. Requisito de **Cuatro Ojos Configurable** para montos elevados (`configurable threshold`, ej: > C$ 5,000.00 NIO). Audit log.
+15. **Cash Settlements (`/admin/cash`):** Rol Mínimo: `admin`. Acciones: Rendición de cuentas de efectivo cobrado en mano. Audit log.
+16. **Módulo de Suspensiones (`/admin/suspensions`):** Rol Mínimo: `admin`. Acciones: Bloqueo/desbloqueo de cuentas. Requisito estricto de `reason` y MFA. Audit log.
+17. **Logs de Auditoría (`/admin/audit`):** Rol Mínimo: `super_admin`. Acciones: Lectura inmutable de `audit_logs`.

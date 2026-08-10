@@ -1,85 +1,69 @@
 # 07 — CONTRATOS DE API Y ENDPOINTS (API CONTRACTS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Especificación de Interfaces REST, Endpoints, DTOs, Idempotencia y Reglas de OTP  
+**Dominio:** Especificación de Interfaces REST, Endpoints por Dominio, DTOs e Idempotencia  
 
 ---
 
 ## 1. Estándares Globales de la API
 
 * **Autenticación:** `Authorization: Bearer <SUPABASE_JWT_TOKEN>`.
-* **Idempotencia Obligatoria:** Peticiones mutativas críticas (`POST /api/v1/deliveries`, `POST /api/v1/driver/offers/{id}/accept`, `POST /api/v1/deliveries/{id}/verify-otp`, `POST /api/v1/payouts`) EXIGEN el encabezado `Idempotency-Key: <UUID-V4-VÁLIDO>`. Reutilizar la misma llave con payload distinto produce `422 IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD`.
-* **Regla Canónica de OTP:** El `DELIVERY_OTP` **NUNCA se retorna a la app del Conductor, Negocio ni Admin.** Solamente se expone al destinatario autenticado mediante su token de seguimiento en el endpoint customer-scoped `GET /api/v1/tracking/{token}/otp`.
+* **Idempotencia Obligatoria:** Encabezado `Idempotency-Key: <UUID-V4>` en todas las mutaciones críticas. La reutilización de una llave con payload distinto produce `422 IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD`.
+* **Regla Canónica de OTP:** El `DELIVERY_OTP` **NUNCA se retorna a Driver, Negocio ni Admin.** Solamente se expone al destinatario en `GET /api/v1/tracking/{token}/otp` descifrando `otp_ciphertext` durante estados de entrega autorizados (`PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`).
 
 ---
 
-## 2. Contratos Detallados por Dominio
+## 2. Matriz Completa de Endpoints por Dominio
 
-### 2.1 Dominio: Conductor (`/api/v1/driver`)
+### 2.1 Dominio: Conductor (`apps/driver-mobile`)
+* `POST /api/v1/driver/onboarding`: Registro de expediente del conductor.
+* `POST /api/v1/driver/documents/upload-authorization`: Solicitud de URL firmada para subida de cédula/licencia.
+* `POST /api/v1/driver/documents`: Registro de metadata de documento subido.
+* `POST /api/v1/driver/vehicles`: Registro de motocicleta.
+* `POST /api/v1/driver/availability`: Alternar disponibilidad (`AVAILABLE` / `OFFLINE`).
+* `GET  /api/v1/driver/state`: Consulta de presencia y estado operativo.
+* `GET  /api/v1/driver/offers/active`: Sincronización de ofertas activas en re-conexión.
+* `POST /api/v1/driver/offers/{id}/accept`: Aceptación atómica de oferta (Idempotente, Stored Procedure).
+* `POST /api/v1/driver/offers/{id}/reject`: Rechazo de oferta de viaje.
+* `GET  /api/v1/driver/deliveries/active`: Consulta de entrega comprometida en curso.
+* `POST /api/v1/driver/deliveries/{id}/arrived-pickup`: Notificación de llegada a sucursal origen.
+* `POST /api/v1/driver/deliveries/{id}/arrived-dropoff`: Notificación de llegada a domicilio destinatario.
+* `POST /api/v1/driver/deliveries/{id}/verify-otp`: Validación de OTP (Idempotente, 3 intentos max).
+* `POST /api/v1/driver/deliveries/{id}/incidents`: Reporte de incidencia en ruta.
+* `POST /api/v1/driver/deliveries/{id}/return/start`: Iniciar ruta de retorno a sucursal.
+* `POST /api/v1/driver/location`: Ingesta de coordenadas GPS autenticadas.
+* `GET  /api/v1/driver/earnings`: Consulta de acumulado de ganancias.
+* `POST /api/v1/driver/payouts`: Solicitud de retiro de fondos (Idempotente).
 
-#### Endpoint: `POST /api/v1/driver/offers/{offer_id}/accept` (Aceptar Oferta de Viaje)
-* **Headers:** `Authorization: Bearer <JWT>`, `Idempotency-Key: a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d`
-* **Response (200 OK):**
-```json
-{
-  "success": true,
-  "delivery_id": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
-  "status": "DRIVER_ASSIGNED",
-  "pickup_code": "PK-8821",
-  "pickup_location": {
-    "business_name": "Farmacia La Buena Salud",
-    "address": "Plaza España 1c abajo",
-    "latitude": 12.131100,
-    "longitude": -86.270000
-  }
-}
-```
+### 2.2 Dominio: Negocio (`apps/business-mobile`)
+* `POST /api/v1/businesses`: Creación de registro comercial.
+* `PATCH /api/v1/businesses/{id}`: Actualización de datos de empresa.
+* `POST /api/v1/businesses/{id}/locations`: Alta de sucursales de recolección.
+* `POST /api/v1/businesses/{id}/members`: Invitación de miembros con asignación N:M de sucursales.
+* `POST /api/v1/quotes`: Solicitud de cálculo de cotización (`QUOTED`).
+* `POST /api/v1/deliveries`: Consumir quote e iniciar entrega (`SEARCHING_DRIVER`, Idempotente).
+* `GET  /api/v1/deliveries/{id}`: Detalle y estado en vivo de la entrega.
+* `POST /api/v1/business/deliveries/{id}/confirm-pickup-custody`: Validar `PICKUP_CODE` y pasar a `PICKED_UP`.
+* `POST /api/v1/deliveries/{id}/cancel`: Cancelación autorizada pre-pickup (Idempotente).
+* `GET  /api/v1/businesses/{id}/deliveries`: Historial de entregas del negocio.
+* `POST /api/v1/support/tickets`: Apertura de ticket de soporte.
 
-#### Endpoint: `POST /api/v1/driver/deliveries/{id}/verify-otp` (Confirmar Entrega por OTP)
-* **Headers:** `Authorization: Bearer <JWT>`, `Idempotency-Key: c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f`
-* **Request:** `{"otp": "482910"}`
-* **Response (200 OK):** `{"success": true, "status": "DELIVERED", "credited_earning": 45.00}`
-* **Response Error (400 / 423):** `{"success": false, "code": "OTP_LOCKED", "message": "Entrega bloqueada temporalmente por 3 intentos fallidos."}`
+### 2.3 Dominio: Tracking Web Destinatario (`apps/tracking-web`)
+* `GET /api/v1/tracking/{token}`: Obtener snapshot de la entrega vía Bearer Tracking Token.
+* `GET /api/v1/tracking/{token}/otp`: Endpoint customer-scoped para descifrar y visualizar el `DELIVERY_OTP` (6 dígitos).
 
----
-
-### 2.2 Dominio: Negocio (`/api/v1/business`)
-
-#### Endpoint: `POST /api/v1/business/deliveries/{id}/confirm-pickup-custody` (Confirmar Custodia Sucursal)
-* **Headers:** `Authorization: Bearer <JWT>`, `Idempotency-Key: d47ac10b-58cc-4372-a567-0e02b2c3d479`
-* **Request:** `{"pickup_code": "PK-8821"}`
-* **Response (200 OK):** `{"success": true, "status": "PICKED_UP", "custody_transferred_at": "2026-08-10T15:35:10Z"}`
-
----
-
-### 2.3 Dominio: Tracking Web del Cliente (`/api/v1/tracking/{token}`)
-
-#### Endpoint: `GET /api/v1/tracking/{token}` (Snapshot de Tracking)
-* **Response (200 OK):**
-```json
-{
-  "delivery_id": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
-  "status": "TO_DROPOFF",
-  "business_name": "Restaurante El Güegüense",
-  "driver": {
-    "full_name": "Juan Pérez",
-    "avatar_url": "https://gueguense.app/avatars/driver_12.jpg",
-    "vehicle_plate": "M-123456"
-  },
-  "driver_location": {
-    "latitude": 12.125000,
-    "longitude": -86.258000,
-    "freshness": "LIVE"
-  },
-  "eta_minutes": 7
-}
-```
-
-#### Endpoint: `GET /api/v1/tracking/{token}/otp` (Obtener OTP del Destinatario)
-* **Response (200 OK):** `{"delivery_otp": "482910", "expires_at": "2026-08-10T18:00:00Z"}`
-*(Único endpoint autorizado para exponer el `DELIVERY_OTP` descifrado desde `private.delivery_secrets.otp_ciphertext`).*
-
-#### Endpoint: `POST /api/v1/tracking/{token}/realtime-session` (Sesión Realtime Scoped)
-* **Response (200 OK):** `{"realtime_channel": "delivery:b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e", "scoped_token": "eyJhbGciOi..."}`
+### 2.4 Dominio: Administración y Finanzas (`apps/admin-web`)
+* `GET  /api/v1/admin/verifications`: Cola de auditoría de documentos de conductores.
+* `POST /api/v1/admin/drivers/{id}/approve`: Aprobar verificación de conductor.
+* `POST /api/v1/admin/drivers/{id}/suspend`: Suspender conductor con justificación `reason`.
+* `POST /api/v1/admin/businesses/{id}/suspend`: Suspender comercio con justificación `reason`.
+* `GET  /api/v1/admin/deliveries/live`: Mapa y lista de entregas activas.
+* `POST /api/v1/admin/incidents/{id}/resolve`: Resolución de incidente (`RESOLVED_CONTINUE`, `RESOLVED_RETURN`, `RESOLVED_HANDOFF`).
+* `POST /api/v1/admin/returns/{id}/authorize`: Autorización administrativa de devolución.
+* `POST /api/v1/admin/handoffs`: Autorización de traspaso presencial de custodia (`custody_handoffs`).
+* `POST /api/v1/admin/pricing/zones`: Crear/modificar polígonos geoespaciales de tarifa.
+* `POST /api/v1/admin/payouts/{id}/approve`: Aprobación de retiro (Cuatro Ojos para montos elevados).
+* `POST /api/v1/admin/cash-settlements`: Registro de rendición de cuentas de efectivo cobrado en mano.
+* `GET  /api/v1/admin/audit-logs`: Consulta de log inmutable de auditoría.

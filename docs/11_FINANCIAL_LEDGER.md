@@ -1,60 +1,54 @@
 # 11 — SISTEMA CONTABLE Y LEDGER FINANCIERO (FINANCIAL LEDGER)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Contabilidad Doble Entrada (Journal + Postings), 10 Ejemplos de Asientos y Moneda NIO  
+**Dominio:** Contabilidad Doble Entrada (Journal + Postings), Convención de Signos Firmados y Moneda NIO  
 
 ---
 
-## 1. Arquitectura de Partida Doble (Journal + Postings)
+## 1. Convención de Signos Firmados y Regla de Suma Cero
 
-Güegüense implementa una arquitectura contable de partida doble compuesta por **Transacciones (`ledger_transactions`)** y **Asientos (`ledger_postings`)**.
+Güegüense implementa una arquitectura de partida doble basada en **`ledger_transactions`** y **`ledger_postings`**.
 
-**Regla de Suma Cero (Zero-Sum Invariant):** En toda transacción, la suma algebraica de sus `ledger_postings` DEBE SER EXACTAMENTE CERO ($\sum \text{amount} = 0$).
+### Convención Única de Signos:
+* **`amount > 0` $\rightarrow$ DÉBITO (DEBIT)**
+* **`amount < 0` $\rightarrow$ CRÉDITO (CREDIT)**
+
+**Invariante de Suma Cero:** En toda transacción, la suma algebraica de sus `ledger_postings` DEBE SER EXACTAMENTE CERO ($\sum \text{amount} = 0$).
 
 ---
 
-## 2. Ejemplos Completos de Asientos Contables (10 Escenarios con Moneda `NIO`)
+## 2. Ejemplos Canónicos de Asientos Contables (Transacciones Unificadas en `NIO`)
 
-### 1. Entrega Normal Liquidada (C$ 100.00 Total)
-* **Débito:** `ASSET_BUSINESS_REC` $-100.00 \text{ NIO}$
-* **Crédito:** `LIABILITY_DRIVER` $+80.00 \text{ NIO}$
-* **Crédito:** `REVENUE_PLATFORM` $+20.00 \text{ NIO}$ (Suma: $0.00 \text{ NIO}$)
+### 1. Entrega Normal Liquidada (C$ 100.00 Total) — Single Journal Transaction
+* **Postings:**
+  * `ASSET_BUSINESS_REC` $\rightarrow$ $+100.00 \text{ NIO}$ (Débito: Cuenta por cobrar al comercio)
+  * `LIABILITY_DRIVER` $\rightarrow$ $-80.00 \text{ NIO}$ (Crédito: Cuenta por pagar al conductor)
+  * `REVENUE_PLATFORM` $\rightarrow$ $-20.00 \text{ NIO}$ (Crédito: Ingreso comisión Güegüense)
+  * **Suma total:** $+100.00 - 80.00 - 20.00 = 0.00 \text{ NIO}$
 
-### 2. Ganancia del Conductor (`DRIVER_EARNING`)
-* **Débito:** `ASSET_BUSINESS_REC` $-80.00 \text{ NIO}$
-* **Crédito:** `LIABILITY_DRIVER` $+80.00 \text{ NIO}$ (Suma: $0.00 \text{ NIO}$)
+### 2. Cobro de Efectivo en Mano por Conductor (C$ 500.00 Total)
+* **Postings:**
+  * `ASSET_DRIVER_CASH_RECEIVABLE` $\rightarrow$ $+500.00 \text{ NIO}$ (Débito: Efectivo del servicio en poder del motorizado)
+  * `ASSET_BUSINESS_REC` $\rightarrow$ $-500.00 \text{ NIO}$ (Crédito: Ajuste de cuenta por cobrar al negocio)
+  * **Suma total:** $+500.00 - 500.00 = 0.00 \text{ NIO}$
 
-### 3. Ingreso por Comisión Güegüense (`PLATFORM_REVENUE`)
-* **Débito:** `ASSET_BUSINESS_REC` $-20.00 \text{ NIO}$
-* **Crédito:** `REVENUE_PLATFORM` $+20.00 \text{ NIO}$ (Suma: $0.00 \text{ NIO}$)
+### 3. Rendición de Cuentas de Efectivo (`CASH_SETTLEMENT` C$ 500.00)
+* **Postings:**
+  * `BANK_PLATFORM` $\rightarrow$ $+500.00 \text{ NIO}$ (Débito: Depósito recibido en banco plataforma)
+  * `ASSET_DRIVER_CASH_RECEIVABLE` $\rightarrow$ $-500.00 \text{ NIO}$ (Crédito: Descarga de responsabilidad del conductor)
+  * **Suma total:** $+500.00 - 500.00 = 0.00 \text{ NIO}$
 
-### 4. Tarifa de Espera Excedida (`WAITING_FEE` C$ 15.00)
-* **Débito:** `ASSET_BUSINESS_REC` $-15.00 \text{ NIO}$
-* **Crédito:** `LIABILITY_DRIVER` $+15.00 \text{ NIO}$ (Suma: $0.00 \text{ NIO}$)
+### 4. Retiro de Ganancias de Conductor (`PAYOUT` C$ 1,000.00)
+* **Postings:**
+  * `LIABILITY_DRIVER` $\rightarrow$ $+1,000.00 \text{ NIO}$ (Débito: Cancelación de deuda con conductor)
+  * `BANK_PLATFORM` $\rightarrow$ $-1,000.00 \text{ NIO}$ (Crédito: Salida de banco plataforma)
+  * **Suma total:** $+1,000.00 - 1,000.00 = 0.00 \text{ NIO}$
 
 ### 5. Tarifa de Devolución (`RETURN_FEE` C$ 30.00)
-* **Débito:** `ASSET_BUSINESS_REC` $-30.00 \text{ NIO}$
-* **Crédito:** `LIABILITY_DRIVER` $+25.00 \text{ NIO}$
-* **Crédito:** `REVENUE_PLATFORM` $+5.00 \text{ NIO}$ (Suma: $0.00 \text{ NIO}$)
-
-### 6. Efectivo Recaudado por Conductor en Destino (`CASH_COLLECTED` C$ 500.00)
-* **Débito:** `ASSET_CASH_HELD` $+500.00 \text{ NIO}$ (El conductor sostiene el efectivo)
-* **Crédito:** `ASSET_BUSINESS_REC` $-500.00 \text{ NIO}$ (Suma: $0.00 \text{ NIO}$)
-
-### 7. Liquidación de Efectivo (`CASH_SETTLEMENT` C$ 500.00)
-* **Débito:** `BANK_PLATFORM` $+500.00 \text{ NIO}$
-* **Crédito:** `ASSET_CASH_HELD` $-500.00 \text{ NIO}$ (Suma: $0.00 \text{ NIO}$)
-
-### 8. Retiro de Ganancias de Conductor (`PAYOUT` C$ 1,000.00)
-* **Débito:** `LIABILITY_DRIVER` $-1,000.00 \text{ NIO}$
-* **Crédito:** `BANK_PLATFORM` $+1,000.00 \text{ NIO}$ (Suma: $0.00 \text{ NIO}$)
-
-### 9. Reembolso a Comercio (`REFUND` C$ 100.00)
-* **Débito:** `REVENUE_PLATFORM` $-100.00 \text{ NIO}$
-* **Crédito:** `ASSET_BUSINESS_REC` $+100.00 \text{ NIO}$ (Suma: $0.00 \text{ NIO}$)
-
-### 10. Ajuste Manual Administrativo (`MANUAL_ADJUSTMENT` C$ 50.00)
-* **Débito:** `BANK_PLATFORM` $-50.00 \text{ NIO}$
-* **Crédito:** `LIABILITY_DRIVER` $+50.00 \text{ NIO}$ (Suma: $0.00 \text{ NIO}$)
+* **Postings:**
+  * `ASSET_BUSINESS_REC` $\rightarrow$ $+30.00 \text{ NIO}$ (Débito: Recargo cobrado al negocio)
+  * `LIABILITY_DRIVER` $\rightarrow$ $-25.00 \text{ NIO}$ (Crédito: Acreditación al conductor por retorno)
+  * `REVENUE_PLATFORM` $\rightarrow$ $-5.00 \text{ NIO}$ (Crédito: Margen plataforma)
+  * **Suma total:** $+30.00 - 25.00 - 5.00 = 0.00 \text{ NIO}$

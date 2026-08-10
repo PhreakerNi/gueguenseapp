@@ -1,48 +1,37 @@
 # 10 — MOTOR DE PRECIOS Y AJUSTES (PRICING ENGINE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Tarificación Dinámica, Precios Cotizados vs. Finales y Ajustes  
+**Dominio:** Tarificación Dinámica, Precios Cotizados vs. Finales, Umbrales Configurables y Resiliencia  
 
 ---
 
 ## 1. Distinción Entre `quoted_price` y `final_price`
 
-1. **`quoted_price`:** Tarifa estimada calculada al crear la cotización (`QUOTED`), basada en la distancia teórica y tiempo estimado original.
+1. **`quoted_price`:** Tarifa estimada calculada al crear la cotización (`QUOTED`), basada en la distancia teórica vial y tiempo estimado original.
 2. **`final_price`:** Monto total real a liquidar tras concluir la entrega, que resulta de la consolidación de `quoted_price` más o menos la lista de **Ajustes de Tarifa (`pricing_adjustments`)**.
 
 $$\text{final\_price} = \text{quoted\_price} + \sum \text{pricing\_adjustments}$$
 
 ---
 
-## 2. Entidad Canónica de Ajustes de Tarifa (`pricing_adjustments`)
+## 2. Umbrales Operativos Configurables (`Configurable Policies / Initial Defaults`)
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│             TIPOS CANÓNICOS DE AJUSTES (`PRICING_ADJUSTMENT_TYPE`)     │
-├───────────────────┬────────────────────────────────────────────────────┤
-│ `WAITING_FEE`     │ Tiempo de espera excedido en sucursal (>5 min)     │
-├───────────────────┼────────────────────────────────────────────────────┤
-│ `RETURN_FEE`      │ Tarifa adicional por retorno de custodia           │
-├───────────────────┼────────────────────────────────────────────────────┤
-│ `CANCEL_FEE`      │ Penalización por cancelación tardía                │
-├───────────────────┼────────────────────────────────────────────────────┤
-│ `DISCOUNT`        │ Promociones o cupones aplicados al negocio         │
-├───────────────────┼────────────────────────────────────────────────────┤
-│ `SUBSIDY`         │ Bonificación o subsidio aportado por Güegüense     │
-├───────────────────┼────────────────────────────────────────────────────┤
-│ `MANUAL_ADJUSTMENT│ Ajuste manual de arbitraje autorizado por Admin    │
-└───────────────────┴────────────────────────────────────────────────────┘
-```
+Los siguientes valores representan parámetros de configuración iniciales del sistema (no invariantes hardcoded):
+* **Quote Expiry:** 5 minutos (`initial default`).
+* **Offer Timeout:** 15 segundos (`initial default`).
+* **Waiting Grace Period:** 5 minutos (`initial default`).
+* **Waiting Timeout:** 15 minutos (`initial default`).
+* **Four-Eyes Approval Threshold:** C$ 5,000.00 NIO (`initial default`).
 
 ---
 
-## 3. Reconciliación Financiera
+## 3. Resiliencia ante Fallas del Proveedor de Mapas (Routes API)
 
-La fórmula de reconciliación contable exacta al finalizar el servicio es:
+PostGIS / Haversine se utilizan **exclusivamente para filtrado grueso de candidatos y estimación de proximidad**.
 
-$$\text{final\_price} = \text{driver\_earning} + \text{platform\_revenue} \pm \text{ajustes\_terceros}$$
-
-* **Tiempo de Espera (`WAITING_FEE`):** Acredita 100% de la tarifa de espera al conductor.
-* **Tarifa de Retorno (`RETURN_FEE`):** Se suma al `final_price` cobrado al negocio y se acredita al motorizado por el trayecto de regreso.
+**REGLA EN CASO DE FALLO DE GOOGLE ROUTES API:** Si la API de rutas no responde durante la generación de una cotización oficial:
+1. Se intenta recuperar un cálculo en cache válido para el par de origen/destino.
+2. Se ejecuta un re-intento controlado con timeout estricto.
+3. Si la falla persiste, el sistema notifica temporalmente que la cotización no está disponible. **SE PROHIBE FACTURAR UNA COTIZACIÓN OFICIAL EN LÍNEA RECTA (HAVERSINE) DE FORMA SILENCIOSA.**

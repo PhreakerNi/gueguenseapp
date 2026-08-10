@@ -1,9 +1,9 @@
 # 01 — ESPECIFICACIÓN DE PRODUCTO (PRODUCT SPECIFICATION)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Especificación de Producto, Alcance B2B, KPIs, Criterios de Éxito e Invariantes  
+**Dominio:** Especificación de Producto, 4 Aplicaciones Canónicas, KPIs e Invariantes  
 
 ---
 
@@ -17,34 +17,29 @@ en el menor número de interacciones y segundos posibles.
 
 ---
 
-## 2. Definición del Problema y Supuestos Operativos Iniciales
+## 2. Aplicaciones Canónicas del Proyecto (4 Apps)
 
-Los comercios locales (restaurantes, farmacias, tiendas boutique, e-commerce, distribuidores, emprendedores) enfrentan fricciones severas en la logística de última milla:
-1. **Dependencia de flotas propias costosas:** Mantenimiento vehicular e ineficiencias en horas valle.
-2. **Limitaciones de marketplaces tradicionales:** Comisiones del 20%-35% y obligación de cargar catálogos.
-3. **Inseguridad e informalidad:** Riesgo de pérdida de mercadería y falta de liquidación de efectivo recaudado.
-4. **Falta de visibilidad:** Incertidumbre sobre la ruta en tiempo real.
+El ecosistema de software está compuesto de forma exclusiva por 4 aplicaciones:
 
-### Supuestos Operativos Iniciales (`INITIAL OPERATING ASSUMPTIONS`):
-* El motorizado promedio realiza entregas urbanas en un radio de 1 a 12 kilómetros.
-* El pago de la entrega se realiza mediante saldo prepagado/crédito del negocio o cobro en efectivo en destino.
-* Las notificaciones push se consideran alertas secundarias best-effort; la base de datos PostgreSQL es la fuente de verdad.
+1. **`apps/business-mobile`:** App móvil React Native (Expo) para comercios. Solicitud, cotización, seguimiento y confirmación de custodia.
+2. **`apps/driver-mobile`:** App móvil React Native (Expo) para motorizados. Recepción de ofertas, navegación, verificación de custodia y entrega OTP.
+3. **`apps/admin-web`:** Panel de control Web Next.js (Supabase SSR) para administradores y operadores de la plataforma.
+4. **`apps/tracking-web`:** Web Next.js de seguimiento para el cliente destinatario, **sin registro de cuenta pero protegida por un bearer tracking token de alta entropía**.
 
 ---
 
 ## 3. Alcance del Proyecto (`MVP SCOPE`)
 
 ### 3.1 Dentro del Alcance MVP (`MVP IN SCOPE`)
-* **Modalidad Solo Delivery B2B:** Contratación directa de envíos sin necesidad de catálogo previo de productos.
-* **App Güegüense Negocios (Mobile & Web):** Cotización instantánea (`QUOTED`), confirmación, seguimiento y gestión de sucursales.
-* **App Güegüense Motorizado (Mobile):** Recepción atómica de ofertas, navegación, verificación de custodia por `PICKUP_CODE` y confirmación por `DELIVERY_OTP`.
-* **Güegüense Admin (Web):** Mesa de control de operaciones en vivo, verificación de documentos, gestión de incidentes y devoluciones.
-* **Portal de Tracking Web Público:** Seguimiento para el destinatario con `DELIVERY_OTP` (6 dígitos) resguardado.
+* **Modalidad Solo Delivery B2B:** Contratación directa de envíos sin catálogo previo de productos.
+* **App Güegüense Negocios (`business-mobile`):** Cotización instantánea (`QUOTED`), confirmación, seguimiento y gestión de sucursales.
+* **App Güegüense Motorizado (`driver-mobile`):** Recepción atómica de ofertas, navegación, verificación de custodia por `PICKUP_CODE` y confirmación por `DELIVERY_OTP`.
+* **Güegüense Admin (`admin-web`):** Mesa de control de operaciones en vivo, verificación de documentos, gestión de incidentes y devoluciones.
+* **Portal de Tracking Web (`tracking-web`):** Seguimiento mediante bearer token con acceso restringido al `DELIVERY_OTP` de 6 dígitos.
 
 ### 3.2 Fuera del Alcance MVP (`MVP OUT OF SCOPE / POST-MVP`)
-* **Modalidad Catálogo / Menú Directo (Post-MVP):** Creación de tiendas públicas y menús digitales de productos.
-* **Entregas Multiparada / Envíos Masivos Batch:** Algoritmos de optimización de rutas con más de 1 punto de recogida y múltiples entregas simultáneas por conductor.
-* **Vehículos Pesados / Camiones:** Exclusividad de vehículos de dos ruedas (motocicletas) en la fase inicial.
+* **Modalidad Catálogo / Menú Directo (Fase 9 Post-MVP):** Creación de tiendas públicas y menús digitales de productos.
+* **Entregas Multiparada / Batch:** Optimización de rutas con múltiples recogidas o entregas simultáneas por conductor.
 
 ---
 
@@ -58,8 +53,6 @@ Los comercios locales (restaurantes, farmacias, tiendas boutique, e-commerce, di
 * **Average Pickup Wait:** Tiempo transcurrido entre `ARRIVED_PICKUP` y `PICKED_UP`.
 * **Stale Tracking Rate:** Frecuencia de pérdida de señal GPS (> 60 segundos sin actualización).
 * **Incident Rate:** Porcentaje de entregas con registros de incidencias en `incidents`.
-
-*(Nota: Los valores objetivo numéricos específicos de cada KPI se definirán formalmente en el entorno de pruebas de la Fase 1).*
 
 ---
 

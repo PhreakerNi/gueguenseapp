@@ -1,7 +1,7 @@
 # 21 — MATRIZ CANÓNICA DE ENUMS Y DICCIONARIO DE ESTADOS (CANONICAL ENUMS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.3.0-phase0  
+**Versión:** 1.4.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Matriz Canónica de Estados, Tipos y Enumeradores de Dominio Nombres Completos Sin Abreviaciones  
 
@@ -111,7 +111,7 @@ Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) utili
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 14. EVENT_TYPE (Nombres Completos)                                     │
+│ 14. EVENT_TYPE (Nombres Completos Canónicos)                           │
 ├────────────────────────────────────────────────────────────────────────┤
 │ `DELIVERY_CREATED`, `SEARCH_STARTED`, `OFFER_CREATED`, `OFFER_ACCEPTED`,│
 │ `DRIVER_ASSIGNED`, `TO_PICKUP_STARTED`, `ARRIVED_PICKUP`,              │
@@ -120,6 +120,11 @@ Este documento centraliza la totalidad de los valores enumerados (`ENUMS`) utili
 │ `RETURN_STARTED`, `RETURN_COMPLETED`, `HANDOFF_STARTED`,               │
 │ `HANDOFF_COMPLETED`, `INCIDENT_OPENED`, `INCIDENT_RESOLVED`,           │
 │ `DRIVER_UNASSIGNED`, `DELIVERY_CANCELED`, `DELIVERY_FAILED`,           │
-│ `QUOTE_CONSUMED`, `OFFER_EXPIRED`, `OFFER_REJECTED`.                   │
+│ `QUOTE_CALCULATED`, `QUOTE_CONSUMED`, `QUOTE_EXPIRED`, `QUOTE_CANCELED`,│
+│ `OFFER_EXPIRED`, `OFFER_REJECTED`, `OFFER_CANCELED`,                   │
+│ `SEARCH_EXPANDED`, `MAPS_FALLBACK_USED`, `WAITING_STARTED`,            │
+│ `OTP_ATTEMPT_FAILED`, `OTP_LOCKED`, `PAYMENT_FAILED`,                  │
+│ `DRIVER_SUSPENDED`, `BUSINESS_SUSPENDED`, `RETURN_AUTHORIZED`,         │
+│ `CUSTODY_RETURNED`, `HANDOFF_ABORTED`.                                 │
 └────────────────────────────────────────────────────────────────────────┘
 ```
