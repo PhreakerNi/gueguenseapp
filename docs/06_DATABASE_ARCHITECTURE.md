@@ -2,126 +2,124 @@
 
 **Proyecto:** Güegüense  
 **Versión:** 1.0.0-phase0  
-**Dominio:** Modelo Relacional PostgreSQL, PostGIS, Índices Geoespaciales y Políticas RLS  
+**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
+**Dominio:** Esquema Relacional PostgreSQL, PostGIS, Integración con `auth.users`, Índices y Políticas RLS  
 
 ---
 
-## 1. Diseñando el Esquema Relacional
+## 1. Modelo de Datos Unificado
 
-El modelo de datos de Güegüense está optimizado para integridad contable, rapidez en consultas geoespaciales y aislamiento estricto mediante **Row Level Security (RLS)**.
+El modelo relacional de Güegüense se integra directamente con **Supabase Auth (`auth.users`)**, desacoplando perfiles de plataforma, miembros de negocios y conductores.
 
 ```text
-┌────────────────┐      ┌────────────────┐      ┌────────────────┐
-│     users      ├─────►│    profiles    ├─────►│   businesses   │
-└────────────────┘      └────────────────┘      └───────┬────────┘
-                                                        │
-                        ┌────────────────┐              │ 1:N
-                        │driver_presence │              ▼
-                        └───────▲────────┘      ┌────────────────┐
-                                │               │business_locat. │
-                        ┌───────┴────────┐      └───────┬────────┘
-                        │    drivers     │              │
-                        └───────▲────────┘              │ 1:N
-                                │                       ▼
-┌────────────────┐      ┌───────┴────────┐      ┌────────────────┐
-│ delivery_offers│◄─────┤   deliveries   │◄─────┤delivery_requests│
-└────────────────┘      └───────┬────────┘      └────────────────┘
-                                │
-                        ┌───────┴────────┐
-                        │ledger_entries  │
-                        └────────────────┘
+                           ┌──────────────────┐
+                           │    auth.users    │ (Identity Provider)
+                           └────────┬─────────┘
+                                    │
+       ┌────────────────────────────┼────────────────────────────┐
+       │ (1:1)                      │ (1:N)                      │ (1:1)
+┌──────▼───────────┐      ┌─────────▼─────────┐        ┌─────────▼─────────┐
+│  public.profiles │      │ business_members  │        │   public.drivers  │
+└──────────────────┘      └─────────┬─────────┘        └─────────┬─────────┘
+                                    │ (N:1)                      │
+                          ┌─────────▼─────────┐                  │
+                          │    businesses     │                  │
+                          └─────────┬─────────┘                  │
+                                    │ (1:N)                      │
+                          ┌─────────▼─────────┐                  │
+                          │business_locations │                  │
+                          └─────────┬─────────┘                  │
+                                    │ (1:N)                      │
+                          ┌─────────▼─────────┐                  │
+                          │ delivery_requests │                  │
+                          └─────────┬─────────┘                  │
+                                    │ (1:1)                      │
+                          ┌─────────▼─────────┐                  │
+                          │    deliveries     ├──────────────────┘ (1:N)
+                          └─────────┬─────────┘
+                                    │
+                                    ├──────────────────────────┐
+                                    │                          │
+                          ┌─────────▼─────────┐      ┌─────────▼─────────┐
+                          │   ledger_entries  │      │     incidents     │
+                          └───────────────────┘      └───────────────────┘
 ```
 
 ---
 
-## 2. Definición Detallada de Tablas / Entidades
+## 2. Catálogo Completo de Entidades del Sistema
 
-### 2.1 Dominio de Autenticación y Perfiles
+### 2.1 Dominio de Usuarios y Membresías
 
-#### Tabla: `users` (Manejada por Supabase Auth)
-* **Descripción:** Credenciales y registro base de la plataforma.
-* **Columnas:** `id` (UUID, PK), `email` (Text, Unique), `phone` (Text, Unique), `created_at` (TIMESTAMPTZ).
+#### Tabla: `public.profiles`
+* **Propósito:** Almacena información de perfil general e identificadores de roles de plataforma.
+* **Columnas:** `id` (UUID, PK, FK `auth.users.id` ON DELETE CASCADE), `platform_role` (ENUM: `super_admin`, `admin`, `operator`, `verification_agent`, `none`), `full_name` (Text), `avatar_url` (Text), `phone` (Text), `created_at` (TIMESTAMPTZ).
+* **Constraints:** `UNIQUE(id)`.
+* **RLS:** El usuario lee su propio perfil. Roles de plataforma leen según nivel.
 
-#### Tabla: `profiles`
-* **Descripción:** Datos personales comunes a todos los usuarios.
-* **Columnas:** `id` (UUID, PK, FK `users.id`), `role` (ENUM: `super_admin`, `admin`, `operator`, `verification_agent`, `business_owner`, `business_manager`, `business_employee`, `driver`), `full_name` (Text), `avatar_url` (Text), `status` (Text), `created_at` (TIMESTAMPTZ).
-* **RLS Strategy:** El usuario lee su propio perfil. Administradores leen todos.
+#### Tabla: `public.businesses`
+* **Propósito:** Entidad comercial de la empresa cliente.
+* **Columnas:** `id` (UUID, PK), `legal_name` (Text), `brand_name` (Text), `tax_id` (Text), `status` (ENUM: `REGISTERED`, `UNDER_REVIEW`, `ACTIVE`, `SUSPENDED`), `created_at` (TIMESTAMPTZ).
+* **Lifecycle:** `REGISTERED` $\rightarrow$ `UNDER_REVIEW` $\rightarrow$ `ACTIVE` (o `SUSPENDED`).
 
----
+#### Tabla: `public.business_members`
+* **Propósito:** Relación de membresía N:M entre un usuario (`auth.users`) y un negocio (`businesses`).
+* **Columnas:** `id` (UUID, PK), `business_id` (UUID, FK `businesses.id`), `user_id` (UUID, FK `auth.users.id`), `role` (ENUM: `business_owner`, `business_manager`, `business_employee`), `status` (ENUM: `ACTIVE`, `INVITED`, `SUSPENDED`), `created_at` (TIMESTAMPTZ).
+* **Constraints:** `UNIQUE(business_id, user_id)`.
 
-### 2.2 Dominio de Negocios y Sucursales
-
-#### Tabla: `businesses`
-* **Descripción:** Registro comercial de las empresas clientes.
-* **Columnas:** `id` (UUID, PK), `owner_id` (UUID, FK `profiles.id`), `legal_name` (Text), `brand_name` (Text), `tax_id` (Text), `phone` (Text), `status` (ENUM: `REGISTERED`, `UNDER_REVIEW`, `ACTIVE`, `SUSPENDED`), `created_at` (TIMESTAMPTZ).
-* **RLS Strategy:** `business_owner` gestiona solo su `id`. Admin gestiona todos.
-
-#### Tabla: `business_locations` (Sucursales)
-* **Descripción:** Puntos de recogida y sedes operativas de un negocio.
-* **Columnas:** `id` (UUID, PK), `business_id` (UUID, FK `businesses.id`), `name` (Text), `address_text` (Text), `location` (GEOGRAPHY(Point, 4326)), `pickup_instructions` (Text), `phone` (Text), `is_active` (Boolean).
-* **Índices:** `GIST(location)` para búsqueda espacial cercana.
+#### Tabla: `public.business_locations` (Sucursales)
+* **Propósito:** Sedes físicas de recogida.
+* **Columnas:** `id` (UUID, PK), `business_id` (UUID, FK `businesses.id`), `name` (Text), `address_text` (Text), `location` (GEOGRAPHY(Point, 4326)), `pickup_instructions` (Text), `is_active` (Boolean).
+* **Índices:** `GIST(location)`.
 
 ---
 
-### 2.3 Dominio de Motorizados y Flota
+### 2.2 Dominio de Conductores y Flota
 
-#### Tabla: `drivers`
-* **Descripción:** Perfil operativo y legal del conductor de delivery.
-* **Columnas:** `id` (UUID, PK, FK `profiles.id`), `national_id_number` (Text, Sensitive), `license_number` (Text, Sensitive), `status` (ENUM: `REGISTERED`, `PENDING_VERIFICATION`, `UNDER_REVIEW`, `VERIFIED`, `ACTIVE`, `SUSPENDED`, `REJECTED`, `BLOCKED`), `rating_avg` (Numeric(3,2)), `total_deliveries` (Integer), `verified_at` (TIMESTAMPTZ).
-* **RLS Strategy:** Driver ve solo sus datos (excluyendo notas internas). `verification_agent` y Admin ven todo.
+#### Tabla: `public.drivers`
+* **Propósito:** Expediente legal y operativo del motorizado.
+* **Columnas:** `id` (UUID, PK, FK `auth.users.id`), `verification_status` (ENUM: `PENDING`, `UNDER_REVIEW`, `VERIFIED`, `REJECTED`), `account_status` (ENUM: `REGISTERED`, `ACTIVE`, `SUSPENDED`, `BLOCKED`), `national_id_number` (Text, Sensitive), `license_number` (Text, Sensitive), `rating_avg` (Numeric(3,2)), `total_deliveries` (Integer).
+* **RLS:** Conductor lee y edita solo su perfil no-sensible. Agentes de verificación ven expediente.
 
-#### Tabla: `driver_documents`
-* **Descripción:** Archivos de legalización presentados por el motorizado.
-* **Columnas:** `id` (UUID, PK), `driver_id` (UUID, FK `drivers.id`), `document_type` (ENUM: `NATIONAL_ID_FRONT`, `NATIONAL_ID_BACK`, `DRIVERS_LICENSE`, `VEHICLE_REGISTRATION`), `file_path` (Text, Private Bucket), `verification_status` (ENUM: `PENDING`, `APPROVED`, `REJECTED`), `rejection_reason` (Text), `reviewed_by` (UUID, FK `profiles.id`), `reviewed_at` (TIMESTAMPTZ).
+#### Tabla: `public.driver_documents`
+* **Propósito:** Archivos de legalización.
+* **Columnas:** `id` (UUID, PK), `driver_id` (UUID, FK `drivers.id`), `document_type` (Text), `file_path` (Text, Bucket Privado), `verification_status` (Text), `rejection_reason` (Text).
 
-#### Tabla: `vehicles`
-* **Descripción:** Datos de la motocicleta registrada.
-* **Columnas:** `id` (UUID, PK), `driver_id` (UUID, FK `drivers.id`), `make` (Text), `model` (Text), `year` (Integer), `color` (Text), `license_plate` (Text, Unique), `photo_url` (Text).
-
-#### Tabla: `driver_presence`
-* **Descripción:** Estado en tiempo real del motorizado para el Dispatch Engine.
-* **Columnas:** `driver_id` (UUID, PK, FK `drivers.id`), `operational_state` (ENUM: `OFFLINE`, `AVAILABLE`, `OFFERED`, `ASSIGNED`, `TO_PICKUP`, `DELIVERING`, `PAUSED`), `current_location` (GEOGRAPHY(Point, 4326)), `last_ping_at` (TIMESTAMPTZ), `battery_level` (Integer).
+#### Tabla: `public.driver_presence`
+* **Propósito:** Estado geoespacial en tiempo real.
+* **Columnas:** `driver_id` (UUID, PK, FK `drivers.id`), `operational_state` (ENUM: `OFFLINE`, `AVAILABLE`, `OFFERED`, `ASSIGNED`, `TO_PICKUP`, `DELIVERING`, `PAUSED`), `current_location` (GEOGRAPHY(Point, 4326)), `location_updated_at` (TIMESTAMPTZ).
 * **Índices:** `GIST(current_location)`, `BTREE(operational_state)`.
 
 ---
 
-### 2.4 Dominio de Solicitudes y Entregas
+### 2.3 Dominio de Entregas e Historización de Direcciones
 
-#### Tabla: `delivery_requests`
-* **Descripción:** Intención de envío y parámetros ingresados por el negocio.
-* **Columnas:** `id` (UUID, PK), `business_id` (UUID, FK `businesses.id`), `location_id` (UUID, FK `business_locations.id`), `recipient_name` (Text), `recipient_phone` (Text), `delivery_address_text` (Text), `dropoff_location` (GEOGRAPHY(Point, 4326)), `package_type` (Text), `cash_to_collect` (Numeric(10,2)), `created_at` (TIMESTAMPTZ).
+#### Tabla: `public.delivery_requests`
+* **Propósito:** Parámetros de envío ingresados por el comercio con **Snapshot de Dirección**.
+* **Columnas:** `id` (UUID, PK), `business_id` (UUID, FK `businesses.id`), `location_id` (UUID, FK `business_locations.id`), `pickup_address_snapshot` (JSONB - Copia inmutable de la sucursal al momento de crear), `dropoff_address_snapshot` (JSONB - Copia inmutable del destino), `recipient_name` (Text), `recipient_phone` (Text), `dropoff_location` (GEOGRAPHY(Point, 4326)), `package_type` (Text), `cash_to_collect` (Numeric(10,2)).
 
-#### Tabla: `deliveries`
-* **Descripción:** El viaje de entrega activo o histórico (Vinculado a la máquina de estados).
-* **Columnas:** `id` (UUID, PK), `request_id` (UUID, FK `delivery_requests.id`), `driver_id` (UUID, FK `drivers.id`, Nullable), `status` (ENUM Delivery State Machine: `DRAFT`, `QUOTED`, `SEARCHING_DRIVER`, `DRIVER_ASSIGNED`, `TO_PICKUP`, `ARRIVED_PICKUP`, `PICKED_UP`, `TO_DROPOFF`, `ARRIVED_DROPOFF`, `DELIVERED`, `CANCELED`, `FAILED`, `DISPUTED`), `delivery_pin` (Text, Hash/Encrypted), `quoted_price` (Numeric(10,2)), `driver_earning` (Numeric(10,2)), `platform_fee` (Numeric(10,2)), `tracking_token` (Text, Unique), `created_at` (TIMESTAMPTZ), `delivered_at` (TIMESTAMPTZ).
-* **Constraints:** `CHECK (quoted_price = driver_earning + platform_fee)`.
+#### Tabla: `public.deliveries`
+* **Propósito:** Registro maestro de la entrega y máquina de estados.
+* **Columnas:** `id` (UUID, PK), `request_id` (UUID, FK `delivery_requests.id`), `driver_id` (UUID, FK `drivers.id`, Nullable), `status` (ENUM Delivery State Machine), `pickup_code` (Text, Nullable), `otp_hash` (Text, Hash Bcrypt/Argon2 del OTP del cliente), `otp_expires_at` (TIMESTAMPTZ), `otp_attempt_count` (Integer, Default 0), `otp_locked_until` (TIMESTAMPTZ, Nullable), `otp_verified_at` (TIMESTAMPTZ, Nullable), `quoted_price` (Numeric(10,2)), `final_price` (Numeric(10,2)), `driver_earning` (Numeric(10,2)), `platform_fee` (Numeric(10,2)), `token_hash` (Text, Unique - Hash del token de tracking web).
+* **Partial Unique Index:** `CREATE UNIQUE INDEX idx_driver_active_delivery ON deliveries (driver_id) WHERE status IN ('DRIVER_ASSIGNED', 'TO_PICKUP', 'ARRIVED_PICKUP', 'PICKED_UP', 'TO_DROPOFF', 'ARRIVED_DROPOFF');` (Garantiza Invariante de 1 entrega activa por conductor en MVP).
 
-#### Tabla: `delivery_events`
-* **Descripción:** Log de eventos inmutables auditables de cada entrega.
-* **Columnas:** `id` (BigInt, PK), `delivery_id` (UUID, FK `deliveries.id`), `event_type` (Text), `actor_id` (UUID, FK `profiles.id`), `actor_role` (Text), `location` (GEOGRAPHY(Point, 4326)), `metadata` (JSONB), `created_at` (TIMESTAMPTZ).
+#### Tabla: `public.incidents`
+* **Propósito:** Sub-sistema desacoplado de incidencias operativas.
+* **Columnas:** `id` (UUID, PK), `delivery_id` (UUID, FK `deliveries.id`), `reported_by` (UUID, FK `auth.users.id`), `incident_type` (Text), `status` (ENUM: `OPEN`, `UNDER_INVESTIGATION`, `RESOLVED`), `resolution_notes` (Text), `created_at` (TIMESTAMPTZ).
 
----
-
-### 2.5 Dominio Financiero y Ledger
-
-#### Tabla: `wallet_accounts`
-* **Descripción:** Cuentas virtuales por actor.
-* **Columnas:** `id` (UUID, PK), `owner_id` (UUID, FK `profiles.id` o `businesses.id`), `account_type` (ENUM: `DRIVER_WALLET`, `BUSINESS_ACCOUNT`, `PLATFORM_REVENUE`), `current_balance` (Numeric(12,2)), `created_at` (TIMESTAMPTZ).
-
-#### Tabla: `ledger_entries` (Partida Doble)
-* **Descripción:** Transacciones inmutables de saldo.
-* **Columnas:** `id` (UUID, PK), `delivery_id` (UUID, FK `deliveries.id`, Nullable), `source_account_id` (UUID, FK `wallet_accounts.id`), `destination_account_id` (UUID, FK `wallet_accounts.id`), `entry_type` (ENUM: `DELIVERY_EARNING`, `PLATFORM_COMMISSION`, `CASH_COLLECTION`, `PAYOUT`, `ADJUSTMENT`), `amount` (Numeric(10,2)), `currency` (Text, Default 'NIO'), `description` (Text), `created_at` (TIMESTAMPTZ).
-* **Constraints:** `CHECK (amount > 0)`.
+#### Tabla: `public.delivery_events`
+* **Propósito:** Historial auditable inmutable.
+* **Columnas:** `id` (BigInt, PK), `delivery_id` (UUID, FK `deliveries.id`), `actor_type` (ENUM: `USER`, `SYSTEM`, `CUSTOMER_TOKEN`, `WEBHOOK`, `BACKGROUND_JOB`), `actor_id` (UUID, FK `auth.users.id`, Nullable), `event_type` (Text), `metadata` (JSONB), `created_at` (TIMESTAMPTZ).
 
 ---
 
-## 3. Resumen de Tablas Adicionales del Sistema
+### 2.4 Dominio Financiero (Party Accounting)
 
-* `delivery_quotes`: Cotizaciones firmadas temporalmente.
-* `delivery_offers`: Ofertas temporizadas emitidas por el Dispatch Engine a motorizados.
-* `delivery_tracking_points`: Historial de puntos GPS recorridos durante un viaje.
-* `delivery_proofs`: Evidencia fotográfica de entrega o firma.
-* `payouts`: Solicitudes de retiro de dinero por parte de los conductores.
-* `pricing_zones` & `pricing_rules`: Tablas de configuración de tarifas dinámicas.
-* `incidents` & `support_tickets`: Reportes de problemas y disputas operativas.
-* `audit_logs`: Registros de acciones administrativas de seguridad.
+#### Tabla: `public.wallet_accounts`
+* **Propósito:** Billeteras virtuales asociadas a poseedores de cuenta (`account_holders`).
+* **Columnas:** `id` (UUID, PK), `holder_type` (ENUM: `USER`, `BUSINESS`, `PLATFORM`), `user_id` (UUID, FK `auth.users.id`, Nullable), `business_id` (UUID, FK `businesses.id`, Nullable), `account_type` (Text), `cached_balance` (Numeric(12,2), Materializado de auditoría), `created_at` (TIMESTAMPTZ).
+* **Check Constraint:** `CHECK ((holder_type = 'USER' AND user_id IS NOT NULL AND business_id IS NULL) OR (holder_type = 'BUSINESS' AND business_id IS NOT NULL AND user_id IS NULL) OR (holder_type = 'PLATFORM'))`.
+
+#### Tablas: `ledger_transactions` & `ledger_postings` (Partida Doble Real)
+* `ledger_transactions`: Registro maestro de la operación económica (`id`, `delivery_id`, `transaction_type`, `created_at`).
+* `ledger_postings`: Entradas de débito y crédito (`id`, `transaction_id`, `account_id`, `amount` [Positivo=Crédito, Negativo=Débito], `created_at`).

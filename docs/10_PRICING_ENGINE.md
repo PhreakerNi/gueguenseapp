@@ -1,66 +1,50 @@
-# 10 — MOTOR DE PRECIOS Y TARIFAS (PRICING ENGINE)
+# 10 — MOTOR DE PRECIOS Y AJUSTES (PRICING ENGINE)
 
 **Proyecto:** Güegüense  
 **Versión:** 1.0.0-phase0  
-**Dominio:** Tarificación Dinámica, Reglas Configurables y Cotización Backend  
+**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
+**Dominio:** Tarificación Dinámica, Precios Cotizados vs. Finales y Ajustes  
 
 ---
 
-## 1. Regla de Oro del Motor de Precios
+## 1. Distinción Entre `quoted_price` y `final_price`
 
-**EL CÁLCULO DE PRECIOS NUNCA SE EJECUTA O HARDCODEA EN LAS APLICACIONES MÓVILES CLIENTES.**  
-El cálculo oficial es ejecutado **exclusivamente en el Backend** (Supabase Edge Function / PostgreSQL Stored Procedure). Las aplicaciones cliente solo muestran la cotización obtenida y firmada temporalmente.
+Un error común es asumir que el precio cotizado inicialmente es igual al precio cobrado al finalizar la entrega. Güegüense distingue estrictamente dos valores:
+
+1. **`quoted_price`:** Tarifa estimada calculada al crear la cotización (`QUOTED`), basada en la distancia teórica y tiempo estimado original.
+2. **`final_price`:** Monto total real a liquidar tras concluir la entrega, que resulta de la consolidación de `quoted_price` más o menos la lista de **Ajustes de Tarifa (`pricing_adjustments`)**.
+
+$$\text{final\_price} = \text{quoted\_price} + \sum \text{pricing\_adjustments}$$
 
 ---
 
-## 2. Fórmula General de Tarificación
+## 2. Entidad de Ajustes de Tarifa (`pricing_adjustments`)
 
-El precio final de un envío se calcula mediante la evaluación de las siguientes variables configurables almacenadas en la base de datos:
-
-$$\text{Precio Final} = \max\left(\text{Tarifa Mínima}, \left(\text{Base} + \text{Costo Distancia} + \text{Costo Tiempo} + \text{Recargo Zona} + \text{Recargo Tipo} + \text{Costo Espera}\right) \times \text{Factor Demanda} - \text{Descuentos}\right)$$
+Cualquier variación en el costo del viaje genera una entrada transparente de ajuste vinculada a la entrega:
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        VARIABLES DE COTIZACIÓN                         │
+│                   TIPOS DE AJUSTES DE TARIFA (`adjustment_type`)       │
 ├─────────────────┬──────────────────────────────────────────────────────┤
-│ Tarifa Base     │ Monto fijo de arranque del servicio (ej. C$ 35.00)   │
+│ `WAITING_FEE`   │ Cobro por tiempo de espera excedido en sucursal (>5m)│
 ├─────────────────┼──────────────────────────────────────────────────────┤
-│ Costo Distancia │ Precio por km recorrido (ej. C$ 8.00 / km extra)     │
+│ `RETURN_FEE`    │ Tarifa adicional por retorno de custodia al comercio │
 ├─────────────────┼──────────────────────────────────────────────────────┤
-│ Costo Tiempo    │ Tarifa por minuto estimado en tráfico (ej. C$ 1.50)  │
+│ `CANCEL_FEE`    │ Penalización por cancelación tardía                  │
 ├─────────────────┼──────────────────────────────────────────────────────┤
-│ Recargo Zona    │ Sobrecosto por entrega en zonas periféricas / riesgo │
+│ `DISCOUNT`      │ Promociones o cupones aplicados al negocio           │
 ├─────────────────┼──────────────────────────────────────────────────────┤
-│ Recargo Paquete │ Ajuste por fragilidad, peso o volumen especial       │
-├─────────────────┼──────────────────────────────────────────────────────┤
-│ Factor Demanda  │ Multiplicador dinámico por lluvia / hora pico (1.0x) │
+│ `SUBSIDY`       │ Bonificación o subsidio aportado por Güegüense       │
 └─────────────────┴──────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Desglose Detallado de Componentes
+## 3. Reconciliación Financiera
 
-### 3.1 Tarifa Base y Mínima
-* `base_fee`: Cobertura básica de los primeros $X \text{ km}$ (ej: C$ 35.00 por los primeros $2.0 \text{ km}$).
-* `minimum_fee`: El precio final cotizado nunca podrá ser inferior a esta suma (ej: C$ 35.00).
+Se elimina el invariant simplista `quoted_price = driver_earning + platform_fee`. La fórmula de reconciliación contable exacta al finalizar el servicio es:
 
-### 3.2 Distancia y Tiempo
-* `cost_per_km`: Se aplica a partir del kilómetro adicional al umbral base. La distancia se mide siguiendo la ruta vial real provista por Google Maps Directions API, no en línea recta.
-* `cost_per_minute`: Compensa trayectos congestionados en horas pico.
+$$\text{final\_price} = \text{driver\_earning} + \text{platform\_fee} \pm \text{ajustes\_terceros}$$
 
-### 3.3 Recargos por Zona (`pricing_zones`)
-Las zonas delimitadas por polígonos PostGIS pueden aplicar un ajuste fijo o porcentual.
-* *Ejemplo:* Zona Periférica Norte $\rightarrow + \text{C\$ 20.00}$ de recargo para compensar el retorno en vacío del motorizado.
-
-### 3.4 Cobro por Tiempo de Espera en Sucursal (`waiting_time_fee`)
-Si el negocio no tiene el pedido listo a la llegada del conductor:
-* Primeros 5 minutos de espera: **Gratis**.
-* A partir del minuto 6: Se cobra una tarifa adicional por minuto (ej: C$ 3.00 / min) que se acredita 100% al motorizado.
-
----
-
-## 4. Firma y Expiración de Cotizaciones
-
-1. Cuando la app del negocio solicita una cotización (`POST /api/v1/quotes`), el backend retorna el precio calculado junto con un `quote_id` firmado y un timestamp de expiración de **5 minutos**.
-2. Al presionar "Solicitar Motorizado", la app debe enviar el `quote_id`. El backend valida que la cotización no haya expirado para evitar desacuerdos si las tarifas o zonas cambian durante la preparación.
+* **Tiempo de Espera (`WAITING_FEE`):** Acredita 100% de la tarifa de espera al conductor.
+* **Tarifa de Retorno (`RETURN_FEE`):** Se suma al `final_price` cobrado al negocio y se acredita al motorizado por el trayecto de regreso a la sucursal.

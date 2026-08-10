@@ -2,64 +2,59 @@
 
 **Proyecto:** Güegüense  
 **Versión:** 1.0.0-phase0  
-**Dominio:** Seguridad, Cifrado, Control de Acceso RLS, Protección de Archivos y Threat Modeling  
+**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
+**Dominio:** Hardened Security Definer, Resguardo de OTP, Revocación de Sesiones y Web Auth  
 
 ---
 
-## 1. Principios de Seguridad del Sistema
+## 1. Guía de Endurecimiento de Funciones `SECURITY DEFINER`
 
-1. **Zero-Trust Client:** Ninguna entrada enviada desde las aplicaciones móviles o web se considera válida sin sanitización y verificación estricta en el servidor.
-2. **Defensa en Profundidad (Defense in Depth):** Seguridad a nivel de red (HTTPS/TLS), autenticación (JWT/MFA), autorización (RBAC), base de datos (RLS) y almacenamiento (Signed URLs).
-3. **Privacidad de Documentos Sensibles:** Cero almacenamiento de cédulas o licencias en buckets públicos o accesibles vía URLs permanentes.
+Toda función almacenada en PostgreSQL que utilice `SECURITY DEFINER` debe cumplir obligatoriamente los siguientes 5 requisitos de seguridad:
 
----
-
-## 2. Estrategia de Autenticación y Sesiones
-
-* **Tokens JWT:** Emitidos por Supabase Auth con expiración corta (1 hora) y tokens de refresco seguros (*Refresh Tokens*) almacenados en `SecureStore` (móvil) y `HttpOnly Cookies` (web).
-* **Autenticación en Dos Pasos (MFA):** Obligatoria para roles administrativos (`super_admin`, `admin`, `operator`) utilizando aplicaciones TOTP (Google Authenticator / Authy).
-* **Revocación Instantánea:** Posibilidad de invalidar todas las sesiones activas de un conductor o negocio inmediatamente al ser suspendido.
+1. **Ruta de Búsqueda Fija (`search_path`):** Declarar explícitamente `SET search_path = public, pg_temp;` para evitar ataques de hijacking de esquema.
+2. **Referencias Calificadas por Esquema:** Todas las tablas se invocan calificadas (ej: `public.deliveries`).
+3. **Revocación de Permisos por Defecto:** Se ejecuta `REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC;` inmediatamente después de la creación.
+4. **Concesión Granular de Permisos:** Se otorga permiso únicamente a los roles necesarios (ej: `GRANT EXECUTE ... TO authenticated;`).
+5. **Validación de Identidad por Sesión:** La función verifica la identidad real mediante `auth.uid()` y nunca confía en IDs de usuario o conductor enviados en los argumentos por el cliente.
 
 ---
 
-## 3. Seguridad de Documentos de Verificación
+## 2. Protección y Resguardo del `DELIVERY_OTP`
 
-Los documentos personales de los motorizados (Cédula de Identidad, Licencia de Conducir, Matrícula) son datos de alto riesgo.
+El `DELIVERY_OTP` (Código de Entrega al Cliente) se protege bajo estándares criptográficos equivalentes a una contraseña de usuario:
 
 ```text
-┌────────────────────────┐
-│  App Driver (Camara)   │ Subida cifrada multipart/form-data.
-└───────────┬────────────┘
-            │
-            ▼
-┌────────────────────────┐
-│ Bucket Supabase Privado│ Access Control: NINGÚN ACCESO PÚBLICO (Public READ: FALSE).
-└───────────┬────────────┘
-            │
-            ▼
-┌────────────────────────┐
-│ Admin API / Visor      │ Genera URL Firmada con expiración de 15 minutos (HMAC-SHA256).
-└────────────────────────┘
-```
-
-1. **Bucket Privado:** `driver-documents-private`.
-2. **Acceso Autorizado Exclusivo:** Solamente los roles `super_admin`, `admin` y `verification_agent` pueden solicitar la generación de una URL firmada de corta duración mediante la función:
-```typescript
-const { data, error } = await supabase
-  .storage
-  .from('driver-documents-private')
-  .createSignedUrl('drivers/doc_123.jpg', 900); // Expiración en 15 minutos (900 segundos)
+┌────────────────────────────────────────────────────────────────────────┐
+│                        REGLAS DE SEGURIDAD DEL OTP                     │
+├─────────────────┬──────────────────────────────────────────────────────┤
+│ Almacenamiento  │ NUNCA en texto plano. Se guarda como `otp_hash`      │
+│                 │ utilizando algoritmos Bcrypt / Argon2.               │
+├─────────────────┼──────────────────────────────────────────────────────┤
+│ Transmisión     │ Exclusiva al cliente final vía SMS / Web Tracking.   │
+│                 │ NUNCA se retorna en endpoints de API para el driver. │
+├─────────────────┼──────────────────────────────────────────────────────┤
+│ Intentos        │ Límite estricto de 3 intentos (`otp_attempt_count`). │
+│                 │ Al tercer fallo se activa `otp_locked_until` (2 min).│
+├─────────────────┼──────────────────────────────────────────────────────┤
+│ Expiración      │ Campo `otp_expires_at` (12 horas máximo).            │
+└─────────────────┴──────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 4. Threat Model Inicial (Modelo de Amenazas)
+## 3. Validación de Estado de Cuenta y Revocación de Sesiones
 
-| Amenaza | Vector de Ataque | Gravedad | Mitigación Arquitectónica |
-| :--- | :--- | :--- | :--- |
-| **Asignación Doble de Delivery** | Dos clicks simultáneos en app driver. | **CRÍTICA** | Transacción pesimista atómica `FOR UPDATE` en PL/pgSQL (Ver `08_DISPATCH_ENGINE.md`). |
-| **Ataque Man-in-the-Middle (MitM)** | Intercepción de tráfico GPS o PIN. | **ALTA** | SSL/TLS 1.3 obligatorio con Certificate Pinning en aplicaciones móviles. |
-| **Inyección SQL / Bypassing UI** | Alteración de precios enviando payloads manipulados desde cliente. | **ALTA** | Backend como fuente de verdad. La API no acepta precios del cliente; los calcula internamente. |
-| **Spoofing / Falsificación GPS** | App modificada reporta ubicación falsa para ganar ofertas. | **ALTA** | Validación de velocidad imposible entre pings consecutivos y verificación de timestamps del SO. |
-| **Robo de Credenciales Admin** | Brute-force a login administrativo. | **ALTA** | MFA obligatorio + Rate Limiting en API (máximo 5 intentos por minuto por IP). |
-| **Acceso Indebido a Documentos** | Extracción de URLs directas de licencias. | **ALTA** | Bucket 100% privado + Auditoría de creación de Signed URLs. |
+Para mitigar el riesgo de tokens JWT que permanecen válidos hasta su hora de expiración (1 hora), **todas las peticiones mutativas críticas evalúan en base de datos el estado actual de la cuenta**:
+
+```sql
+-- Validación de seguridad en Edge Function / Stored Procedure
+IF (SELECT account_status FROM public.drivers WHERE id = auth.uid()) != 'ACTIVE' THEN
+    RAISE EXCEPTION 'FORBIDDEN: La cuenta del conductor se encuentra suspendida o bloqueada.' USING ERRCODE = '42501';
+END IF;
+```
+
+---
+
+## 4. Estrategia de Autenticación Web (Supabase SSR)
+
+Para el portal Web (`admin-web` y `tracking-web`), se implementa la arquitectura oficial **Supabase SSR** para Next.js App Router, gestionando la creación y refresco de tokens mediante cookies de servidor seguras (`@supabase/ssr`).

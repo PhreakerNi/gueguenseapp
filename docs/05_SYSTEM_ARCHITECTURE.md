@@ -2,90 +2,92 @@
 
 **Proyecto:** Güegüense  
 **Versión:** 1.0.0-phase0  
-**Dominio:** Arquitectura de Software, Diagramas de Componentes y Stack Tecnológico  
+**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
+**Dominio:** Arquitectura de Software, Diagramas de Componentes y Supabase Integration  
 
 ---
 
-## 1. Visión General de Arquitectura
+## 1. Visión General de Arquitectura (Monorepo & Supabase CLI)
 
-Güegüense adopta una arquitectura modular limpia orientada al dominio (**Domain-Driven Monorepo**). El sistema separa estrictamente las aplicaciones cliente de la lógica de negocio, centralizando la validación de contratos, schemas de datos y la máquina de estados en paquetes compartidos.
+Güegüense adopta una arquitectura modular limpia orientada al dominio. El sistema separa estrictamente las aplicaciones cliente de la lógica de negocio, centralizando las configuraciones y migraciones en la carpeta oficial `/supabase`.
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              APLICACIONES CLIENTES                              │
-│                                                                                 │
-│   ┌──────────────────────┐    ┌──────────────────────┐    ┌─────────────────┐   │
-│   │  business-mobile     │    │    driver-mobile     │    │   admin-web     │   │
-│   │ (React Native/Expo)  │    │ (React Native/Expo)  │    │   (Next.js)     │   │
-│   └──────────┬───────────┘    └──────────┬───────────┘    └────────┬────────┘   │
-└──────────────┼───────────────────────────┼─────────────────────────┼────────────┘
-               │                           │                         │
-               └───────────────────────────┼─────────────────────────┘
-                                           │ (TypeScript Shared Types / Schemas)
-┌──────────────────────────────────────────▼──────────────────────────────────────┐
-│                               PAQUETES COMPARTIDOS                              │
-│   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐     │
-│   │ @gueguense/  │   │ @gueguense/  │   │ @gueguense/  │   │ @gueguense/  │     │
-│   │    types     │   │   schemas    │   │    domain    │   │      ui      │     │
-│   └──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘     │
-└──────────────────────────────────────────┬──────────────────────────────────────┘
-                                           │ (API Rest / Edge Functions / Realtime)
-┌──────────────────────────────────────────▼──────────────────────────────────────┐
-│                             BACKEND Y BASE DE DATOS                             │
-│                                                                                 │
-│   ┌─────────────────────────────────────────────────────────────────────────┐   │
-│   │                      Supabase / PostgreSQL Server                        │   │
-│   │  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────────────┐  │   │
-│   │  │   PostGIS Geo    │  │ Row Level Secur. │  │ PL/pgSQL Atomic Func. │  │   │
-│   │  └──────────────────┘  └──────────────────┘  └───────────────────────┘  │   │
-│   └──────────┬───────────────────────┬────────────────────────┬─────────────┘   │
-│              │                       │                        │                 │
-│   ┌──────────▼───────────┐ ┌─────────▼──────────┐ ┌───────────▼────────────┐   │
-│   │ Realtime Engine Web  │ │ Edge Functions API │ │  Storage (Doc Privados)│   │
-│   └──────────────────────┘ └────────────────────┘ └────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────────┘
+gueguenseapp/
+├── apps/
+│   ├── business-mobile/    # App móvil React Native (Expo) para comercios
+│   ├── driver-mobile/      # App móvil React Native (Expo) para motorizados
+│   ├── admin-web/          # Panel administrativo Web Next.js (Supabase SSR)
+│   └── tracking-web/       # Portal web de seguimiento público de entregas
+│
+├── packages/
+│   ├── types/              # Definiciones TypeScript globales
+│   ├── schemas/            # Schemas Zod / validaciones compartidas
+│   ├── domain/             # Lógica de negocio y máquina de estados pura
+│   ├── ui/                 # Design System & componentes compartidos
+│   └── config/             # Configuraciones compartidas (ESLint, TS, Tailwind)
+│
+├── supabase/               # Configuración Oficial Supabase CLI
+│   ├── migrations/         # Migraciones SQL versionadas
+│   ├── functions/          # Edge Functions Serverless (TypeScript/Deno)
+│   ├── tests/              # Pruebas pgTAP y RLS Policies
+│   ├── seed.sql            # Datos semilla de desarrollo
+│   └── config.toml         # Configuración local Supabase
+│
+└── docs/                   # Especificación técnica (Fase 0)
 ```
 
 ---
 
-## 2. Definición del Stack Tecnológico
+## 2. Definición del Stack Tecnológico y Seguridad de Claves
 
-| Capa | Tecnología Seleccionada | Justificación Técnica |
+| Capa / Módulo | Tecnología | Función y Seguridad |
 | :--- | :--- | :--- |
-| **Lenguaje Base** | **TypeScript 5.x** | Tipado estático de extremo a extremo, previniendo errores de runtime en producción. |
-| **Apps Móviles** | **React Native + Expo (EAS)** | Despliegue multiplataforma (iOS/Android), rendimiento nativo y acceso robusto a sensores GPS en background. |
-| **Panel Web & Tracking**| **Next.js (App Router)** | Renderizado en servidor (SSR), optimización SEO, carga ultrarrápida para el cliente web sin login. |
-| **Base de Datos Core** | **PostgreSQL 15+ (Supabase)** | Base de datos relacional robusta con soporte para ACID contable e integridad referencial. |
-| **Motor Geoespacial** | **PostGIS Extension** | Cálculo de distancias esféricas reales (`ST_DistanceSphere`), geofencing e índices de cuadrícula espacial (`GIST`). |
-| **Autenticación** | **Supabase Auth / JWT** | Tokens seguros con refresco automático, soporte OTP celular y políticas nativas RLS. |
-| **Realtime / WebSockets**| **Supabase Realtime (Elixir/Phoenix)**| Suscripción en tiempo real a cambios de estado de entrega y transmisión de coordenadas GPS sin saturar la DB. |
-| **Mapas y Rutas** | **Google Maps Platform API** | Autocompletado de direcciones, geocodificación inversa, matriz de distancias y renderizado de mapas. |
-| **Almacenamiento Privado**| **Supabase Storage (Private Buckets)**| Cifrado de documentos sensibles de motorizados servidos exclusivamente vía URLs firmadas con expiración. |
+| **Lenguaje Base** | **TypeScript 5.x** | Tipado estático de extremo a extremo. |
+| **Apps Móviles** | **React Native + Expo** | Despliegue iOS/Android con Maps SDK Key restringida por Application ID / Bundle ID. |
+| **Web Apps** | **Next.js (App Router)** | Renderizado SSR con Supabase SSR Cookie Auth. |
+| **Database & Auth** | **PostgreSQL (Supabase)** | Base de datos relacional con `auth.users` y RLS nativo. |
+| **Geoespacial** | **PostGIS Extension** | Descubrimiento espacial (`ST_DWithin`) y polígonos de zonas. |
+| **Rutas & ETA** | **Google Maps Routes API** | `Compute Routes` y `Compute Route Matrix` para ETA vial real (vía backend serverless). |
+| **Realtime** | **Supabase Realtime (Private)** | Canales privados con autorización por JWT y token de rastreo. |
+
+### Separación Estricta de API Keys:
+1. **Client Maps SDK Key:** Restringida por Bundle ID (iOS) / Package Name (Android) / HTTP Referrer (Web). Incluida en la app cliente exclusivamente para renderizado gráfico de mapas.
+2. **Server Routes API Key:** Restringida por dirección IP / Servicio de Servidor. Utilizada **EXCLUSIVAMENTE** desde Supabase Edge Functions para calcular matrices de rutas y ETAs reales. NUNCA se expone en las apps móviles.
 
 ---
 
-## 3. Estructura de Módulos y Paquetes (Monorepo Workspace)
+## 3. Arquitectura del Pipeline de Ingesta de Ubicación GPS
 
-### 3.1 Apps (`/apps`)
-* `business-mobile`: Aplicación móvil para comercios. Enfoque en velocidad de creación de órdenes y seguimiento.
-* `driver-mobile`: Aplicación móvil para conductores. Enfoque en interfaz táctil de alta visibilidad, gestión de presencia y navegación GPS.
-* `admin-web`: Dashboard web administrativo Next.js para control operativo, verificación de documentos, tarifas y disputas.
-* `tracking-web`: Portal web ligero de seguimiento de pedidos en tiempo real para consumidores finales.
+Para evitar que clientes maliciosos emitan posiciones GPS falsas directamente vía Realtime, el sistema implementa un pipeline de ingesta autenticado y validado:
 
-### 3.2 Paquetes Compartidos (`/packages`)
-* `@gueguense/types`: Tipos e interfaces globales TypeScript (`Delivery`, `Driver`, `Business`, `LedgerEntry`).
-* `@gueguense/schemas`: Validadores Zod compartidos para requests de API, formularios y payloads de notificaciones.
-* `@gueguense/domain`: Lógica de negocio pura (definición de la máquina de estados, validadores de transiciones, fórmulas de comisiones).
-* `@gueguense/ui`: Sistema de diseño compartido, componentes primitivos (Buttons, Cards, Inputs, Status Badges).
+```text
+ ┌───────────────────────────┐
+ │ App Driver (GPS Sensor)   │ Transmite payload con timestamp, accuracy, speed y lat/lng.
+ └─────────────┬─────────────┘
+               │
+               ▼
+ ┌───────────────────────────┐
+ │ Ingesta Autenticada API   │ Endpoint seguro (Valida JWT, velocidad máxima y timestamp).
+ └─────────────┬─────────────┘
+               │
+               ▼
+ ┌───────────────────────────┐
+ │ Actualización DB & Filter │ Actualiza `driver_presence` (PostgreSQL).
+ └─────────────┬─────────────┘
+               │
+               ▼
+ ┌───────────────────────────┐
+ │ Broadcast Autorizado      │ Emisión en Canales Privados (`delivery:{id}`).
+ └───────────────────────────┘
+```
 
 ---
 
-## 4. Estrategia de Comunicación entre Componentes
+## 4. Estrategia de Canales Privados en Realtime
 
-1. **Peticiones Síncronas (REST / Edge Functions):**
-   * Creación de envíos, cotización, actualización de estados de verificación, procesamiento de PIN y solicitudes de retiros.
-2. **Comunicación Asíncrona en Tiempo Real (Realtime WebSockets):**
-   * Canal `delivery:{id}`: Escuchado por el Negocio y el Tracking Web del Cliente para recibir actualizaciones de ubicación del conductor.
-   * Canal `driver:offers:{driver_id}`: Escuchado por la App Driver para recibir ofertas de viajes entrantes emitidas por el Dispatch Engine.
-3. **Eventos y Notificaciones Push:**
-   * Firebase Cloud Messaging (**FCM**) / Apple Push Notification Service (**APNs**) via Expo Notifications para despertar la app del motorizado ante una nueva oferta cuando la pantalla está apagada.
+Todo canal de WebSocket sensible utiliza **Canales Privados de Supabase Realtime** con verificación de tokens de autorización:
+
+* `delivery:{delivery_id}`: Autorizado para el negocio emisor, el motorizado asignado y el token de tracking web.
+* `driver:{driver_id}:offers`: Canal privado de alta seguridad para recibir ofertas de despacho del motorizado.
+* `business:{business_id}`: Canal privado para alertas corporativas de sucursal.
+* `admin:operations`: Canal privado para la mesa de control de operadores en Admin.

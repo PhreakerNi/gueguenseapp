@@ -2,6 +2,7 @@
 
 **Proyecto:** Güegüense  
 **Versión:** 1.0.0-phase0  
+**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
 **Dominio:** Especificación de Producto y Estrategia B2B  
 
 ---
@@ -34,8 +35,8 @@ Güegüense no compite como un simple directorio de comida; opera como una **Pla
 ### Principales Pilares B2B:
 * **Logística Plug-and-Play:** El negocio utiliza Güegüense para entregar cualquier pedido, sin importar si la venta ocurrió por WhatsApp, llamada, red social o tienda física.
 * **Seguridad y Confianza Garantizada:** 100% de los motorizados pasan por un proceso de verificación documental riguroso (identidad, antecedentes, vehículo) antes de recibir su primer servicio.
-* **Despacho Automatizado e Inteligente:** Algoritmo que empareja la entrega con el motorizado más apto en segundos, evitando demoras.
-* **Trazabilidad de Extremo a Extremo:** Transparencia total de ubicación GPS, estado de recogida, prueba de entrega por PIN y auditoría de eventos.
+* **Despacho Automatizado e Inteligente:** Algoritmo que empareja la entrega con el motorizado más apto en segundos, asegurando que un conductor no tenga más de una entrega activa en el MVP.
+* **Trazabilidad y Confirmación Segura por OTP:** Transparencia total de ubicación GPS y verificación de recepción mediante un código **DELIVERY_OTP** exclusivo del cliente final que el conductor nunca puede obtener vía API.
 * **Certeza Financiera:** Tarifas claras, cálculo dinámico basado en distancia/tiempo y control de cobro de efectivo en mano con liquidación transparente.
 
 ---
@@ -44,10 +45,10 @@ Güegüense no compite como un simple directorio de comida; opera como una **Pla
 
 | Tipo de Usuario | Descripción | Necesidad Principal |
 | :--- | :--- | :--- |
-| **Comercio / Negocio (B2B)** | Restaurantes, farmacias, tiendas, supermercados, floristerías, e-commerce, pymes. | Encontrar un motorizado verificado de forma inmediata para enviar un pedido sin pagar comisiones sobre el valor de su venta. |
+| **Comercio / Negocio (B2B)** | Restaurantes, farmacias, tiendas, supermercados, floristerías, e-commerce, pymes. | Encontrar un motorizado verificado de forma inmediata para enviar un paquete sin pagar comisiones sobre el valor de su venta. |
 | **Motorizado (Driver)** | Conductores independientes de motocicleta con vehículo propio y documentación en regla. | Obtener ingresos justos, transparentes y bajo demanda, optimizando sus rutas y tiempos operativos. |
 | **Equipo Operativo / Admin** | Personal administrativo y de soporte de Güegüense. | Monitorear la flota activa, auditar verificaciones, resolver disputas y mantener la salud financiera del sistema. |
-| **Cliente Final (Consumidor)** | Receptor del paquete o comprador del negocio. | Conocer cuándo llegará su pedido mediante un enlace de tracking web dinámico y seguro sin necesidad de descargar una app. |
+| **Cliente Final (Consumidor)** | Receptor del paquete o comprador del negocio. | Conocer cuándo llegará su pedido mediante un enlace de tracking web dinámico y confirmar la recepción entregando su OTP al conductor. |
 
 ---
 
@@ -56,21 +57,20 @@ Güegüense no compite como un simple directorio de comida; opera como una **Pla
 ### 5.1 Modalidad A — Solo Delivery (Prioridad Absoluta MVP)
 El comercio ya realizó la venta por sus propios canales. La app se utiliza puramente como **motor de contratación logística**.
 * **Entradas:** Dirección de recogida (sucursal), dirección de entrega, contacto del destinatario, tipo de paquete, cobro en destino (si aplica).
-* **Salidas:** Cotización instantánea, asignación de motorizado verificado, seguimiento GPS en vivo, validación de entrega por PIN.
+* **Salidas:** Cotización instantánea, asignación de motorizado verificado, seguimiento GPS en vivo, validación de entrega por DELIVERY_OTP.
 * **Requisito de catálogo:** Ninguno.
 
 ### 5.2 Modalidad B — Catálogo / Menú Directo (Fase Posterior)
 Permite al negocio registrar su menú/catálogo dentro de Güegüense y obtener una storefront pública para recibir pedidos directos.
-* **Funcionalidad:** Menús, categorías, variantes, modificadores, carrito de compra, pago en línea y generación automática de la orden de delivery correspondiente.
 
 ---
 
-## 6. Componentes de la Plataforma
+## 6. Componentes de la Plataforma (Monorepo & Supabase CLI)
 
 ```text
                                 ┌───────────────────────────┐
-                                │   Güegüense Backend / DB  │
-                                │   (PostgreSQL + Supabase) │
+                                │   Supabase / PostgreSQL   │
+                                │   (Auth, DB, Realtime, Edge)│
                                 └─────────────┬─────────────┘
                                               │
         ┌──────────────────────┬──────────────┴──────────────┬──────────────────────┐
@@ -81,51 +81,14 @@ Permite al negocio registrar su menú/catálogo dentro de Güegüense y obtener 
 └───────────────────┘  └───────────────────┘         └───────────────────┘  └───────────────────┘
 ```
 
-1. **Güegüense Negocios (Mobile App):** Para propietarios y empleados de negocios. Permite cotizar, solicitar motorizados, gestionar sucursales y ver historial.
-2. **Güegüense Motorizado (Mobile App):** Para los conductores. Permite conectarse/desconectarse, recibir ofertas temporizadas, navegar, confirmar hitos operativos y ver ganancias.
-3. **Güegüense Admin (Web Dashboard):** Para la operación de Güegüense. Verificación de documentos, monitoreo de flotas en mapa en vivo, reglas de tarifas, resolución de disputas y liquidaciones.
-4. **Tracking Web Cliente (Web Portal):** Portal ultraliviano accesible por URL firmada de un solo uso para que el destinatario siga su paquete en vivo.
-
 ---
 
-## 7. Alcance del MVP (Fase 1 - 8) vs. Fuera del Alcance (Fase 9+)
+## 7. Reglas Fundamentales del Producto y Seguridad
 
-### INCLUIDO EN EL MVP (Scope):
-* Autenticación basada en roles (Negocio, Motorizado, Admin).
-* Registro y verificación documental de motorizados con aprobación en Admin.
-* Configuración de negocios y múltiples sucursales.
-* Cotizador dinámico de tarifas (distancia, base, zona).
-* Creación de envíos "Solo Delivery" (Modalidad A).
-* Motor de Despacho Atómico con timer (15s), ofertas y prevención de asignación doble.
-* Flujo de entrega completo con navegación GPS e hito obligatorio de confirmación por PIN de 4 dígitos.
-* Tracking web público en vivo para clientes sin login.
-* Ledger de contabilidad financiera de partida doble (precio cliente, ganancia driver, comisión Güegüense, efectivo).
-* Panel administrativo para monitoreo de operaciones, incidencias y gestión de estados de cuenta.
-
-### FUERA DEL MVP (Out of Scope / Fases Futuras):
-* Catálogo de productos / Menú digital / Pedidos en storefront público (Modalidad B).
-* Entregas con múltiples paradas (Multi-stop) o rutas consolidadas.
-* Entregas programadas en franjas futuras (Reserva diferida).
-* Integración API pública/Webhooks directos para e-commerce externos (Shopify/WooCommerce).
-* Desembolsos bancarios automatizados (Stripe Payouts / API bancaria local); se manejarán vía registros de payouts en Admin.
-* Algoritmos de Machine Learning para predicción de demanda o precios dinámicos por demanda extrema.
-
----
-
-## 8. Reglas Fundamentales del Producto
-
-1. **Backend como Fuente de Verdad:** Ninguna aplicación cliente (Negocio o Driver) calcula precios, asigna estados ni adjudica viajes por su cuenta. Todo cambio de estado es validado y procesado por el backend.
-2. **Asignación Atómica Garantizada:** Una entrega NUNCA puede ser asignada a dos motorizados en paralelo, sin importar la concurrencia de peticiones en red.
-3. **Motorizados Verificados Exclusivamente:** Ningún conductor con estado `PENDING_VERIFICATION`, `REJECTED` o `BLOCKED` puede recibir ofertas de despacho.
-4. **Entrega Confirmada por PIN:** Ninguna entrega pasa a estado `DELIVERED` sin ingresar la clave PIN atómica provista al cliente final o validación administrativa autorizada.
-5. **No Mezclar Finanzas:** El dinero del cobro del paquete, la tarifa de envío, la ganancia del driver y la comisión de la plataforma son conceptos contables independientes en el ledger.
-
----
-
-## 9. Métricas Principales de Éxito (KPIs)
-
-* **Tiempo de Asignación (Time-to-Assign):** Mediana de segundos desde que el negocio presiona "Solicitar" hasta que un motorizado acepta la oferta (Objetivo < 60s).
-* **Tiempo de Recogida (Time-to-Pickup):** Tiempo promedio desde la aceptación hasta la llegada a la sucursal (Objetivo < 12 min).
-* **Tasa de Cumplimiento (Fulfillment Rate):** Porcentaje de solicitudes creadas que se completan exitosamente en estado `DELIVERED` (Objetivo > 98%).
-* **Tasa de Rechazo de Oferta:** % de ofertas expiradas o rechazadas por motorizados antes de ser aceptadas.
-* **Incidencias Logísticas:** % de entregas reportadas con contratiempos (dirección errónea, cliente ausente, paquete dañado).
+1. **Backend como Fuente de Verdad:** Ninguna aplicación cliente calcula precios, asigna estados ni adjudica viajes por su cuenta. Todo cambio de estado es validado por el backend.
+2. **Doble Invariante de Despacho:** Una entrega NUNCA puede tener dos motorizados asignados en paralelo, y un motorizado NUNCA puede tener dos entregas activas simultáneamente en el MVP.
+3. **Separación Estricta de Códigos (PICKUP_CODE vs. DELIVERY_OTP):**
+   * **`PICKUP_CODE`:** Código opcional de transferencia de custodia en el negocio (no confirma la entrega final).
+   * **`DELIVERY_OTP`:** Código numérico de 4 a 6 dígitos exclusivo del cliente final. El backend NUNCA lo envía al conductor ni al negocio. La App Driver solo permite escribir el código dictado por el destinatario.
+4. **Resguardo de OTP:** Almacenado como hash (`otp_hash`) con límite de intentos y expiración.
+5. **Separación de Liciclos (Delivery vs. Incidencias):** Los problemas operativos (accidente, avería, pérdida de GPS) se manejan en la entidad `incidents` sin corromper el ciclo de vida del delivery.

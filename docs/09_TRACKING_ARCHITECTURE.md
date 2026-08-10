@@ -2,76 +2,60 @@
 
 **Proyecto:** Güegüense  
 **Versión:** 1.0.0-phase0  
-**Dominio:** Rastreabilidad GPS, Geoespacialidad, Realtime y Privacidad de Ubicación  
+**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
+**Dominio:** Rastreabilidad GPS Adaptativa, Ingesta Autenticada y Seguridad de Tokens Web  
 
 ---
 
-## 1. Visión General del Sistema de Tracking
+## 1. Intervalos Objetivo Adaptativos (Adaptive Target Intervals)
 
-El sistema de tracking de Güegüense permite transmitir y visualizar la posición exacta del motorizado desde el momento en que acepta una entrega hasta que valida el PIN con el cliente final, garantizando alto rendimiento, bajo consumo de batería y privacidad rigurosa.
+Güegüense no utiliza una frecuencia rígida e inalterable. La captura GPS se adapta dinámicamente al estado de la aplicación, nivel de batería y permisos del dispositivo:
+
+| Estado de la App / Dispositivo | Intervalo Objetivo de Captura | Filtro de Distancia Mínimo |
+| :--- | :--- | :--- |
+| **En Ruta Activa (`TO_PICKUP`, `TO_DROPOFF`) - Primer Plano** | Cada 3 a 5 segundos | 5 metros |
+| **En Ruta Activa - Segundo Plano (Background)** | Cada 8 a 12 segundos | 15 metros |
+| **Batería Baja (<20%) / Ahorro de Energía** | Cada 15 a 30 segundos | 30 metros |
+| **Sin Permisos de Background / Aplicación Cerrada** | Fallback a pings manuales en cambios de hito | N/A |
+
+El servidor utiliza la columna **`location_updated_at`** de `driver_presence` como la **única autoridad de frescura del dato**.
+
+---
+
+## 2. Ingesta de Ubicación Autenticada y Validada
+
+Queda prohibido emitir coordenadas directamente vía WebSockets desde la app cliente hacia otros usuarios sin validación previa en el backend.
 
 ```text
  ┌───────────────────────────┐
- │ App Driver (Background)   │ Obtiene GPS (Frecuencia adaptable: 3s a 10s).
+ │ App Driver (Sensor GPS)   │ Captura lat/lng, accuracy, heading, speed y timestamp.
  └─────────────┬─────────────┘
                │
                ▼
  ┌───────────────────────────┐
- │ Supabase Realtime Channel │ Transmisión WebSocket ultraliviana (Broadcast).
- └───────┬───────────────┬───┘
-         │               │
-         ▼               ▼
-┌──────────────────┐  ┌──────────────────┐
-│ App Negocio      │  │ Tracking Web     │ Renderizan la animación del marcador.
-└──────────────────┘  └──────────────────┘
-         │
-         ▼ (Batch Persist cada 15s / 100m)
-┌────────────────────────────────────────┐
-│ PostgreSQL (delivery_tracking_points)  │ Persistencia de auditoría histórica.
-└────────────────────────────────────────┘
+ │ Ingesta Autenticada API   │ Endpoint REST/RPC `POST /api/v1/driver/location`.
+ └─────────────┬─────────────┘ Validaciones: (1) JWT válido, (2) Velocidad físicamente
+               │              posible (<120 km/h), (3) Accuracy < 50m.
+               ▼
+ ┌───────────────────────────┐
+ │ DB Update (`driver_pres.`)│ Actualiza registro en PostgreSQL PostGIS.
+ └─────────────┬─────────────┘
+               │
+               ▼
+ ┌───────────────────────────┐
+ │ Realtime Broadcast Privado│ Emite actualización al canal autorizado `delivery:{id}`.
+ └───────────────────────────┘
 ```
 
 ---
 
-## 2. Parámetros Técnicos de Captura GPS
+## 3. Seguridad y Privacidad del Token de Tracking Web
 
-| Parámetro | Valor En Ruta Activa (`TO_PICKUP`, `TO_DROPOFF`) | Valor En Espera (`AVAILABLE`) |
-| :--- | :--- | :--- |
-| **Frecuencia de Muestreo** | Cada 3 a 5 segundos | Cada 30 a 60 segundos |
-| **Filtro de Distancia (Distance Filter)** | 5 metros mínimo de movimiento | 25 metros mínimo de movimiento |
-| **Precisión Esperada (Accuracy)** | $< 15 \text{ metros}$ | $< 50 \text{ metros}$ |
-| **Captura en Segundo Plano (Background)** | Habilitada obligatoriamente (Android Location Service / iOS Always Location) | Desactivada o mínima cuando se minimiza la app |
-
----
-
-## 3. Estados de Calidad de la Ubicación
-
-El sistema clasifica visualmente la señal GPS del motorizado en 4 estados para prevenir diagnósticos erróneos ante fallas de red:
-
-```text
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│     LIVE     │───► │   DELAYED    │───► │    STALE     │───► │ UNAVAILABLE  │
-│(Ping < 10s)  │     │(Ping 10-30s) │     │(Ping 30-120s)│     │(Ping > 120s) │
-└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
-```
-
-1. **`LIVE` (Señal Óptima - Indicador Verde):** Posición actualizada hace menos de 10 segundos. Movimiento fluido.
-2. **`DELAYED` (Retraso Leve - Indicador Amarillo):** Ping recibido hace entre 10 y 30 segundos. Red móvil inestable.
-3. **`STALE` (Ubicación Desactualizada - Indicador Naranja):** Sin actualización por 30 a 120 segundos. Se despliega la advertencia: *"Última ubicación registrada hace X segundos"*. NUNCA se simula la posición actual.
-4. **`UNAVAILABLE` (Sin Señal / Perdidó GPS - Indicador Gris):** Sin ping por más de 2 minutos. Se alerta al operador para verificar si el teléfono del driver se apago o perdió señal.
-
----
-
-## 4. Cálculo de ETA y Matriz de Rutas
-
-* **Motor de ETA:** Se utiliza la API de Google Maps Distance Matrix / Directions combinada con la velocidad promedio informada por el GPS del motorizado.
-* **Geofencing Automático de Llegada:**
-  * Al aproximarse a menos de **50 metros** de la sucursal o del cliente, el backend detecta el evento de entrada al geofence e hiper-notifica el arribo al negocio o destinatario.
-
----
-
-## 5. Privacidad y Seguridad Geoespacial
-
-1. **Privacidad Fuera de Servicio:** Cuando el conductor está en estado `OFFLINE`, la capturación de GPS se detiene por completo. Queda estrictamente prohibido rastrear al usuario fuera de su horario disponible.
-2. **Expiración de Tokens de Tracking Web:** El acceso del cliente final vía token web expira de inmediato al pasar la entrega a estado `DELIVERED` o `CANCELED`. Intentar ingresar a la URL posterior al viaje retorna un mensaje de "Entrega Finalizada" sin mostrar la posición actual del conductor.
-3. **Política de Retención de Datos Puntos GPS:** Los puntos de ruta detallados de la tabla `delivery_tracking_points` se purgan o comprimen a centroides históricos tras 30 días para proteger la privacidad del conductor y optimizar el almacenamiento en base de datos.
+1. **Hash de Token (`token_hash`):** El token expuesto en la URL (`https://gueguense.app/t/<TOKEN_HIGH_ENTROPY>`) no es un ID secuencial ni UUID simple. Se almacena como un hash SHA-256 en la base de datos para prevenir enumeration attacks.
+2. **Expiración e Inactivación Post-DELIVERED:**
+   * Al pasar la entrega a estado `DELIVERED`, `CANCELED` o `RETURNED`, la posición GPS del motorizado **se desvincula inmediatamente** del canal de tracking web.
+   * La consulta web posterior muestra el resumen de entrega completada pero **NUNCA la ubicación actual del conductor**.
+3. **Encabezados HTTP de Privacidad:**
+   * `Cache-Control: no-store, max-age=0` (Previene almacenamiento en caché de navegadores intermediarios).
+   * `Referrer-Policy: strict-origin-when-cross-origin` (Previene fuga de tokens en encabezados referer).
+   * Exclusión explícita del token en scripts de analítica web.

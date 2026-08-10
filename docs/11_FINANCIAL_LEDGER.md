@@ -2,99 +2,71 @@
 
 **Proyecto:** Güegüense  
 **Versión:** 1.0.0-phase0  
-**Dominio:** Contabilidad de Partida Doble, Billeteras Virtuales, Efectivo y Retiros  
+**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
+**Dominio:** Contabilidad de Partida Doble (Journal + Postings), Billeteras y Control de Efectivo  
 
 ---
 
-## 1. Principio de Separación Financiera
+## 1. Arquitectura de Partida Doble (Journal + Postings)
 
-Güegüense prohíbe terminantemente almacenar las finanzas en un solo campo o recalcular saldos al vuelo sumando historiales de entregas.
-
-Toda transacción monetaria se registra mediante un **Ledger de Partida Doble** inmutable (`ledger_entries`), donde cada movimiento debita de una cuenta origen y acredita en una cuenta destino en la misma transacción atómica.
+Güegüense implementa una arquitectura contable estricta de partida doble compuesta por **Transacciones (`ledger_transactions`)** y **Asientos/Postings (`ledger_postings`)**.
 
 ```text
-                               ┌───────────────────────────┐
-                               │   NEGOCIO / CLIENTE       │
-                               │   (Paga Precio del Envío) │
-                               └─────────────┬─────────────┘
-                                             │  C$ 100.00 Total Delivery
-                                             ▼
-                               ┌───────────────────────────┐
-                               │    SISTEMA GÜEGÜENSE      │
-                               │ (Distribución Contable)   │
-                               └──────┬─────────────┬──────┘
-                                      │             │
-                    ┌─────────────────┘             └─────────────────┐
-                    │ C$ 80.00 (80%)                                  │ C$ 20.00 (20%)
-                    ▼                                                 ▼
-┌───────────────────────────────────────┐         ┌───────────────────────────────────────┐
-│     BILLETERA DEL MOTORIZADO          │         │    CUENTA INGRESOS GÜEGÜENSE          │
-│    (`DRIVER_EARNING` en Ledger)       │         │  (`PLATFORM_COMMISSION` en Ledger)    │
-└───────────────────────────────────────┘         └───────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                   `ledger_transactions` (Operación)                    │
+│   id: tx_9981 | delivery_id: d_123 | type: DELIVERY_SETTLEMENT         │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (1:N)
+         ┌──────────────────────────┴──────────────────────────┐
+         │                                                     │
+         ▼                                                     ▼
+┌──────────────────────────────────────┐     ┌──────────────────────────────────────┐
+│  `ledger_postings` (Débito)          │     │  `ledger_postings` (Crédito)         │
+│  account: Business Receivable        │     │  account: Driver Payable             │
+│  amount: -100.00 NIO                 │     │  amount: +80.00 NIO                  │
+└──────────────────────────────────────┘     └──────────────────────────────────────┘
+                                             ┌──────────────────────────────────────┐
+                                             │  `ledger_postings` (Crédito)         │
+                                             │  account: Platform Revenue           │
+                                             │  amount: +20.00 NIO                  │
+                                             └──────────────────────────────────────┘
 ```
 
----
-
-## 2. Definición de Cuentas del Ledger (`wallet_accounts`)
-
-1. **`BUSINESS_ACCOUNT`:** Billetera / crédito del negocio emisor.
-2. **`DRIVER_WALLET`:** Billetera virtual del conductor donde se acumulan sus ganancias netas.
-3. **`PLATFORM_REVENUE`:** Cuenta institucional de Güegüense donde ingresan las comisiones retenidas.
-4. **`CASH_HELD_BY_DRIVER`:** Cuenta de control que registra el dinero en efectivo recibido por el conductor de manos del cliente final.
+**Regla Fundamental:** En toda transacción, la suma algebraica de sus `ledger_postings` DEBE SER EXACTAMENTE CERO ($\sum \text{amount} = 0$).
 
 ---
 
-## 3. Tipos de Transacciones Contables (`entry_type`)
+## 2. Definición de Cuentas Contables (`wallet_accounts`)
 
-* **`DELIVERY_EARNING`:** Acreditación de la ganancia por servicio al conductor al completarse la entrega (`DELIVERED`).
-* **`PLATFORM_COMMISSION`:** Retención de la comisión pactada para la plataforma Güegüense.
-* **`CASH_COLLECTION`:** Registro del dinero en efectivo cobrado por el conductor en la entrega.
-* **`CASH_SETTLEMENT`:** Liquidación o depósito del efectivo cobrado por el conductor hacia la plataforma o negocio.
-* **`PAYOUT`:** Transferencia / retiro de fondos procesado desde la billetera del conductor hacia su cuenta bancaria.
-* **`ADJUSTMENT`:** Ajuste contable manual autorizado por un `super_admin` por disputa o compensación.
-
----
-
-## 4. Ejemplo de Asiento Contable en Entrega Exitosa
-
-**Escenario:** Entrega de C$ 100.00 (C$ 80.00 ganancia driver + C$ 20.00 comisión Güegüense).
+Para evitar claves foráneas ambiguas, cada cuenta contable pertenece a un poseedor explícito mediante la estructura `account_holder`:
 
 ```sql
--- Asiento 1: Acreditar Ganancia al Conductor
-INSERT INTO ledger_entries (delivery_id, source_account_id, destination_account_id, entry_type, amount, description)
-VALUES (
-    'd_11223344',
-    'acc_business_01',
-    'acc_driver_wallet_99',
-    'DELIVERY_EARNING',
-    80.00,
-    'Ganancia neta por entrega d_11223344'
-);
-
--- Asiento 2: Acreditar Comisión a la Plataforma
-INSERT INTO ledger_entries (delivery_id, source_account_id, destination_account_id, entry_type, amount, description)
-VALUES (
-    'd_11223344',
-    'acc_business_01',
-    'acc_platform_revenue',
-    'PLATFORM_COMMISSION',
-    20.00,
-    'Comisión de plataforma 20% por entrega d_11223344'
+CREATE TABLE public.wallet_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    holder_type TEXT NOT NULL CHECK (holder_type IN ('USER', 'BUSINESS', 'PLATFORM')),
+    user_id UUID REFERENCES auth.users(id),
+    business_id UUID REFERENCES public.businesses(id),
+    account_category TEXT NOT NULL CHECK (account_category IN (
+        'ASSET_CASH_HELD',      -- Efectivo retenido por conductores
+        'LIABILITY_DRIVER',     -- Por pagar a conductores (Driver Payable)
+        'ASSET_BUSINESS_REC',   -- Por cobrar a negocios (Business Receivable)
+        'REVENUE_PLATFORM',     -- Ingresos por comisiones Güegüense
+        'BANK_PLATFORM'         -- Banco/Caja central Güegüense
+    )),
+    cached_balance NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_holder_fk CHECK (
+        (holder_type = 'USER' AND user_id IS NOT NULL AND business_id IS NULL) OR
+        (holder_type = 'BUSINESS' AND business_id IS NOT NULL AND user_id IS NULL) OR
+        (holder_type = 'PLATFORM' AND user_id IS NULL AND business_id IS NULL)
+    )
 );
 ```
 
 ---
 
-## 5. Control de Efectivo y Retiros (Payouts)
+## 3. Inmutabilidad del Saldos Materializados (`cached_balance`)
 
-### 5.1 Manejo de Efectivo Recaudado en Mano
-Si el conductor cobra C$ 500.00 en efectivo al cliente final (C$ 400.00 del pedido + C$ 100.00 del delivery):
-* El conductor se queda con el dinero físico.
-* Se crea un registro en `CASH_HELD_BY_DRIVER` por C$ 500.00.
-* Su saldo disponible para retiros se compensa automáticamente contra el efectivo que ya sostiene en sus manos, evitando que el conductor se retire con dinero pendiente de liquidar.
+El campo `cached_balance` existe únicamente como una vista materializada de lectura rápida. **QUEDA ESTRICTAMENTE PROHIBIDO MODIFICAR LIBREMENTE `cached_balance` MEDIANTE SENTENCIAS `UPDATE` DIRECTAS DESDE LA API.**
 
-### 5.2 Solicitudes de Retiro (`payouts`)
-1. El motorizado solicita un retiro de su saldo disponible desde la app.
-2. La solicitud pasa a estado `REQUESTED`.
-3. En el panel Admin, un administrador valida que no existan disputas activas ni saldos de efectivo pendientes.
-4. Al transferir el dinero, el Admin presiona **"APROBAR PAYOUT"** y el Ledger registra la salida de fondos.
+Cualquier actualización del saldo se ejecuta **exclusivamente mediante Triggers / Stored Procedures en PostgreSQL** al insertar un nuevo asiento en `ledger_postings`, garantizando la auditabilidad y reconciliación perfecta en todo momento.

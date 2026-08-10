@@ -2,181 +2,127 @@
 
 **Proyecto:** Güegüense  
 **Versión:** 1.0.0-phase0  
-**Dominio:** Especificación de Interfaces REST, Serverless Actions, DTOs y Manejo de Errores  
+**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
+**Dominio:** Especificación de Endpoints REST, DTOs, Idempotencia y Manejo de Errores  
 
 ---
 
 ## 1. Estándares Globales de la API
 
-* **Formato de Protocolo:** RESTful sobre HTTPS / JSON API v1.
-* **Autenticación:** Encabezado `Authorization: Bearer <SUPABASE_JWT_TOKEN>`.
-* **Idempotencia:** Operaciones mutativas (`POST`, `PUT`) requieren el encabezado opcional pero recomendado `Idempotency-Key: <UUID>`.
-* **Respuesta de Error Estándar:**
-```json
-{
-  "error": {
-    "code": "RESOURCE_NOT_FOUND",
-    "message": "La entrega solicitada no existe o no tiene permisos para verla.",
-    "details": {},
-    "timestamp": "2026-08-10T14:30:00Z"
-  }
-}
-```
+* **Autenticación:** `Authorization: Bearer <SUPABASE_JWT_TOKEN>`.
+* **Idempotencia Obligatoria:** Peticiones mutativas críticas (`POST /api/v1/deliveries`, `POST /api/v1/driver/offers/{id}/accept`, `POST /api/v1/payouts`) EXIGEN el encabezado `Idempotency-Key: <UUID-V4-VÁLIDO>`.
+* **Manejo de Secretos:** La API NUNCA retorna el `DELIVERY_OTP` en respuestas JSON.
 
 ---
 
-## 2. Contratos Principales por Dominio
+## 2. Contratos Detallados de Endpoints
 
-### 2.1 Dominio: Cotizaciones y Solicitudes (`/api/v1/quotes` & `/api/v1/deliveries`)
+### 2.1 Dominio: Registro y Verificación de Conductor (`/api/v1/driver`)
 
-#### Endpoint: `POST /api/v1/quotes` (Crear Cotización)
-* **Descripción:** Calcula el costo y tiempo estimado de un envío previo a crearlo.
-* **Rol Autorizado:** `business_owner`, `business_manager`, `business_employee`.
-* **Request Payload:**
+#### Endpoint: `POST /api/v1/driver/onboarding`
+* **Request:** `{"national_id": "001-120595-0002K", "license_number": "LIC-998822"}`
+* **Response (200 OK):** `{"driver_id": "c0a80101-0000-0000-0000-000000000001", "verification_status": "UNDER_REVIEW"}`
+
+#### Endpoint: `POST /api/v1/driver/documents`
+* **Request:** `{"document_type": "DRIVERS_LICENSE", "file_path": "drivers/lic_123.jpg"}`
+* **Response (201 Created):** `{"document_id": "c0a80101-0000-0000-0000-000000000002", "status": "PENDING"}`
+
+---
+
+### 2.2 Dominio: Cotizaciones y Envíos (`/api/v1/deliveries`)
+
+#### Endpoint: `POST /api/v1/quotes`
+* **Request:**
 ```json
 {
-  "location_id": "8f3b2a11-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
+  "location_id": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
   "dropoff_address": {
-    "street_text": "De los semáforos de Villa Fontana 2c al sur",
-    "latitude": 12.11542,
-    "longitude": -86.25412
+    "street_text": "Semaforos de Villa Fontana 2c al sur",
+    "latitude": 12.115420,
+    "longitude": -86.254120
   },
   "package_type": "FOOD",
   "cash_to_collect": 0.00
 }
 ```
-* **Response Payload (200 OK):**
+* **Response (200 OK):**
 ```json
 {
-  "quote_id": "q_991823a-12",
+  "quote_id": "e7f8a9b0-1c2d-3e4f-5a6b-7c8d9e0f1a2b",
   "distance_km": 4.85,
   "estimated_duration_minutes": 18,
   "pricing_breakdown": {
     "base_fee": 35.00,
     "distance_fee": 24.25,
-    "total_price": 59.25,
+    "total_quoted_price": 59.25,
     "currency": "NIO"
   },
-  "expires_at": "2026-08-10T14:35:00Z"
+  "expires_at": "2026-08-10T15:00:00Z"
 }
 ```
 
-#### Endpoint: `POST /api/v1/deliveries` (Solicitar Delivery / Disparar Dispatch)
-* **Descripción:** Confirma una cotización y coloca la solicitud en la máquina de estados en `SEARCHING_DRIVER`.
-* **Request Payload:**
+#### Endpoint: `POST /api/v1/deliveries` (Idempotencia Obligatoria)
+* **Headers:** `Idempotency-Key: f47ac10b-58cc-4372-a567-0e02b2c3d479`
+* **Request:**
 ```json
 {
-  "quote_id": "q_991823a-12",
+  "quote_id": "e7f8a9b0-1c2d-3e4f-5a6b-7c8d9e0f1a2b",
   "recipient": {
     "name": "Carlos Mendoza",
     "phone": "+50588887777",
-    "instructions": "Entregar en portón negro de dos plantas"
+    "instructions": "Entregar en portón negro"
   }
 }
 ```
-* **Response Payload (201 Created):**
+* **Response (201 Created):**
 ```json
 {
-  "delivery_id": "d_11223344-5566-7788-9900-aabbccddeeff",
+  "delivery_id": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
   "status": "SEARCHING_DRIVER",
-  "created_at": "2026-08-10T14:31:00Z"
+  "pickup_code": "PK-8821",
+  "created_at": "2026-08-10T14:55:00Z"
 }
 ```
 
 ---
 
-### 2.2 Dominio: Operaciones del Motorizado (`/api/v1/driver`)
+### 2.3 Dominio: Despacho y Aceptación de Conductor
 
-#### Endpoint: `POST /api/v1/driver/presence` (Alternar Disponibilidad)
-* **Request Payload:**
-```json
-{
-  "operational_state": "AVAILABLE",
-  "current_location": {
-    "latitude": 12.12001,
-    "longitude": -86.25001
-  }
-}
-```
-* **Response Payload (200 OK):** `{"status": "UPDATED", "operational_state": "AVAILABLE"}`
-
-#### Endpoint: `POST /api/v1/driver/offers/{offer_id}/accept` (Aceptar Oferta Atómica)
-* **Descripción:** Intenta adjudicarse una entrega ofrecida dentro de la ventana de 15 segundos.
-* **Response Payload Exitoso (200 OK):**
+#### Endpoint: `POST /api/v1/driver/offers/{offer_id}/accept` (Atómico Security Definer)
+* **Headers:** `Idempotency-Key: a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d`
+* **Response Exitoso (200 OK):**
 ```json
 {
   "success": true,
-  "delivery_id": "d_11223344-5566-7788-9900-aabbccddeeff",
-  "new_status": "DRIVER_ASSIGNED",
+  "delivery_id": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
+  "status": "DRIVER_ASSIGNED",
   "pickup_location": {
     "business_name": "Farmacia La Buena Salud",
     "address": "Plaza España 1c abajo",
-    "latitude": 12.1311,
-    "longitude": -86.2700
+    "latitude": 12.131100,
+    "longitude": -86.270000
   }
 }
 ```
-* **Response Payload Conflicto (409 Conflict - Ya asignado a otro):**
-```json
-{
-  "error": {
-    "code": "OFFER_EXPIRED_OR_TAKEN",
-    "message": "La entrega ya fue asignada a otro conductor o el tiempo de oferta expiró."
-  }
-}
-```
+* **Response Conflicto (409 Conflict):** `{"error": {"code": "OFFER_EXPIRED_OR_DRIVER_BUSY", "message": "Oferta expirada o ya posee otra entrega activa."}}`
 
-#### Endpoint: `POST /api/v1/driver/deliveries/{id}/verify-pin` (Confirmar Entrega)
-* **Request Payload:** `{"pin": "4829"}`
-* **Response Payload (200 OK):**
+#### Endpoint: `POST /api/v1/driver/deliveries/{id}/verify-otp` (Confirmar Entrega Final)
+* **Request:** `{"otp": "4829"}`
+* **Response (200 OK):**
 ```json
 {
   "success": true,
-  "delivery_id": "d_11223344-5566-7788-9900-aabbccddeeff",
+  "delivery_id": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
   "status": "DELIVERED",
   "credited_earning": 45.00,
-  "delivered_at": "2026-08-10T14:52:10Z"
+  "verified_at": "2026-08-10T15:15:20Z"
 }
 ```
 
 ---
 
-### 2.3 Dominio: Tracking Público del Cliente (`/api/v1/tracking/{token}`)
+### 2.4 Dominio: Incidentes (`/api/v1/incidents`)
 
-#### Endpoint: `GET /api/v1/tracking/{token}` (Datos de Tracking Web Publico)
-* **Descripción:** Endpoint público (sin encabezado de Auth, autenticado únicamente por la firma del token).
-* **Response Payload (200 OK):**
-```json
-{
-  "delivery_id": "d_11223344-5566-7788-9900-aabbccddeeff",
-  "status": "TO_DROPOFF",
-  "business": {
-    "name": "Restaurante El Güegüense"
-  },
-  "driver": {
-    "full_name": "Juan Pérez",
-    "avatar_url": "https://gueguense.app/avatars/driver_12.jpg",
-    "vehicle_plate": "M-123456",
-    "rating": 4.95
-  },
-  "driver_location": {
-    "latitude": 12.1250,
-    "longitude": -86.2580,
-    "updated_at": "2026-08-10T14:48:30Z"
-  },
-  "eta_minutes": 7,
-  "customer_pin": "4829"
-}
-```
-
----
-
-### 2.4 Catálogo de Códigos de Error Globales API
-
-* `AUTH_INVALID_TOKEN`: Token JWT expirado o inválido.
-* `PERMISSION_DENIED`: El rol del usuario no tiene autorización para esta acción.
-* `INVALID_STATE_TRANSITION`: Intento de cambiar el estado de la entrega violando la máquina de estados.
-* `OFFER_TIMEOUT`: La ventana de 15 segundos para aceptar la oferta ha vencido.
-* `PIN_INVALID`: El código PIN ingresado por el conductor no coincide con el registrado.
-* `LOCATION_OUT_OF_BOUNDS`: El punto de entrega está fuera del radio de cobertura operativo.
-* `IDEMPOTENCY_CONFLICT`: Petición duplicada procesada anteriormente con el mismo `Idempotency-Key`.
+#### Endpoint: `POST /api/v1/incidents`
+* **Request:** `{"delivery_id": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e", "incident_type": "VEHICLE_BREAKDOWN", "notes": "Llanta ponchada en semáforos de ENEL"}`
+* **Response (201 Created):** `{"incident_id": "c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f", "status": "OPEN"}`
