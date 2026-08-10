@@ -1,7 +1,7 @@
 # 06 — ARQUITECTURA DE BASE DE DATOS (DATABASE ARCHITECTURE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.6.0-phase0  
+**Versión:** 1.7.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Catálogo Relacional Completo PostgreSQL (37 Entidades MVP Individualizadas con Plantilla de 15 Propiedades)  
 
@@ -84,7 +84,7 @@ Güegüense integra **Supabase Auth (`auth.users`)** y aísla los secretos cript
 * **Writer:** Business Owner/Admin.
 * **Reader:** Business Members/Admin.
 * **Sensitivity:** Media.
-* **Lifecycle:** Creado al registrar la empresa.
+* **Lifecycle:** Creado al registrar la empresa (`verification_status = PENDING`, `account_status = ACTIVE`).
 * **Retention:** Permanente.
 
 #### 3. `public.business_members`
@@ -152,7 +152,7 @@ Güegüense integra **Supabase Auth (`auth.users`)** y aísla los secretos cript
 * **Writer:** Admin/Driver.
 * **Reader:** Authenticated Users.
 * **Sensitivity:** Alta (PII).
-* **Lifecycle:** Creado al registrarse el conductor.
+* **Lifecycle:** Creado al registrarse el conductor (`verification_status = PENDING`, `account_status = REGISTERED`).
 * **Retention:** Permanente.
 
 #### 7. `public.driver_documents`
@@ -169,7 +169,7 @@ Güegüense integra **Supabase Auth (`auth.users`)** y aísla los secretos cript
 * **Writer:** Driver/Verification Agent.
 * **Reader:** Driver/Admin.
 * **Sensitivity:** Alta.
-* **Lifecycle:** Creado durante el proceso de onboarding.
+* **Lifecycle:** Creado durante el proceso de onboarding mediante referencia de subida previa autorizada por backend.
 * **Retention:** Permanente.
 
 #### 8. `public.vehicles`
@@ -199,7 +199,7 @@ Güegüense integra **Supabase Auth (`auth.users`)** y aísla los secretos cript
 * **UNIQUE:** `UNIQUE(driver_id)`.
 * **CHECK:** CHECK operational_state IN ('OFFLINE', 'AVAILABLE', 'OFFERED', 'BUSY', 'PAUSED').
 * **Indexes:** `GIST(current_location)`, `BTREE(operational_state)`.
-* **RLS:** RLS RESTINGE ESCRITURA DIRECTA DE COORDENADAS DESDE CLIENTE. Actualización de ubicación realizada por la función/endpoint validado de ingesta GPS.
+* **RLS:** RLS RESTREÑE ESCRITURA DIRECTA DE COORDENADAS DESDE CLIENTE. Actualización de ubicación realizada por la función/endpoint validado de ingesta GPS.
 * **Writer:** Server-side Validated Ingestion / Stored Procedures.
 * **Reader:** System/Dispatch/Admin.
 * **Sensitivity:** Alta (GPS en tiempo real).
@@ -308,6 +308,11 @@ Güegüense integra **Supabase Auth (`auth.users`)** y aísla los secretos cript
 * **ON DELETE:** CASCADE.
 * **UNIQUE:** `UNIQUE(scope, key)`.
 * **CHECK:** CHECK actor_type IN ('USER', 'SYSTEM', 'WEBHOOK', 'BACKGROUND_JOB').
+* **Invariantes de Identidad del Actor:**
+  * `actor_type = 'USER'` $\rightarrow$ `actor_user_id NOT NULL`.
+  * `actor_type IN ('SYSTEM', 'BACKGROUND_JOB')` $\rightarrow$ `actor_user_id` puede ser NULL; `external_actor_key` identifica el subsistema cuando aplique.
+  * `actor_type = 'WEBHOOK'` $\rightarrow$ `external_actor_key` (identificador de proveedor) OBLIGATORIO; `actor_user_id` normalmente NULL.
+  * **Comportamiento de Fingerprint:** Mismo `key` + mismo `request_fingerprint` $\rightarrow$ respuesta idempotente previa; mismo `key` + `request_fingerprint` distinto $\rightarrow$ `IDEMPOTENCY_FINGERPRINT_MISMATCH` (422).
 * **Indexes:** `BTREE(scope, key)`.
 * **RLS:** Acceso por propio actor o worker del sistema.
 * **Writer:** System/Api Gateway.
@@ -351,7 +356,7 @@ Güegüense integra **Supabase Auth (`auth.users`)** y aísla los secretos cript
 * **Writer:** System/Conductores/Admin.
 * **Reader:** Conductores/Admin.
 * **Sensitivity:** Media.
-* **Lifecycle:** Creado por Admin al autorizar el traspaso.
+* **Lifecycle:** Creado y autorizado por Admin (`POST /api/v1/admin/handoffs`); finaliza en `COMPLETED` tras `confirm-to`.
 * **Retention:** Permanente.
 
 #### 18. `public.delivery_proofs`
