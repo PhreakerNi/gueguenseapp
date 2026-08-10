@@ -1,80 +1,87 @@
 # 03 — FLUJOS DE USUARIO (USER FLOWS)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.0.0-phase0  
-**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
-**Dominio:** Diagramación de Interacciones y Experiencia de Usuario Alineada con la Máquina de Estados  
+**Versión:** 1.2.0-phase0  
+**Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
+**Dominio:** Diagramación UX y Experiencia de Usuario Alineada 100% con la Máquina de Estados  
 
 ---
 
-## 1. Alineación Total con la Máquina de Estados
+## 1. Alineación Total con los Ciclos de Vida del Backend
 
-Los flujos de interfaz de usuario (**UX Flows**) reflejan punto por punto cada estado y transición del backend sin omitir pasos intermedios.
+Los flujos de interfaz de usuario (**UX Flows**) representan punto por punto las transiciones validadas por el backend, sin omitir pasos intermedios ni inventar estados.
 
+### 1.1 Ciclo de Cotización (Quote Lifecycle UX)
+```text
+┌─────────────────────────┐      ┌─────────────────────────┐      ┌─────────────────────────┐
+│     Formulario App      │─────►│    Cálculo Backend      │─────►│   Cotización Activa     │
+│ (Sucursal / Destinatario)│      │  (Quote Motor Tarifas)  │      │(QUOTED - Valida 5 min)  │
+└─────────────────────────┘      └─────────────────────────┘      └────────────┬────────────┘
+                                                                               │
+                                                                               ▼ (Confirmar Envío)
+                                                                  ┌─────────────────────────┐
+                                                                  │   Quote Consumido       │
+                                                                  │(CONSUMED - Crea Delivery│
+                                                                  └─────────────────────────┘
+```
+
+### 1.2 Ciclo de Entrega (Delivery Lifecycle UX)
 ```text
 ┌────────────────┐    ┌────────────────┐    ┌────────────────┐    ┌────────────────┐
-│   DRAFT        │───►│   QUOTED       │───►│SEARCHING_DRIVER│───►│ DRIVER_ASSIGNED│
-│(Llenar Datos)  │    │(Cotización 5m) │    │(Dispatch Timer)│    │(Lock Atómico)  │
+│SEARCHING_DRIVER│───►│ DRIVER_ASSIGNED│───►│   TO_PICKUP    │───►│ ARRIVED_PICKUP │
+│(Búsqueda Open) │    │(Lock Atómico)  │    │(Desplazamiento)│    │(En Sucursal)   │
 └────────────────┘    └────────────────┘    └────────────────┘    └───────┬────────┘
-                                                                          │
+                                                                          │ (Transferencia Custodia
+                                                                          │  con PICKUP_CODE)
 ┌────────────────┐    ┌────────────────┐    ┌────────────────┐            │
-│ ARRIVED_PICKUP │◄───│   TO_PICKUP    │◄───│  Confirmar     │◄───────────┘
-│(En Sucursal)   │    │(Desplazamiento)│    │  Inicio Ruta   │
-└───────┬────────┘    └────────────────┘    └────────────────┘
-        │
-        ▼
-┌────────────────┐    ┌────────────────┐    ┌────────────────┐    ┌────────────────┐
-│   PICKED_UP    │───►│   TO_DROPOFF   │───►│ARRIVED_DROPOFF │───►│   DELIVERED    │
-│(Transfer Cust.)│    │(Desplazamiento)│    │(En Cliente)    │    │(Valida OTP)    │
-└────────────────┘    └────────────────┘    └────────────────┘    └────────────────┘
+│   DELIVERED    │◄───│ARRIVED_DROPOFF │◄───│   TO_DROPOFF   │◄───────────┘
+│(Valida OTP)    │    │(En Cliente)    │    │(En Camino)     │
+└────────────────┘    └────────────────┘    └────────────────┘
 ```
 
 ---
 
-## 2. Flujos del Negocio (Business Flows)
+## 2. Flujo de Transferencia de Custodia en Sucursal (Pickup Protocol)
 
-### 2.1 Flujo de Solicitud "Solo Delivery" (Modalidad A)
-1. **Punto de Recogida (`DRAFT`):** Selecciona la sucursal activa.
-2. **Destinatario e Información:** Ingresa cliente, teléfono, dirección y marca pin en el mapa.
-3. **Cotización (`QUOTED`):** El backend calcula y congela el precio por 5 minutos.
-4. **Solicitar:** Presiona **"SOLICITAR MOTORIZADO"**. El backend pasa el viaje a `SEARCHING_DRIVER`.
-5. **Asignación (`DRIVER_ASSIGNED`):** Al ganar la oferta un conductor, el negocio ve su nombre, foto, vehículo y ETA de llegada a la sucursal.
-6. **Entrega del Paquete en Sucursal:** Al llegar el conductor (`ARRIVED_PICKUP`), el despadachador verifica la identidad, entrega el paquete y opcionalmente valida el `PICKUP_CODE` de transferencia de custodia. El viaje cambia a `PICKED_UP`.
+1. **Llegada:** El conductor arriba a la sucursal y presiona "Llegué al Negocio". El backend pasa el viaje a `ARRIVED_PICKUP`.
+2. **Generación de Código:** El backend genera el `PICKUP_CODE` (o QR temporal) en la pantalla de la App Driver.
+3. **Validación:** El despachador del negocio (`business_employee`) escanea o digita el `PICKUP_CODE` en su App Business.
+4. **Confirmación:** El backend valida la coincidencia y la membresía del empleado, registrando el evento `CUSTODY_TRANSFERRED` y cambiando la entrega a `PICKED_UP`.
+5. **Invariante:** El conductor no puede autopromoverse a `PICKED_UP` por sí solo.
 
 ---
 
-## 3. Flujos del Motorizado (Driver Flows)
+## 3. Flujo de Confirmación al Cliente Final (Delivery OTP Protocol)
 
-### 3.1 Flujo Completo de Ejecución de Servicio
-1. **Ponerse Disponible:** Activa el switch **"ESTOY DISPONIBLE"** (`AVAILABLE`).
-2. **Oferta Entrante:** Tono sonoro y modal con temporizador atómico de 15s mostrando ganancia neta.
-3. **Aceptación (`DRIVER_ASSIGNED`):** Presiona **"ACEPTAR"**. El backend ejecuta la función atómica.
-4. **Inicio de Ruta a Sucursal (`TO_PICKUP`):** Presiona "INICIAR NAVEGACIÓN A NEGOCIO".
-5. **Llegada a Sucursal (`ARRIVED_PICKUP`):** Al estar a <50m o presionar el botón, se notifica al negocio.
-6. **Recogida y Custodia (`PICKED_UP`):** Recibe el paquete y presiona **"CONFIRMAR RECOGIDA"**.
-7. **Navegación al Cliente (`TO_DROPOFF`):** Inicia desplazamiento hacia el destino.
-8. **Llegada a Destino (`ARRIVED_DROPOFF`):** Presiona "LLEGUÉ AL DESTINO". Se notifica al cliente.
-9. **Confirmación con OTP (`DELIVERED`):** Pide el `DELIVERY_OTP` de 4-6 dígitos al cliente, lo digita en su app. El backend valida el hash. Al tener éxito, la ganancia se acredita y el viaje finaliza.
+1. **Llegada:** El conductor arriba al domicilio y presiona "Llegué al Destino". El viaje pasa a `ARRIVED_DROPOFF`.
+2. **Notificación:** El cliente recibe la alerta SMS/WhatsApp con el aviso de llegada y visualiza su **`DELIVERY_OTP` de 6 dígitos** en su pantalla de Tracking Web.
+3. **Verificación:** El cliente dicta verbalmente el OTP al conductor. El conductor lo ingresa en su App Driver.
+4. **Resguardo Backend:** El backend compara el hash del intento contra `private.delivery_secrets.otp_digest`. Si coincide, la entrega cambia a `DELIVERED` y la ganancia se acredita.
 
 ---
 
-## 4. Cancelaciones y Custodia Controlada
+## 4. Flujo de Devolución de Custodia (Return Sub-flow UX)
 
-### 4.1 Cancelación ANTES de la Recogida (`TO_PICKUP` / `ARRIVED_PICKUP`)
-* **Acción:** Si el conductor sufre una ponchadura antes de recoger el paquete, presiona "Cancelar Viaje".
-* **Resultado:** El conductor queda desasignado (`driver_id = NULL`). El delivery regresa automáticamente a `SEARCHING_DRIVER` para que otro motorizado cercano lo recoja sin afectar al negocio.
-
-### 4.2 Incidencia DESPUÉS de la Recogida (`PICKED_UP` / `TO_DROPOFF`)
-* **REGLA DE CUSTODIA:** El conductor ya tiene el paquete físico. **NUNCA** se realiza una desasignación simple.
-* **Resultado:**
-  1. El conductor presiona "Reportar Incidencia" -> *Accidente / Avería*.
-  2. Se abre una entidad `incidents` en estado `OPEN`. El delivery entra en protocolo de devolución o traspaso controlado (`RETURN_REQUIRED` / Hand-off presencial supervisado por Operator).
-  3. No se libera la entrega hasta registrar la prueba de firma/foto de traspaso o retorno al comercio.
+```text
+  [Incapacidad de entrega en ARRIVED_DROPOFF / Incidencia Post-Pickup]
+                                  │
+                                  ▼
+                       ┌────────────────────┐
+                       │  RETURN_REQUIRED   │ (Operador/Backend ordena devolución)
+                       └──────────┬─────────┘
+                                  │ (Driver inicia retorno)
+                       ┌──────────▼─────────┐
+                       │     RETURNING      │ (Navegación de regreso a sucursal)
+                       └──────────┬─────────┘
+                                  │ (Comercio recibe paquete y firma)
+                       ┌──────────▼─────────┐
+                       │      RETURNED      │ (Custodia cerrada exitosamente)
+                       └────────────────────┘
+```
 
 ---
 
-## 5. Flujo del Cliente y Confirmación por OTP (Customer Flow)
+## 5. Cancela pre-pickup vs Custodia post-pickup
 
-1. **Recepción del Enlace:** SMS / WhatsApp automático enviado al estado `PICKED_UP`.
-2. **Portal Web de Tracking:** Abre la web pública. Visualiza mapa con posición adaptativa, datos del motorizado y su **`DELIVERY_OTP` en pantalla destacado**.
-3. **Entrega del Código:** Dicta verbalmente su OTP al motorizado al recibir el paquete. El motorizado lo ingresa en su app y la entrega concluye exitosamente.
+* **Cancelación Pre-Pickup (`DRIVER_ASSIGNED` / `TO_PICKUP`):** El conductor presiona "Cancelar Aceptación". El `driver_id` se vuelve `NULL`, el estado regresa a `SEARCHING_DRIVER` y se emite la búsqueda a otro motorizado.
+* **Incidencia Post-Pickup (`PICKED_UP` / `TO_DROPOFF`):** Prohibida la desasignación simple. El conductor debe iniciar la ruta de devolución (`RETURNING`) o entregar el paquete presencialmente a otro conductor bajo la supervisión de un operador (`RESOLVED_HANDOFF`).

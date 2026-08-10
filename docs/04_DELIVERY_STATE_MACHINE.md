@@ -1,56 +1,61 @@
 # 04 — MÁQUINA DE ESTADOS Y SUBSISTEMAS DE ENTREGA (DELIVERY STATE MACHINE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.0.0-phase0  
-**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
-**Dominio:** Lógica de Negocio Central, Ciclos de Vida, Sub-ciclos de Incidentes y Devoluciones  
+**Versión:** 1.2.0-phase0  
+**Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
+**Dominio:** Máquina de Estados Canónica, Separación Quote/Delivery, Sub-ciclo de Incidentes y Devoluciones  
 
 ---
 
-## 1. Desacoplamiento de Ciclos de Vida
+## 1. Separación Estricta: Quote Lifecycle vs. Delivery Lifecycle
 
-Güegüense separa estrictamente el **Ciclo de Vida de la Entrega** de la gestión de **Incidentes Operativos** y del **Flujo de Devolución de Custodia**.
+Güegüense no mezcla la cotización inicial con la máquina de estados de la entrega.
+
+### 1.1 Ciclo de Vida de la Cotización (`QUOTE_STATUS`)
+1. **`DRAFT`:** Formulario de cotización en preparación en la app.
+2. **`QUOTED`:** Cotización calculada con `quoted_total` y expiración (`expires_at` de 5 minutos).
+3. **`CONSUMED`:** La cotización fue confirmada y dio origen a una entrega activa.
+4. **`EXPIRED`:** Venció el tiempo de 5 minutos sin ser confirmada.
+5. **`CANCELED`:** Invalidad por el negocio o sistema.
+
+---
+
+## 2. Ciclo de Vida de la Entrega (`DELIVERY_STATUS`)
+
+Una entrega solo nace cuando una cotización en estado `QUOTED` es consumida.
 
 ```text
-                               ┌──────────┐
-                               │  DRAFT   │
-                               └────┬─────┘
-                                    │ (Cotizar)
-                               ┌────▼─────┐
-                               │  QUOTED  │
-                               └────┬─────┘
-                                    │ (Solicitar)
-                           ┌────────▼──────────┐
-                           │ SEARCHING_DRIVER  │◄──────────────────┐
-                           └────────┬──────────┘                   │
-                                    │ (Aceptar Lock)               │ (Cancelación pre-pickup:
-                           ┌────────▼──────────┐                   │  Desasignar e iniciar
-                           │  DRIVER_ASSIGNED  ├───────────────────┤  nueva búsqueda)
-                           └────────┬──────────┘                   │
-                                    │ (Iniciar Ruta)               │
-                           ┌────────▼──────────┐                   │
-                           │    TO_PICKUP      ├───────────────────┘
-                           └────────┬──────────┘
-                                    │ (Llegada)
-                           ┌────────▼──────────┐
-                           │  ARRIVED_PICKUP   │
-                           └────────┬──────────┘
-                                    │ (Verificar PICKUP_CODE)
-                           ┌────────▼──────────┐
-                           │    PICKED_UP      │
-                           └────────┬──────────┘
-                                    │ (Iniciar Ruta Cliente)
-                           ┌────────▼──────────┐
-                           │    TO_DROPOFF     │
-                           └────────┬──────────┘
-                                    │ (Llegada a Cliente)
-                           ┌────────▼──────────┐
-                           │  ARRIVED_DROPOFF  │
-                           └────────┬──────────┘
-                                    │ (Validar DELIVERY_OTP Hash)
-                           ┌────────▼──────────┐
-                           │     DELIVERED     │
-                           └───────────────────┘
+               ┌───────────────────┐
+               │ SEARCHING_DRIVER  │◄──────────────────┐
+               └─────────┬─────────┘                   │
+                         │ (Aceptar Lock)              │ (Cancelación pre-pickup:
+               ┌─────────▼─────────┐                   │  Desasignar e iniciar
+               │  DRIVER_ASSIGNED  ├───────────────────┤  nueva búsqueda)
+               └─────────┬─────────┘                   │
+                         │ (Iniciar Ruta)              │
+               ┌─────────▼─────────┐                   │
+               │    TO_PICKUP      ├───────────────────┘
+               └─────────┬─────────┘
+                         │ (Llegada)
+               ┌─────────▼─────────┐
+               │  ARRIVED_PICKUP   │
+               └─────────┬─────────┘
+                         │ (Verificar PICKUP_CODE en Negocio)
+               ┌─────────▼─────────┐
+               │    PICKED_UP      │
+               └─────────┬─────────┘
+                         │ (Iniciar Ruta Cliente)
+               ┌─────────▼─────────┐
+               │    TO_DROPOFF     │
+               └─────────┬─────────┘
+                         │ (Llegada a Cliente)
+               ┌─────────▼─────────┐
+               │  ARRIVED_DROPOFF  │
+               └─────────┬─────────┘
+                         │ (Validar DELIVERY_OTP Digest Hash)
+               ┌─────────▼─────────┐                    ┌───────────────────┐
+               │     DELIVERED     │                    │     CANCELED      │
+               └───────────────────┘                    └───────────────────┘
 
 ─────────────────────────────────────────────────────────────────────────────────
 SUBSISTEMA DE DEVOLUCIÓN DE CUSTODIA (POST-PICKUP INCIDENT / FAILED)
@@ -65,7 +70,7 @@ SUBSISTEMA DE DEVOLUCIÓN DE CUSTODIA (POST-PICKUP INCIDENT / FAILED)
              ┌─────────▼─────────┐
              │     RETURNING     │ (Navegación de regreso a sucursal)
              └─────────┬─────────┘
-                       │ (Comercio recibe paquete y firma/valida)
+                       │ (Comercio recibe paquete y valida custodia)
              ┌─────────▼─────────┐
              │     RETURNED      │ (Custodia cerrada exitosamente)
              └───────────────────┘
@@ -73,39 +78,37 @@ SUBSISTEMA DE DEVOLUCIÓN DE CUSTODIA (POST-PICKUP INCIDENT / FAILED)
 
 ---
 
-## 2. Definición del Sub-sistema de Incidentes (`incidents`)
+## 3. Catálogo Canónico de Estados de Entrega
 
-Los problemas operativos (avería mecánica, accidente, GPS perdido, desacuerdo) **NO** son estados finales de la entrega ni alteran el enum principal de la entrega a valores ambiguos.
+### Estados Activos Primarios:
+* **`SEARCHING_DRIVER`:** Solicitud activa emitiendo ofertas en el Dispatch Engine.
+* **`DRIVER_ASSIGNED`:** Conductor adjudicado atómicamente al viaje.
+* **`TO_PICKUP`:** Conductor desplazándose a la sucursal.
+* **`ARRIVED_PICKUP`:** Conductor presente en la sucursal.
+* **`PICKED_UP`:** Custodia del paquete transferida y validada por `PICKUP_CODE`.
+* **`TO_DROPOFF`:** Conductor en tránsito hacia el cliente final.
+* **`ARRIVED_DROPOFF`:** Conductor presente en el domicilio del destinatario.
 
-Se manejan en una entidad independiente `incidents`:
-* **`incident_type`:** `VEHICLE_BREAKDOWN`, `ACCIDENT`, `WEATHER_ALERT`, `ADDRESS_UNREACHABLE`, `RECIPIENT_REFUSED`, `PACKAGE_DAMAGED`, `GPS_LOST`.
-* **`incident_status`:** `OPEN`, `UNDER_INVESTIGATION`, `RESOLVED_CONTINUE`, `RESOLVED_RETURN`, `RESOLVED_REASSIGNED`.
+### Sub-ciclo de Devolución de Custodia:
+* **`RETURN_REQUIRED`:** Devolución ordenada por operador/sistema (cliente ausente, paquete rechazado).
+* **`RETURNING`:** Conductor en ruta de regreso a la sucursal origen.
 
-Una entrega puede permanecer en estado `TO_DROPOFF` y tener simultáneamente un registro de incidente `OPEN`.
-
----
-
-## 3. Matriz Estricta de Transiciones de la Entrega
-
-| Estado Origen | Estado Destino | Actor | Condición / Validación Previa | Evento Inmutable Generado |
-| :--- | :--- | :--- | :--- | :--- |
-| `DRAFT` | `QUOTED` | `business` | Formulario válido con sucursal y destino. | `DELIVERY_QUOTED` |
-| `QUOTED` | `SEARCHING_DRIVER` | `business` | Cotización vigente (<5 min). | `SEARCH_STARTED` |
-| `SEARCHING_DRIVER` | `DRIVER_ASSIGNED` | `driver` / `system` | Transacción atómica `accept_delivery_offer` con verificaciones duales. | `DRIVER_ASSIGNED` |
-| `DRIVER_ASSIGNED` | `TO_PICKUP` | `driver` | Driver inicia desplazamiento en app. | `EN_ROUTE_TO_PICKUP` |
-| `DRIVER_ASSIGNED` / `TO_PICKUP` | `SEARCHING_DRIVER` | `driver` / `system` | Cancelación ANTES del pickup. Driver desasignado, paquete sigue en comercio. | `DRIVER_UNASSIGNED_RESEARCHING` |
-| `TO_PICKUP` | `ARRIVED_PICKUP` | `driver` | Geofence <50m o confirmación manual. | `ARRIVED_AT_PICKUP` |
-| `ARRIVED_PICKUP` | `PICKED_UP` | `driver` / `business` | Transferencia de paquete y validación opcional de `PICKUP_CODE`. | `PACKAGE_PICKED_UP` |
-| `PICKED_UP` | `TO_DROPOFF` | `driver` | Driver inicia ruta al destinatario. | `EN_ROUTE_TO_DROPOFF` |
-| `TO_DROPOFF` | `ARRIVED_DROPOFF` | `driver` | Geofence <50m del destino. | `ARRIVED_AT_DROPOFF` |
-| `ARRIVED_DROPOFF` | `DELIVERED` | `driver` | Validación exitosa del `DELIVERY_OTP` contra `otp_hash` en backend. | `DELIVERY_COMPLETED` |
-| `ARRIVED_DROPOFF` / `TO_DROPOFF` | `RETURN_REQUIRED` | `operator` / `system` | Cliente ausente (después de 10 min de gracia) o paquete rechazado. | `RETURN_INITIATED` |
-| `RETURN_REQUIRED` | `RETURNING` | `driver` | Driver inicia desplazamiento de regreso al comercio. | `EN_ROUTE_TO_RETURN` |
-| `RETURNING` | `RETURNED` | `business` / `driver` | Comercio confirma recepción del paquete devuelto. | `RETURN_COMPLETED` |
+### Estados Terminales de la Entrega:
+* **`DELIVERED`:** Entrega completada mediante validación exitosa del `DELIVERY_OTP`.
+* **`RETURNED`:** Paquete devuelto al negocio y custodia física cerrada.
+* **`CANCELED`:** Operación abortada antes de la recogida conforme a reglas autorizadas.
+* **`FAILED`:** Operación no completable sin flujo operativo de custodia pendiente.
 
 ---
 
-## 4. Invariantes Absolutos del Sistema
+## 4. Sub-sistema Independiente de Incidentes (`incidents`)
 
-1. **Custodia Protegida:** Un conductor que ya ejecutó la transición a `PICKED_UP` NO puede ser simplemente "desasignado" de la entrega sin activar la cadena de custodia `RETURN_REQUIRED` o un protocolo de traspaso físico supervisado por `operator`.
-2. **Resguardo de OTP:** El `DELIVERY_OTP` se almacena exclusivamente como hash bcrypt/argon2 (`otp_hash`). La verificación se realiza server-side.
+Los imprevistos en ruta **NO** alteran el enum `DELIVERY_STATUS` a valores ambiguos. Se registran en la entidad `incidents`:
+
+### `INCIDENT_TYPE` Canónico:
+`VEHICLE_BREAKDOWN`, `ACCIDENT`, `GPS_LOST`, `NETWORK_LOST`, `PACKAGE_DAMAGED`, `BUSINESS_CLOSED`, `PACKAGE_NOT_READY`, `CUSTOMER_UNREACHABLE`, `RECIPIENT_REFUSED`, `ADDRESS_PROBLEM`, `PAYMENT_PROBLEM`, `CASH_MISMATCH`, `SAFETY_ISSUE`, `OTHER`.
+
+### `INCIDENT_STATUS` Canónico:
+`OPEN`, `UNDER_INVESTIGATION`, `RESOLVED_CONTINUE`, `RESOLVED_RETURN`, `RESOLVED_HANDOFF`, `CLOSED`.
+
+Una entrega puede estar en `TO_DROPOFF` y tener un incidente asociado en `OPEN`.

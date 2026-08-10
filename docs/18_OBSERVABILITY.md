@@ -1,47 +1,49 @@
 # 18 — OBSERVABILIDAD, LOGS Y PRIVACIDAD (OBSERVABILITY)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.0.0-phase0  
-**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
-**Dominio:** Telemetría, Logs Estructurados y Política Estricta de Redacción de PII  
+**Versión:** 1.2.0-phase0  
+**Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
+**Dominio:** Telemetría, Logs Estructurados, Correlation IDs y Redacción de PII  
 
 ---
 
-## 1. Política Estricta de Redacción de PII (Log Privacy Policy)
+## 1. Política Estricta de Redacción de PII y Secretos
 
-Queda **ESTRICTAMENTE PROHIBIDO** registrar en archivos de logs, consolas o servicios de telemetría de terceros (Sentry, PostHog, Logtail) la siguiente información confidencial o de identificación personal (PII):
+Queda **ESTRICTAMENTE PROHIBIDO** registrar en consolas o servicios de telemetría los siguientes datos:
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                    CAMPOS DE REDACCIÓN OBLIGATORIA (PII)               │
-├─────────────────┬──────────────────────────────────────────────────────┤
-│ `DELIVERY_OTP`  │ Jamás registrar el OTP plano ni el hash Bcrypt.      │
-├─────────────────┼──────────────────────────────────────────────────────┤
-│ Tokens          │ Jamás registrar tokens JWT ni tokens de tracking web.│
-├─────────────────┼──────────────────────────────────────────────────────┤
-│ Documentos      │ Cédula de identidad y número de licencia de conducir.│
-├─────────────────┼──────────────────────────────────────────────────────┤
-│ Teléfonos       │ Mascarar siempre: `+505 88****77`.                   │
-├─────────────────┼──────────────────────────────────────────────────────┤
-│ Direcciones     │ Nombres de clientes y texto de dirección de casa.    │
-└─────────────────┴──────────────────────────────────────────────────────┘
-```
+* `DELIVERY_OTP` (Plano o Hash).
+* Tokens JWT o Tokens de Tracking Web.
+* Números de Cédula de Identidad y Licencias de Conducir.
+* Fotografías de documentos o rostros.
+* Número telefónico completo (Mascarar siempre: `+505 88****77`).
+* Texto completo de direcciones de domicilio.
 
 ---
 
-## 2. Esquema de Redacción Automática en Logger
+## 2. Sanitizador Recursivo de Logs
 
-Todos los serializadores de logs utilizan un middleware de sanitización:
+Los serializadores aplican sanitización recursiva profunda en headers, query params y bodies:
 
 ```typescript
-function sanitizeLogPayload(data: Record<string, any>): Record<string, any> {
-  const SENSITIVE_KEYS = ['otp', 'token', 'national_id', 'license_number', 'phone', 'password'];
-  const sanitized = { ...data };
-  for (const key of Object.keys(sanitized)) {
+function sanitizeRecursive(data: any): any {
+  if (!data || typeof data !== 'object') return data;
+  const SENSITIVE_KEYS = ['otp', 'token', 'national_id', 'license_number', 'phone', 'password', 'jwt', 'authorization'];
+  
+  if (Array.isArray(data)) {
+    return data.map(sanitizeRecursive);
+  }
+
+  const sanitized: Record<string, any> = {};
+  for (const [key, value] of Object.entries(data)) {
     if (SENSITIVE_KEYS.some(k => key.toLowerCase().includes(k))) {
       sanitized[key] = '[REDACTED]';
+    } else {
+      sanitized[key] = sanitizeRecursive(value);
     }
   }
   return sanitized;
 }
 ```
+
+### IDs Permitidos para Correlación Tracing:
+`request_id`, `correlation_id`, `delivery_id`, `offer_id`, `business_id`, `driver_id`, `incident_id`, `transaction_id`.

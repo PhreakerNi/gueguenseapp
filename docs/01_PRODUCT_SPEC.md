@@ -1,9 +1,9 @@
 # 01 — ESPECIFICACIÓN DE PRODUCTO (PRODUCT SPECIFICATION)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.0.0-phase0  
-**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
-**Dominio:** Especificación de Producto y Estrategia B2B  
+**Versión:** 1.2.0-phase0  
+**Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
+**Dominio:** Especificación de Producto, Alcance B2B e Invariantes  
 
 ---
 
@@ -28,67 +28,30 @@ Los comercios locales (restaurantes, farmacias, tiendas boutique, e-commerce, di
 
 ---
 
-## 3. Propuesta de Valor B2B
+## 3. Propuesta de Valor B2B y Modalidades de Servicio
 
-Güegüense no compite como un simple directorio de comida; opera como una **Plataforma de Logística como Servicio (LaaS)** para negocios.
-
-### Principales Pilares B2B:
-* **Logística Plug-and-Play:** El negocio utiliza Güegüense para entregar cualquier pedido, sin importar si la venta ocurrió por WhatsApp, llamada, red social o tienda física.
-* **Seguridad y Confianza Garantizada:** 100% de los motorizados pasan por un proceso de verificación documental riguroso (identidad, antecedentes, vehículo) antes de recibir su primer servicio.
-* **Despacho Automatizado e Inteligente:** Algoritmo que empareja la entrega con el motorizado más apto en segundos, asegurando que un conductor no tenga más de una entrega activa en el MVP.
-* **Trazabilidad y Confirmación Segura por OTP:** Transparencia total de ubicación GPS y verificación de recepción mediante un código **DELIVERY_OTP** exclusivo del cliente final que el conductor nunca puede obtener vía API.
-* **Certeza Financiera:** Tarifas claras, cálculo dinámico basado en distancia/tiempo y control de cobro de efectivo en mano con liquidación transparente.
-
----
-
-## 4. Usuarios Objetivos (Target Persona)
-
-| Tipo de Usuario | Descripción | Necesidad Principal |
-| :--- | :--- | :--- |
-| **Comercio / Negocio (B2B)** | Restaurantes, farmacias, tiendas, supermercados, floristerías, e-commerce, pymes. | Encontrar un motorizado verificado de forma inmediata para enviar un paquete sin pagar comisiones sobre el valor de su venta. |
-| **Motorizado (Driver)** | Conductores independientes de motocicleta con vehículo propio y documentación en regla. | Obtener ingresos justos, transparentes y bajo demanda, optimizando sus rutas y tiempos operativos. |
-| **Equipo Operativo / Admin** | Personal administrativo y de soporte de Güegüense. | Monitorear la flota activa, auditar verificaciones, resolver disputas y mantener la salud financiera del sistema. |
-| **Cliente Final (Consumidor)** | Receptor del paquete o comprador del negocio. | Conocer cuándo llegará su pedido mediante un enlace de tracking web dinámico y confirmar la recepción entregando su OTP al conductor. |
-
----
-
-## 5. Modalidades de Servicio
-
-### 5.1 Modalidad A — Solo Delivery (Prioridad Absoluta MVP)
+### 3.1 Modalidad A — Solo Delivery (Prioridad Absoluta MVP)
 El comercio ya realizó la venta por sus propios canales. La app se utiliza puramente como **motor de contratación logística**.
 * **Entradas:** Dirección de recogida (sucursal), dirección de entrega, contacto del destinatario, tipo de paquete, cobro en destino (si aplica).
-* **Salidas:** Cotización instantánea, asignación de motorizado verificado, seguimiento GPS en vivo, validación de entrega por DELIVERY_OTP.
+* **Salidas:** Cotización instantánea (Quote), asignación de motorizado verificado, seguimiento GPS en vivo, validación de transferencia de custodia por `PICKUP_CODE` y confirmación de entrega por `DELIVERY_OTP`.
 * **Requisito de catálogo:** Ninguno.
 
-### 5.2 Modalidad B — Catálogo / Menú Directo (Fase Posterior)
-Permite al negocio registrar su menú/catálogo dentro de Güegüense y obtener una storefront pública para recibir pedidos directos.
+### 3.2 Modalidad B — Catálogo / Menú Directo (Fase Posterior al MVP)
+Permite al negocio registrar su catálogo dentro de Güegüense y obtener una storefront pública para recibir pedidos directos.
 
 ---
 
-## 6. Componentes de la Plataforma (Monorepo & Supabase CLI)
-
-```text
-                                ┌───────────────────────────┐
-                                │   Supabase / PostgreSQL   │
-                                │   (Auth, DB, Realtime, Edge)│
-                                └─────────────┬─────────────┘
-                                              │
-        ┌──────────────────────┬──────────────┴──────────────┬──────────────────────┐
-        │                      │                             │                      │
-┌───────▼───────────┐  ┌───────▼───────────┐         ┌───────▼───────────┐  ┌───────▼───────────┐
-│ Güegüense Negocios│  │ Güegüense Driver  │         │  Güegüense Admin  │  │   Tracking Web    │
-│  (App Mobile B2B) │  │  (App Mobile)     │         │   (Panel Web)     │  │   (Cliente Web)   │
-└───────────────────┘  └───────────────────┘         └───────────────────┘  └───────────────────┘
-```
-
----
-
-## 7. Reglas Fundamentales del Producto y Seguridad
+## 4. Invariantes Absolutos del Producto
 
 1. **Backend como Fuente de Verdad:** Ninguna aplicación cliente calcula precios, asigna estados ni adjudica viajes por su cuenta. Todo cambio de estado es validado por el backend.
-2. **Doble Invariante de Despacho:** Una entrega NUNCA puede tener dos motorizados asignados en paralelo, y un motorizado NUNCA puede tener dos entregas activas simultáneamente en el MVP.
-3. **Separación Estricta de Códigos (PICKUP_CODE vs. DELIVERY_OTP):**
-   * **`PICKUP_CODE`:** Código opcional de transferencia de custodia en el negocio (no confirma la entrega final).
-   * **`DELIVERY_OTP`:** Código numérico de 4 a 6 dígitos exclusivo del cliente final. El backend NUNCA lo envía al conductor ni al negocio. La App Driver solo permite escribir el código dictado por el destinatario.
-4. **Resguardo de OTP:** Almacenado como hash (`otp_hash`) con límite de intentos y expiración.
-5. **Separación de Liciclos (Delivery vs. Incidencias):** Los problemas operativos (accidente, avería, pérdida de GPS) se manejan en la entidad `incidents` sin corromper el ciclo de vida del delivery.
+2. **Doble Invariante de Despacho:**
+   * **Invariante A:** Una entrega NUNCA puede tener más de 1 conductor activo.
+   * **Invariante B:** Un conductor NUNCA puede tener más de 1 entrega comprometida en el MVP.
+3. **Separación de Custodia y Códigos:**
+   * **`PICKUP_CODE`:** Utilizado en el negocio para confirmar que el conductor asignado recibe el paquete físico.
+   * **`DELIVERY_OTP`:** Código aleatorio de 6 dígitos exclusivo del destinatario. Almacenado como hash (`otp_digest`). NUNCA se retorna por API al conductor, negocio ni operadores.
+4. **Separación de Ciclos de Vida:**
+   * **Quote Lifecycle** (`DRAFT` $\rightarrow$ `QUOTED` $\rightarrow$ `CONSUMED` / `EXPIRED` / `CANCELED`) es independiente del **Delivery Lifecycle**.
+   * **Incident Lifecycle** (`incidents`) está desacoplado del estado del delivery.
+   * **Return Lifecycle** (`RETURN_REQUIRED` $\rightarrow$ `RETURNING` $\rightarrow$ `RETURNED`) maneja la devolución de custodia post-pickup.
+5. **No Mezclar Finanzas:** El dinero en efectivo recaudado por el conductor (`CASH_HELD_BY_DRIVER`) es un activo separado de la ganancia por servicio (`DRIVER_PAYABLE`).

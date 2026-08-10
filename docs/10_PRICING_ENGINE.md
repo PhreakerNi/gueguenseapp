@@ -1,8 +1,8 @@
 # 10 — MOTOR DE PRECIOS Y AJUSTES (PRICING ENGINE)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.0.0-phase0  
-**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
+**Versión:** 1.2.0-phase0  
+**Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Tarificación Dinámica, Precios Cotizados vs. Finales y Ajustes  
 
 ---
@@ -24,7 +24,7 @@ Cualquier variación en el costo del viaje genera una entrada transparente de aj
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│                   TIPOS DE AJUSTES DE TARIFA (`adjustment_type`)       │
+│                   TIPOS DE AJUSTES DE TARIFA (`PRICING_ADJUSTMENT_TYPE`)│
 ├─────────────────┬──────────────────────────────────────────────────────┤
 │ `WAITING_FEE`   │ Cobro por tiempo de espera excedido en sucursal (>5m)│
 ├─────────────────┼──────────────────────────────────────────────────────┤
@@ -35,6 +35,8 @@ Cualquier variación en el costo del viaje genera una entrada transparente de aj
 │ `DISCOUNT`      │ Promociones o cupones aplicados al negocio           │
 ├─────────────────┼──────────────────────────────────────────────────────┤
 │ `SUBSIDY`       │ Bonificación o subsidio aportado por Güegüense       │
+├─────────────────┼──────────────────────────────────────────────────────┤
+│ `MANUAL_ADJUST` │ Ajuste manual de arbitraje autorizado por Admin      │
 └─────────────────┴──────────────────────────────────────────────────────┘
 ```
 
@@ -42,7 +44,7 @@ Cualquier variación en el costo del viaje genera una entrada transparente de aj
 
 ## 3. Reconciliación Financiera
 
-Se elimina el invariant simplista `quoted_price = driver_earning + platform_fee`. La fórmula de reconciliación contable exacta al finalizar el servicio es:
+La fórmula de reconciliación contable exacta al finalizar el servicio es:
 
 $$\text{final\_price} = \text{driver\_earning} + \text{platform\_fee} \pm \text{ajustes\_terceros}$$
 

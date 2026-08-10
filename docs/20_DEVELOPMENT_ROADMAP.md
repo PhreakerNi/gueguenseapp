@@ -1,8 +1,8 @@
 # 20 — HOJA DE RUTA Y ROADMAP DE DESARROLLO (DEVELOPMENT ROADMAP)
 
 **Proyecto:** Güegüense  
-**Versión:** 1.0.0-phase0  
-**Estado:** FASE 0 — EN REVISIÓN (Pendiente de Aprobación Formal)  
+**Versión:** 1.2.0-phase0  
+**Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Dominio:** Planificación por Fases, Entregables y Definition of Done (DoD)  
 
 ---
@@ -15,7 +15,7 @@ El proyecto Güegüense se ejecutará en **11 Fases Secuenciales Estrictas** (Fa
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        RESUMEN DE FASES DEL ROADMAP                    │
 ├─────────┬───────────────────────────────┬──────────────────────────────┤
-│ Fase 0  │ Especificación y Arquitectura │ 🟡 FASE 0 — EN REVISIÓN     │
+│ Fase 0  │ Especificación y Arquitectura │ 🟡 EN REVISIÓN / CANDIDATA   │
 ├─────────┼───────────────────────────────┼──────────────────────────────┤
 │ Fase 1  │ Fundación y Estructura Core   │ ⚪ Pendiente (Aceptación F0) │
 ├─────────┼───────────────────────────────┼──────────────────────────────┤
@@ -43,7 +43,7 @@ El proyecto Güegüense se ejecutará en **11 Fases Secuenciales Estrictas** (Fa
 
 ## 2. Detalle de Fases de Desarrollo
 
-### 🟡 Fase 0 — Especificación y Arquitectura (EN REVISIÓN)
+### 🟡 Fase 0 — Especificación y Arquitectura (EN REVISIÓN / CANDIDATA A APROBACIÓN)
 * **Objetivo:** Definir la totalidad del producto, roles, máquina de estados, arquitectura de datos, API, dispatch, seguridad y diseño antes de escribir una sola línea de código ejecutable.
-* **Entregables:** 20 Documentos técnicos oficiales en `/docs` + `README.md`.
-* **Definition of Done (DoD):** Documentación revisada, auditada y aprobada formalmente por el usuario. **Queda expresamente prohibido avanzar a la Fase 1 sin esta aprobación.**
+* **Entregables:** 20 Documentos técnicos oficiales en `/docs` + `README.md` alineados al 100% con `Gueguense_Directiva_Cerebro_Fase0_v1_2.md`.
+* **Definition of Done (DoD):** Documentación revisada, auditada y aprobada formalmente por el Cerebro/usuario. **Queda expresamente prohibido avanzar a la Fase 1 sin esta aprobación.**
