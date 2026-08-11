@@ -3,7 +3,7 @@
 **Proyecto:** Güegüense  
 **Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Control de Acceso, Identidad `auth.users`, Roles de Plataforma, Membresías Comerciales (N:M Sucursales), RBAC y Custodia en Cuentas Suspendidas  
+**Dominio:** Control de Acceso, Identidad `auth.users`, Roles de Plataforma, Membresías Comerciales (N:M Sucursales), RBAC y Custodia en Cuentas Suspendidas
 
 ---
 
@@ -35,9 +35,9 @@ Güegüense basa su autenticación en **Supabase Auth (`auth.users`)**, separand
 
 Para evitar ambigüedades en gerentes que administran múltiples sucursales, el alcance de permisos se modela mediante la tabla intermedia N:M **`public.business_member_locations`**:
 
-* **`business_owner`:** Alcance global implícito sobre todas las sucursales pasadas, presentes y futuras del comercio.
-* **`business_manager`:** Gerente de sucursal. Asociado a 1 o N sucursales en `business_member_locations`. Puede crear/cancelar entregas pre-pickup y gestionar personal dentro de sus sucursales asignadas.
-* **`business_employee`:** Despachador de caja. Asociado a 1 o N sucursales específicas. Crea envíos y confirma la transferencia de custodia en sucursal.
+- **`business_owner`:** Alcance global implícito sobre todas las sucursales pasadas, presentes y futuras del comercio.
+- **`business_manager`:** Gerente de sucursal. Asociado a 1 o N sucursales en `business_member_locations`. Puede crear/cancelar entregas pre-pickup y gestionar personal dentro de sus sucursales asignadas.
+- **`business_employee`:** Despachador de caja. Asociado a 1 o N sucursales específicas. Crea envíos y confirma la transferencia de custodia en sucursal.
 
 ---
 
@@ -52,15 +52,15 @@ Si el perfil de un conductor o comercio cambia a `SUSPENDED` o `BLOCKED`:
 
 ## 4. Matriz Canónica de Permisos por Recurso (RBAC & RLS)
 
-| Recurso / Operación | super_admin | admin | operator | verification_agent | business_owner | business_manager | business_employee | driver | Tracking Token Holder |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Gestionar Roles Admin** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Aprobar Documentos Driver** | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Configurar Tarifas/Zonas** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Crear Cotización / Delivery** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ (Scope N:M) | ✅ (Scope N:M) | ❌ | ❌ |
-| **Validar `PICKUP_CODE` (Custodia)**| ✅ | ✅ | ✅ | ❌ | ✅ | ✅ (Scope N:M) | ✅ (Scope N:M) | ❌ | ❌ |
-| **Ver `DELIVERY_OTP` (Plano)** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (Endpoint Customer) |
-| **Ingresar `DELIVERY_OTP`** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| **Aceptar Oferta Delivery** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (Solo Active) | ❌ |
-| **Aprobar Controlled Handoff** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Ver Documentos Cifrados** | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ (Propios) | ❌ |
+| Recurso / Operación                  | super_admin | admin | operator | verification_agent | business_owner | business_manager | business_employee |      driver      | Tracking Token Holder  |
+| :----------------------------------- | :---------: | :---: | :------: | :----------------: | :------------: | :--------------: | :---------------: | :--------------: | :--------------------: |
+| **Gestionar Roles Admin**            |     ✅      |  ❌   |    ❌    |         ❌         |       ❌       |        ❌        |        ❌         |        ❌        |           ❌           |
+| **Aprobar Documentos Driver**        |     ✅      |  ✅   |    ❌    |         ✅         |       ❌       |        ❌        |        ❌         |        ❌        |           ❌           |
+| **Configurar Tarifas/Zonas**         |     ✅      |  ✅   |    ❌    |         ❌         |       ❌       |        ❌        |        ❌         |        ❌        |           ❌           |
+| **Crear Cotización / Delivery**      |     ✅      |  ❌   |    ❌    |         ❌         |       ✅       |  ✅ (Scope N:M)  |  ✅ (Scope N:M)   |        ❌        |           ❌           |
+| **Validar `PICKUP_CODE` (Custodia)** |     ✅      |  ✅   |    ✅    |         ❌         |       ✅       |  ✅ (Scope N:M)  |  ✅ (Scope N:M)   |        ❌        |           ❌           |
+| **Ver `DELIVERY_OTP` (Plano)**       |     ❌      |  ❌   |    ❌    |         ❌         |       ❌       |        ❌        |        ❌         |        ❌        | ✅ (Endpoint Customer) |
+| **Ingresar `DELIVERY_OTP`**          |     ❌      |  ❌   |    ❌    |         ❌         |       ❌       |        ❌        |        ❌         |        ✅        |           ❌           |
+| **Aceptar Oferta Delivery**          |     ❌      |  ❌   |    ❌    |         ❌         |       ❌       |        ❌        |        ❌         | ✅ (Solo Active) |           ❌           |
+| **Aprobar Controlled Handoff**       |     ✅      |  ✅   |    ✅    |         ❌         |       ❌       |        ❌        |        ❌         |        ❌        |           ❌           |
+| **Ver Documentos Cifrados**          |     ✅      |  ✅   |    ❌    |         ✅         |       ❌       |        ❌        |        ❌         |   ❌ (Propios)   |           ❌           |

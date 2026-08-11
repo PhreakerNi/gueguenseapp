@@ -3,7 +3,7 @@
 **Proyecto:** Güegüense  
 **Versión:** 1.6.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Panel de Control Administrativo (17 Módulos Especificados), Permisos e Intervención Extraordinaria  
+**Dominio:** Panel de Control Administrativo (17 Módulos Especificados), Permisos e Intervención Extraordinaria
 
 ---
 

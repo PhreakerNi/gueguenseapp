@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Production & Build outputs
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# Expo & React Native
+.expo/
+web-build/
+*.expo/
+
+# Supabase
+supabase/.temp/
+
+# Environment & Secrets
+.env
+.env*.local
+.env.production
+.env.staging
+.env.development
+!.env.example
+
+# Logs & System
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db

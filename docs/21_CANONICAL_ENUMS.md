@@ -3,7 +3,7 @@
 **Proyecto:** Güegüense  
 **Versión:** 1.7.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Matriz Canónica de Estados, Tipos y Enumeradores de Dominio Nombres Completos Sin Abreviaciones  
+**Dominio:** Matriz Canónica de Estados, Tipos y Enumeradores de Dominio Nombres Completos Sin Abreviaciones
 
 ---
 

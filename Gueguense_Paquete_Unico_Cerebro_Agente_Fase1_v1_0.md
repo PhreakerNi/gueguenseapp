@@ -405,8 +405,7 @@ workspace:*
 pnpm install
 ```
 
-desde root.
-8. Verificar duplicados críticos:
+desde root. 8. Verificar duplicados críticos:
 
 ```text
 pnpm why react

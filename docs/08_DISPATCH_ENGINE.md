@@ -3,7 +3,7 @@
 **Proyecto:** Güegüense  
 **Versión:** 1.8.0-phase0  
 **Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Algoritmo Completo de Despacho (13 Pasos), Motor de Scoring, Compute Route Matrix Top-N y Mutex `driver_presence`  
+**Dominio:** Algoritmo Completo de Despacho (13 Pasos), Motor de Scoring, Compute Route Matrix Top-N y Mutex `driver_presence`
 
 ---
 
@@ -53,6 +53,7 @@ El **Dispatch Engine** ejecuta un pipeline optimizado para seleccionar al candid
 ```
 
 ### 13 Pasos del Pipeline:
+
 1. **Eligibility Filter:** Filtra conductores en regla (`VERIFIED`, `ACTIVE`, `AVAILABLE`).
 2. **PostGIS Candidate Discovery:** Búsqueda espacial rápida en base de datos.
 3. **Freshness Filter:** Descarte de señales GPS desactualizadas.
@@ -111,7 +112,7 @@ BEGIN
     END IF;
 
     -- 2. LOCK 1: Bloquear mutex operacional del conductor (driver_presence)
-    SELECT operational_state, location_updated_at 
+    SELECT operational_state, location_updated_at
     INTO v_operational_state, v_location_updated_at
     FROM public.driver_presence
     WHERE driver_id = v_driver_id

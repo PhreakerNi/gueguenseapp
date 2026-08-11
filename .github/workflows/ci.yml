@@ -1,0 +1,87 @@
+name: Güegüense Monorepo CI - Phase 1
+
+on:
+  push:
+    branches: [main, "phase/*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality-gates:
+    name: Code Quality & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+
+      - name: Setup pnpm 11
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Cache pnpm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Formatting
+        run: pnpm format:check
+
+      - name: Lint Codebase
+        run: pnpm lint
+
+      - name: Type Check Workspace
+        run: pnpm typecheck
+
+      - name: Run Unit Tests
+        run: pnpm test
+
+      - name: Build Web Applications
+        run: pnpm build
+
+  database-gates:
+    name: Supabase Migration & Database Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+
+      - name: Setup pnpm 11
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.15.8
+
+      - name: Start Supabase Local Stack
+        run: pnpm supabase:start
+
+      - name: Run pgTAP Database Tests
+        run: pnpm supabase:test

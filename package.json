@@ -1,0 +1,32 @@
+{
+  "name": "gueguenseapp-monorepo",
+  "private": true,
+  "version": "1.0.0-phase1",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset",
+    "supabase:test": "supabase test db",
+    "db:types": "supabase gen types typescript --local > packages/types/src/database.generated.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "eslint": "^9.21.0",
+    "prettier": "^3.5.2",
+    "supabase": "^2.15.8",
+    "turbo": "^2.4.4",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.0"
+  }
+}

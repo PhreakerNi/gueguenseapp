@@ -188,10 +188,13 @@ Cuando termines, NO comiences Fase 1.
 Entrégame un reporte con:
 
 ### 1. Archivos modificados
+
 Lista completa.
 
 ### 2. Correcciones aplicadas
+
 Agrupadas por:
+
 - Producto
 - State Machine
 - Database
@@ -207,18 +210,23 @@ Agrupadas por:
 - Deployment
 
 ### 3. Contradicciones encontradas
+
 Indica dónde estaban y cómo se resolvieron.
 
 ### 4. Decisiones pendientes
+
 Solo decisiones reales que requieran al usuario/Cerebro.
 
 ### 5. Checklist Fase 0
+
 Reproduce el checklist de Definition of Done de la Directiva y marca:
+
 - CUMPLIDO
 - PENDIENTE
 - BLOQUEADO
 
 ### 6. Estado final
+
 Debe decir exactamente:
 
 ```text
@@ -226,6 +234,7 @@ FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN
 ```
 
 ### 7. Detente
+
 Espera la revisión del Cerebro/usuario.
 
 NO empieces a programar.

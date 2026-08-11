@@ -36,7 +36,9 @@ No comenzar Fase 1.
 ---
 
 # ============================================================
+
 # PARTE A — DIRECTIVA DEL CEREBRO
+
 # ============================================================
 
 # GÜEGÜENSE — AUDITORÍA DEL CEREBRO FASE 0 v1.7
@@ -580,11 +582,12 @@ FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN
 
 Después detenerse.
 
-
 ---
 
 # ============================================================
+
 # PARTE B — PROMPT DE EJECUCIÓN DEL AGENTE
+
 # ============================================================
 
 # PROMPT DEL AGENTE — PARCHE FINAL DE CUMPLIMIENTO FASE 0 v1.7
@@ -793,11 +796,12 @@ Después DETENTE.
 
 No comiences Fase 1.
 
-
 ---
 
 # ============================================================
+
 # REGLA FINAL DEL PAQUETE ÚNICO
+
 # ============================================================
 
 Cuando termines de aplicar este documento:

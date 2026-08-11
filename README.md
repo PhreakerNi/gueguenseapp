@@ -1,9 +1,10 @@
 # GÜEGÜENSE — Plataforma Logística y Delivery B2B Bajo Demanda
 
-**Versión:** 1.8.0-phase0  
-**Estado:** FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
+**Versión:** 1.0.0-phase1  
+**Estado:** FASE 0 — ✅ APROBADA \| FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
+**Rama de Desarrollo:** `phase/1-foundation`  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase0_v1_8.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_v1_0.md`
 
 ---
 
@@ -18,26 +19,26 @@
 ```text
 gueguenseapp/
 ├── apps/
-│   ├── business-mobile/    # App móvil React Native (Expo) para comercios
-│   ├── driver-mobile/      # App móvil React Native (Expo) para motorizados
-│   ├── admin-web/          # Panel administrativo Web Next.js (Supabase SSR)
-│   └── tracking-web/       # Portal web de seguimiento (Protegido por Bearer Token)
+│   ├── business-mobile/    # App móvil Expo SDK 57 (React Native) para comercios
+│   ├── driver-mobile/      # App móvil Expo SDK 57 (React Native) para motorizados
+│   ├── admin-web/          # Panel administrativo Web Next.js 16.x (App Router)
+│   └── tracking-web/       # Portal web de seguimiento Next.js 16.x (App Router)
 │
 ├── packages/
-│   ├── types/              # Definiciones TypeScript globales
-│   ├── schemas/            # Schemas Zod / validaciones compartidas
-│   ├── domain/             # Lógica de negocio y máquina de estados pura
-│   ├── ui/                 # Design System & componentes compartidos
-│   └── config/             # Configuraciones compartidas (ESLint, TS, Tailwind)
+│   ├── types/              # Definiciones TypeScript globales y tipos DB generados
+│   ├── schemas/            # Schemas Zod y validaciones compartidas
+│   ├── domain/             # Estados canónicos, guards puros y lógica pura
+│   ├── ui/                 # Design System tokens y componentes compartidos
+│   └── config/             # TSConfig base y configuraciones compartidas
 │
 ├── supabase/               # Configuración Oficial Supabase CLI
-│   ├── migrations/         # Migraciones SQL versionadas (Expand/Contract)
+│   ├── migrations/         # Migraciones SQL de Fundación (Identity, Business, Driver)
 │   ├── functions/          # Edge Functions Serverless (TypeScript/Deno)
-│   ├── tests/              # Pruebas de integración pgTAP y RLS Policies
-│   ├── seed.sql            # Datos semilla para entorno local
-│   └── config.toml         # Configuración del proyecto Supabase
+│   ├── tests/              # Pruebas pgTAP de RLS y schema foundation
+│   ├── seed.sql            # Datos sintéticos para entorno de desarrollo local
+│   └── config.toml         # Configuración del proyecto local Supabase CLI
 │
-└── docs/                   # Especificación técnica oficial (Fase 0)
+└── docs/                   # Especificación técnica oficial
 ```
 
 ---
@@ -63,11 +64,5 @@ gueguenseapp/
 17. [17_TESTING_STRATEGY.md](docs/17_TESTING_STRATEGY.md) — Estrategia de Pruebas Unitarias, RLS, Concurrencia Dual, Ingesta GPS Validada, Idempotencia No Humana y Payout States.
 18. [18_OBSERVABILITY.md](docs/18_OBSERVABILITY.md) — Logs Estructurados, Redacción Recursiva de PII, Sanitización de URLs/Headers, Omisión de Bearer Tokens en Access Logs y Reducción de Precisión GPS.
 19. [19_DEPLOYMENT_ARCHITECTURE.md](docs/19_DEPLOYMENT_ARCHITECTURE.md) — Pipeline CI/CD, Promoción Dev $\rightarrow$ Staging $\rightarrow$ Prod, Secrets Ownership, Restore Drills, Drift Check y Forced Upgrade.
-20. [20_DEVELOPMENT_ROADMAP.md](docs/20_DEVELOPMENT_ROADMAP.md) — Hoja de Ruta (Estado: `FASE 0 — EN REVISIÓN / CANDIDATA A APROBACIÓN`).
+20. [20_DEVELOPMENT_ROADMAP.md](docs/20_DEVELOPMENT_ROADMAP.md) — Hoja de Ruta (Estado: `FASE 0 — ✅ APROBADA | FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN`).
 21. [21_CANONICAL_ENUMS.md](docs/21_CANONICAL_ENUMS.md) — Diccionario Canónico Completo de Enumeradores y Statuses Auxiliares `CHECK-backed` de Base de Datos.
-
----
-
-## 🚫 Regla de Ejecución (Fase 0)
-
-Durante la **Fase 0 (EN REVISIÓN)**, queda estrictamente prohibida la inicialización de frameworks, instalación de dependencias npm o creación de migraciones de base de datos. Toda implementación técnica iniciará únicamente tras la aprobación formal del Cerebro/usuario.

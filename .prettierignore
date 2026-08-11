@@ -1,0 +1,7 @@
+pnpm-lock.yaml
+.next/
+dist/
+build/
+.expo/
+supabase/.temp/
+packages/types/src/database.generated.ts
