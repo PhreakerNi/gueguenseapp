@@ -8,6 +8,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },
+  "expo": {
+    "install": {
+      "exclude": ["typescript"]
+    }
+  },
   "dependencies": {
     "@gueguense/config": "workspace:*",
     "@gueguense/domain": "workspace:*",

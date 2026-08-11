@@ -19,6 +19,7 @@ export interface Database {
           avatar_url: string | null;
           phone: string | null;
           created_at: string;
+          updated_at: string;
         };
         Insert: {
           id: string;
@@ -27,6 +28,7 @@ export interface Database {
           avatar_url?: string | null;
           phone?: string | null;
           created_at?: string;
+          updated_at?: string;
         };
         Update: {
           id?: string;
@@ -35,6 +37,7 @@ export interface Database {
           avatar_url?: string | null;
           phone?: string | null;
           created_at?: string;
+          updated_at?: string;
         };
       };
       businesses: {
@@ -46,6 +49,7 @@ export interface Database {
           verification_status: string;
           account_status: string;
           created_at: string;
+          updated_at: string;
         };
         Insert: {
           id?: string;
@@ -55,6 +59,7 @@ export interface Database {
           verification_status?: string;
           account_status?: string;
           created_at?: string;
+          updated_at?: string;
         };
         Update: {
           id?: string;
@@ -63,6 +68,85 @@ export interface Database {
           tax_id?: string | null;
           verification_status?: string;
           account_status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      business_members: {
+        Row: {
+          id: string;
+          business_id: string;
+          user_id: string;
+          role: string;
+          status: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          user_id: string;
+          role?: string;
+          status?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          user_id?: string;
+          role?: string;
+          status?: string;
+          created_at?: string;
+        };
+      };
+      business_locations: {
+        Row: {
+          id: string;
+          business_id: string;
+          name: string;
+          address_text: string;
+          location: unknown;
+          pickup_instructions: string | null;
+          is_active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          name: string;
+          address_text: string;
+          location: unknown;
+          pickup_instructions?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          name?: string;
+          address_text?: string;
+          location?: unknown;
+          pickup_instructions?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+        };
+      };
+      business_member_locations: {
+        Row: {
+          id: string;
+          business_member_id: string;
+          business_location_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_member_id: string;
+          business_location_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_member_id?: string;
+          business_location_id?: string;
           created_at?: string;
         };
       };
@@ -98,6 +182,96 @@ export interface Database {
           created_at?: string;
         };
       };
+      driver_documents: {
+        Row: {
+          id: string;
+          driver_id: string;
+          document_type: string;
+          storage_path: string;
+          verification_status: string;
+          rejection_reason: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          driver_id: string;
+          document_type: string;
+          storage_path: string;
+          verification_status?: string;
+          rejection_reason?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          driver_id?: string;
+          document_type?: string;
+          storage_path?: string;
+          verification_status?: string;
+          rejection_reason?: string | null;
+          created_at?: string;
+        };
+      };
+      vehicles: {
+        Row: {
+          id: string;
+          driver_id: string;
+          make: string;
+          model: string;
+          year: number;
+          color: string;
+          license_plate: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          driver_id: string;
+          make: string;
+          model: string;
+          year: number;
+          color: string;
+          license_plate: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          driver_id?: string;
+          make?: string;
+          model?: string;
+          year?: number;
+          color?: string;
+          license_plate?: string;
+          created_at?: string;
+        };
+      };
+      driver_presence: {
+        Row: {
+          driver_id: string;
+          operational_state: string;
+          current_location: unknown | null;
+          location_updated_at: string | null;
+        };
+        Insert: {
+          driver_id: string;
+          operational_state?: string;
+          current_location?: unknown | null;
+          location_updated_at?: string | null;
+        };
+        Update: {
+          driver_id?: string;
+          operational_state?: string;
+          current_location?: unknown | null;
+          location_updated_at?: string | null;
+        };
+      };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      [_ in never]: never;
+    };
+    Enums: {
+      [_ in never]: never;
     };
   };
 }

@@ -1,2 +1,6 @@
-export * from "./database.generated.js";
-export type { DeliveryStatus } from "@gueguense/domain";
+export * from "./database.generated";
+export type {
+  DeliveryStatus,
+  QuoteStatus,
+  DriverVerificationStatus,
+} from "@gueguense/domain";

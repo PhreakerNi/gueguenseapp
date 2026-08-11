@@ -1,66 +1,103 @@
-# 20 — HOJA DE RUTA Y FASES DE DESARROLLO (DEVELOPMENT ROADMAP)
+# Güegüense — Roadmap de Desarrollo Incremental (20 Fases)
 
-**Proyecto:** Güegüense  
 **Versión:** 1.0.0-phase1  
-**Estado:** FASE 1 — EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Dominio:** Planificación Versionada, Fases de Ejecución del Monorepo y Entregables por Hito
+**Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
+**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Correccion_v1_2.md`
 
 ---
 
-## 1. Resumen Ejecutivo de Fases
+## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.2)
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│ FASE 0: ESPECIFICACIÓN ARQUITECTÓNICA COMPLETA                         │
-│ Estado: ✅ APROBADA                                                     │
-│ Entregable: 21 Documentos Técnicos + Paquete Único v1.8               │
-├────────────────────────────────────────────────────────────────────────┤
-│ FASE 1: FUNDACIÓN Y ESTRUCTURA CORE (MONOREPO)                         │
-│ Estado: 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN                        │
-│ Entregable: Pnpm Turborepo Workspace, 4 Apps, 5 Packages,             │
-│             Supabase CLI Local, RLS Foundation, Types, CI Pipeline     │
-├────────────────────────────────────────────────────────────────────────┤
-│ FASE 2: IDENTIDAD, AUTENTICACIÓN Y ONBOARDING                          │
-│ Estado: ⏳ PENDIENTE                                                   │
-│ Entregable: Login Supabase SSR, App Motorizado Auth, App Negocios Auth │
-├────────────────────────────────────────────────────────────────────────┤
-│ FASE 3: CICLO COMPLETO DE ENTREGA Y DISPATCH ENGINE                    │
-│ Estado: ⏳ PENDIENTE                                                   │
-│ Entregable: Cotización, Solicitud, Despacho Rondas, OTP, Devolución    │
-├────────────────────────────────────────────────────────────────────────┤
-│ FASE 4: TRACKING ADAPTATIVO Y PANEL ADMINISTRATIVO OPERATIVO           │
-│ Estado: ⏳ PENDIENTE                                                   │
-│ Entregable: Tracking Web Short Polling, Admin Web Operations           │
-├────────────────────────────────────────────────────────────────────────┤
-│ FASE 5: MOTOR FINANCIERO Y CONTABILIDAD DE DOBLE ENTRADA               │
-│ Estado: ⏳ PENDIENTE                                                   │
-│ Entregable: Ledger, Cash Settlements, Payout Lifecycle                │
-└────────────────────────────────────────────────────────────────────────┘
-```
+- **Node.js:** `24.18.0 LTS`
+- **Gestor de Paquetes:** `pnpm@11.21.0` (Workspaces monorepo con un único `pnpm-lock.yaml`)
+- **Orquestador Monorepo:** `turbo@2.10.9`
+- **Lenguaje:** `TypeScript 5.8.2` (Strict Mode)
+- **Framework Mobile:** `Expo SDK 57` (`57.0.12`, `react-native` 0.86.2, `react` 19.2.3, `expo-router` 57.0.12, `expo-doctor` 1.20.1)
+- **Framework Web:** `Next.js 16.3.0 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.3.0)
+- **Backend / DB:** `Supabase CLI 2.113.0` (PostgreSQL 15+, PostGIS, RLS Deny por defecto)
 
 ---
 
-## 2. Entregables Realizados en Fase 1 (Fundación Monorepo)
+## 🗺️ Fases del Proyecto
 
-1. **Toolchain Reproducible:** Node 24 LTS (`24.16.0`), pnpm 11 stable (`11.21.0`), Turborepo (`2.4.4`).
-2. **Monorepo Workspace:**
-   - `apps/business-mobile` (Expo SDK 57, React Native 0.78 / 0.86, Expo Router, Boot Screen)
-   - `apps/driver-mobile` (Expo SDK 57, React Native 0.78 / 0.86, Expo Router, Boot Screen)
-   - `apps/admin-web` (Next.js 16.x Active LTS App Router, Tailwind CSS, Technical Page)
-   - `apps/tracking-web` (Next.js 16.x Active LTS App Router, Tailwind CSS, Technical Page)
-3. **5 Packages Compartidos (`packages/`):**
-   - `@gueguense/config` (TSConfig base, convenciones)
-   - `@gueguense/domain` (Estados canónicos de `21_CANONICAL_ENUMS.md`, guards puros, unit tests)
-   - `@gueguense/types` (Tipos TypeScript DB generados `database.generated.ts`)
-   - `@gueguense/schemas` (Validaciones Zod compartidas)
-   - `@gueguense/ui` (Design Tokens derivados de `16_DESIGN_SYSTEM.md`)
-4. **Supabase Local & Foundation DB:**
-   - Supabase CLI fijado en devDependencies (`2.15.8`)
-   - Migración 1: PostGIS extension, pgTAP extension, schema `private` privado.
-   - Migración 2: Identity & Business Foundation (`profiles`, `businesses`, `business_members`, `business_locations`, `business_member_locations`).
-   - Migración 3: Driver Foundation (`drivers`, `driver_documents`, `vehicles`, `driver_presence`).
-   - Base de RLS Deny-By-Default + Restricción estricta de escritura directa a GPS (`driver_presence.current_location`).
-   - Generador de tipos DB (`pnpm db:types`).
-   - Pruebas de base de datos pgTAP (`supabase/tests/database/01_foundation_rls.test.sql`).
-5. **Calidad y CI Pipeline:**
-   - Workflow de GitHub Actions (`.github/workflows/ci.yml`) ejecutando format, lint, typecheck, unit tests, build web y pgTAP tests.
+### Fase 0 — Especificación y Arquitectura Congelada
+
+- **Estado:** ✅ **APROBADA** (Commit `8da741f` / v1.8)
+- **Entregables:** 21 documentos en `/docs`, README principal y directiva maestra.
+
+### Fase 1 — Fundación y Estructura Core Monorepo
+
+- **Estado:** 🟡 **EN REVISIÓN / CANDIDATA A APROBACIÓN** (`phase/1-foundation`)
+- **Objetivo:** Monorepo funcional con 4 aplicaciones, 5 paquetes compartidos, migraciones local Supabase (9 tablas foundation + RLS + pgTAP), types generados y CI pipeline.
+
+### Fase 2 — Autenticación, Gestión de Identidad y Sesiones
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 3 — Onboarding B2B y Registro de Conductores
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 4 — Gestión de Cotización de Envíos (Quote Engine)
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 5 — Creación y Ciclo de Vida del Envío (Delivery Engine)
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 6 — Motor de Despacho e Ingesta de Ofertas (Dispatch Engine)
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 7 — Aceptación y Asignación de Conductor
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 8 — Ingesta GPS y Tracking Live
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 9 — Transferencia de Custodia y Confirmación de Entrega (OTP / Proof)
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 10 — Retornos de Paquete y Redirección
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 11 — Transferencias Handoff entre Conductores
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 12 — Gestión de Incidentes e Intervención Administrativa
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 13 — Motor de Tarifación Avanzada (Pricing Engine)
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 14 — Libro Mayor Financiero (Financial Ledger)
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 15 — Liquidaciones en Efectivo y Cobros
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 16 — Solicitud y Procesamiento de Payouts
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 17 — Sistema de Notificaciones y Push
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 18 — Panel de Operaciones Administrativas (Admin Web)
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 19 — Despliegue de Infraestructura y Producción (Deployment)
+
+- **Estado:** ⏳ Pendiente (No iniciada)

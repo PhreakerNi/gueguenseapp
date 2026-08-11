@@ -78,7 +78,7 @@ jobs:
         run: pnpm --filter @gueguense/business-mobile exec expo config
 
       - name: Business Mobile Expo Doctor Check
-        run: pnpm --filter @gueguense/business-mobile exec expo-doctor
+        run: pnpm exec expo-doctor apps/business-mobile
 
       - name: Business Mobile Android Metro Export Bundle
         run: pnpm --filter @gueguense/business-mobile exec expo export --platform android --output-dir .expo/android-export
@@ -87,7 +87,7 @@ jobs:
         run: pnpm --filter @gueguense/driver-mobile exec expo config
 
       - name: Driver Mobile Expo Doctor Check
-        run: pnpm --filter @gueguense/driver-mobile exec expo-doctor
+        run: pnpm exec expo-doctor apps/driver-mobile
 
       - name: Driver Mobile Android Metro Export Bundle
         run: pnpm --filter @gueguense/driver-mobile exec expo export --platform android --output-dir .expo/android-export

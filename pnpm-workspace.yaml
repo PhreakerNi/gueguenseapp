@@ -1,10 +1,13 @@
 packages:
   - "apps/*"
   - "packages/*"
+overrides:
+  expo-constants: "~57.0.10"
 allowBuilds:
   esbuild: true
   sharp: true
   supabase: true
+  unrs-resolver: true
 minimumReleaseAgeExclude:
   - "@expo/cli@57.0.14"
   - "@expo/fingerprint@0.20.7"

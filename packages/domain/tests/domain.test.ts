@@ -27,14 +27,20 @@ describe("@gueguense/domain", () => {
   });
 
   it("should verify terminal delivery statuses are a subset of DELIVERY_STATUSES", () => {
-    TERMINAL_DELIVERY_STATUSES.forEach((status) => {
-      assert.strictEqual(DELIVERY_STATUSES.includes(status), true);
+    TERMINAL_DELIVERY_STATUSES.forEach((status: string) => {
+      const isPresent = (DELIVERY_STATUSES as readonly string[]).includes(
+        status,
+      );
+      assert.strictEqual(isPresent, true);
     });
   });
 
   it("should verify OTP_ALLOWED_STATES are a subset of DELIVERY_STATUSES", () => {
-    OTP_ALLOWED_STATES.forEach((status) => {
-      assert.strictEqual(DELIVERY_STATUSES.includes(status), true);
+    OTP_ALLOWED_STATES.forEach((status: string) => {
+      const isPresent = (DELIVERY_STATUSES as readonly string[]).includes(
+        status,
+      );
+      assert.strictEqual(isPresent, true);
     });
   });
 
