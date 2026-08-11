@@ -2,19 +2,19 @@
 
 **Versión:** 1.0.0-phase1  
 **Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Correccion_v1_3.md`
+**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Correccion_v1_4.md`
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.3)
+## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.4)
 
 - **Node.js:** `24.18.0 LTS`
-- **Gestor de Paquetes:** `pnpm@11.21.0` (Workspaces monorepo con un único `pnpm-lock.yaml`)
-- **Orquestador Monorepo:** `turbo@2.10.9`
+- **Gestor de Paquetes:** `pnpm@11.17.0` (Workspaces monorepo con un único `pnpm-lock.yaml`)
+- **Orquestador Monorepo:** `turbo@2.10.7`
 - **Lenguaje:** `TypeScript 5.8.2` (Strict Mode)
 - **Framework Mobile:** `Expo SDK 57` (`57.0.12`, `react-native` 0.86.2, `react` 19.2.3, `expo-router` 57.0.12, `expo-doctor` 1.20.1)
-- **Framework Web:** `Next.js 16.3.0 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.3.0)
-- **Backend / DB:** `Supabase CLI 2.113.0` (PostgreSQL 15+, PostGIS, RLS Deny por defecto)
+- **Framework Web:** `Next.js 16.2.12 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.2.12)
+- **Backend / DB:** `Supabase CLI 2.110.0` (PostgreSQL 15+, PostGIS, RLS Deny por defecto)
 
 ---
 

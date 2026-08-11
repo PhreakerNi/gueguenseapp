@@ -2,7 +2,7 @@
   "name": "gueguenseapp-monorepo",
   "private": true,
   "version": "1.0.0-phase1",
-  "packageManager": "pnpm@11.21.0",
+  "packageManager": "pnpm@11.17.0",
   "engines": {
     "node": ">=24.0.0 <25.0.0"
   },
@@ -25,8 +25,8 @@
     "eslint": "9.21.0",
     "expo-doctor": "1.20.1",
     "prettier": "3.5.2",
-    "supabase": "2.113.0",
-    "turbo": "2.10.9",
+    "supabase": "2.110.0",
+    "turbo": "2.10.7",
     "typescript": "5.8.2",
     "typescript-eslint": "8.26.0"
   }

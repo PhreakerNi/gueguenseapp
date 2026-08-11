@@ -4,7 +4,7 @@
 **Estado:** FASE 0 — ✅ APROBADA | FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Rama de Desarrollo:** `phase/1-foundation`  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Correccion_v1_3.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Correccion_v1_4.md`
 
 ---
 
@@ -21,8 +21,8 @@ gueguenseapp/
 ├── apps/
 │   ├── business-mobile/    # App móvil Expo SDK 57 (React Native 0.86.2) para comercios
 │   ├── driver-mobile/      # App móvil Expo SDK 57 (React Native 0.86.2) para motorizados
-│   ├── admin-web/          # Panel administrativo Web Next.js 16.3.0 Active LTS (App Router)
-│   └── tracking-web/       # Portal web de seguimiento Next.js 16.3.0 Active LTS (App Router)
+│   ├── admin-web/          # Panel administrativo Web Next.js 16.2.12 Active LTS (App Router)
+│   └── tracking-web/       # Portal web de seguimiento Next.js 16.2.12 Active LTS (App Router)
 │
 ├── packages/
 │   ├── types/              # Tipos TypeScript y database.generated.ts
@@ -42,15 +42,15 @@ gueguenseapp/
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.3)
+## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.4)
 
-- **Gestor de Paquetes:** `pnpm@11.21.0` (Monorepo Workspaces con un único `pnpm-lock.yaml`)
-- **Orquestador:** `turbo@2.10.9`
+- **Gestor de Paquetes:** `pnpm@11.17.0` (Monorepo Workspaces con un único `pnpm-lock.yaml`)
+- **Orquestador:** `turbo@2.10.7`
 - **Lenguaje:** `TypeScript 5.8.2` (Strict Mode)
 - **Entorno:** `Node.js 24.18.0 LTS`
 - **Mobile Stack:** `Expo SDK 57` (`react-native` 0.86.2, `react` 19.2.3, Expo Router 57.0.12)
-- **Web Stack:** `Next.js 16.3.0 Active LTS` (App Router, Turbopack)
-- **Base de Datos & Backend:** `Supabase CLI 2.113.0` (PostGIS, PostgreSQL 15+, RLS denegado por defecto)
+- **Web Stack:** `Next.js 16.2.12 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.2.12)
+- **Base de Datos & Backend:** `Supabase CLI 2.110.0` (PostGIS, PostgreSQL 15+, RLS denegado por defecto)
 - **Diagnostic Tool:** `expo-doctor 1.20.1`
 
 ---
