@@ -6,6 +6,7 @@
     "exactOptionalPropertyTypes": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
+    "types": ["node"],
     "paths": {
       "@/*": ["./src/*"]
     }
