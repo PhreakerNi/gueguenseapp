@@ -77,6 +77,9 @@ jobs:
       - name: Business Mobile Expo Config Check
         run: pnpm --filter @gueguense/business-mobile exec expo config
 
+      - name: Business Mobile Expo Install Check
+        run: pnpm --filter @gueguense/business-mobile exec expo install --check
+
       - name: Business Mobile Expo Doctor Check
         run: pnpm exec expo-doctor apps/business-mobile
 
@@ -85,6 +88,9 @@ jobs:
 
       - name: Driver Mobile Expo Config Check
         run: pnpm --filter @gueguense/driver-mobile exec expo config
+
+      - name: Driver Mobile Expo Install Check
+        run: pnpm --filter @gueguense/driver-mobile exec expo install --check
 
       - name: Driver Mobile Expo Doctor Check
         run: pnpm exec expo-doctor apps/driver-mobile

@@ -2,11 +2,11 @@
 
 **Versión:** 1.0.0-phase1  
 **Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Correccion_v1_2.md`
+**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Correccion_v1_3.md`
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.2)
+## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.3)
 
 - **Node.js:** `24.18.0 LTS`
 - **Gestor de Paquetes:** `pnpm@11.21.0` (Workspaces monorepo con un único `pnpm-lock.yaml`)

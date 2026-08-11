@@ -4,7 +4,7 @@
 **Estado:** FASE 0 — ✅ APROBADA | FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Rama de Desarrollo:** `phase/1-foundation`  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Correccion_v1_1.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Correccion_v1_3.md`
 
 ---
 
@@ -19,10 +19,10 @@
 ```text
 gueguenseapp/
 ├── apps/
-│   ├── business-mobile/    # App móvil Expo SDK 57 (React Native 0.86) para comercios
-│   ├── driver-mobile/      # App móvil Expo SDK 57 (React Native 0.86) para motorizados
-│   ├── admin-web/          # Panel administrativo Web Next.js 16.x Active LTS (App Router)
-│   └── tracking-web/       # Portal web de seguimiento Next.js 16.x Active LTS (App Router)
+│   ├── business-mobile/    # App móvil Expo SDK 57 (React Native 0.86.2) para comercios
+│   ├── driver-mobile/      # App móvil Expo SDK 57 (React Native 0.86.2) para motorizados
+│   ├── admin-web/          # Panel administrativo Web Next.js 16.3.0 Active LTS (App Router)
+│   └── tracking-web/       # Portal web de seguimiento Next.js 16.3.0 Active LTS (App Router)
 │
 ├── packages/
 │   ├── types/              # Tipos TypeScript y database.generated.ts
@@ -42,15 +42,16 @@ gueguenseapp/
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.1)
+## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.3)
 
 - **Gestor de Paquetes:** `pnpm@11.21.0` (Monorepo Workspaces con un único `pnpm-lock.yaml`)
-- **Orquestador:** `turbo@2.4.4`
+- **Orquestador:** `turbo@2.10.9`
 - **Lenguaje:** `TypeScript 5.8.2` (Strict Mode)
 - **Entorno:** `Node.js 24.18.0 LTS`
-- **Mobile Stack:** `Expo SDK 57` (`react-native` 0.86, `react` 19.2.3, Expo Router v5 line)
-- **Web Stack:** `Next.js 16.x Active LTS` (App Router, Turbopack)
-- **Base de Datos & Backend:** `Supabase CLI 2.15.8` (PostGIS, PostgreSQL 15+, RLS denegado por defecto)
+- **Mobile Stack:** `Expo SDK 57` (`react-native` 0.86.2, `react` 19.2.3, Expo Router 57.0.12)
+- **Web Stack:** `Next.js 16.3.0 Active LTS` (App Router, Turbopack)
+- **Base de Datos & Backend:** `Supabase CLI 2.113.0` (PostGIS, PostgreSQL 15+, RLS denegado por defecto)
+- **Diagnostic Tool:** `expo-doctor 1.20.1`
 
 ---
 
@@ -82,4 +83,4 @@ pnpm build
 
 - **Commits:** Mensajes bajo la convención _Conventional Commits_ (ej. `feat(foundation): ...`, `fix(security): ...`).
 - **Prohibido:** No añadir atribución ni firmas AI en commits ("Co-Authored-By").
-- **Quality Gates:** El código solo puede unirse tras aprobar format, lint, typecheck, unit tests, web build y pgTAP db test.
+- **Quality Gates:** El código solo puede unirse tras aprobar format, lint, typecheck, unit tests, web build, expo-doctor y pgTAP db test.
