@@ -1,26 +1,32 @@
--- Migration 3: Driver Foundation Tables + RLS
+-- Migration 3: Driver Foundation Tables + Secure RLS Policies
 
 -- 1. Drivers (1:1 with auth.users)
 CREATE TABLE public.drivers (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     verification_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED', 'REJECTED', 'EXPIRED')),
     account_status TEXT NOT NULL DEFAULT 'REGISTERED' CHECK (account_status IN ('REGISTERED', 'ACTIVE', 'SUSPENDED', 'BLOCKED', 'CLOSED')),
-    national_id_number TEXT,
-    license_number TEXT,
+    national_id_number TEXT UNIQUE,
+    license_number TEXT UNIQUE,
     rating_avg NUMERIC(3,2) NOT NULL DEFAULT 5.00,
     total_deliveries INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX idx_drivers_verification_status ON public.drivers(verification_status);
+CREATE INDEX idx_drivers_account_status ON public.drivers(account_status);
 
 -- 2. Driver Documents
 CREATE TABLE public.driver_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     driver_id UUID NOT NULL REFERENCES public.drivers(id) ON DELETE CASCADE,
     document_type TEXT NOT NULL CHECK (document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION', 'CRIMINAL_RECORD', 'INSURANCE')),
-    upload_id UUID UNIQUE NOT NULL,
+    storage_path TEXT NOT NULL,
     verification_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED', 'REJECTED', 'EXPIRED')),
+    rejection_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX idx_driver_documents_driver_id ON public.driver_documents(driver_id);
 
 -- 3. Vehicles
 CREATE TABLE public.vehicles (
@@ -28,10 +34,13 @@ CREATE TABLE public.vehicles (
     driver_id UUID NOT NULL REFERENCES public.drivers(id) ON DELETE CASCADE,
     make TEXT NOT NULL,
     model TEXT NOT NULL,
-    year INT,
+    year INT NOT NULL,
+    color TEXT NOT NULL,
     license_plate TEXT UNIQUE NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX idx_vehicles_driver_id ON public.vehicles(driver_id);
 
 -- 4. Driver Presence (1:1 with Drivers)
 CREATE TABLE public.driver_presence (
@@ -41,6 +50,7 @@ CREATE TABLE public.driver_presence (
     location_updated_at TIMESTAMPTZ
 );
 
+CREATE INDEX idx_driver_presence_state ON public.driver_presence(operational_state);
 CREATE INDEX idx_driver_presence_geo ON public.driver_presence USING GIST(current_location);
 
 -- Enable RLS (Deny by default)
@@ -55,7 +65,7 @@ CREATE POLICY "Drivers can view own profile"
     TO authenticated
     USING (auth.uid() = id);
 
--- Note: Drivers CANNOT update verification_status or account_status directly via client RLS.
+-- Note: UPDATE direct from client on public.drivers is DENIED to prevent verification_status/account_status self-change.
 
 -- RLS Policies: Driver Documents
 CREATE POLICY "Drivers can view own documents"
@@ -63,10 +73,7 @@ CREATE POLICY "Drivers can view own documents"
     TO authenticated
     USING (auth.uid() = driver_id);
 
-CREATE POLICY "Drivers can insert own documents"
-    ON public.driver_documents FOR INSERT
-    TO authenticated
-    WITH CHECK (auth.uid() = driver_id);
+-- Note: INSERT/UPDATE direct from client on public.driver_documents is DENIED in Phase 1 to prevent auto-verified document uploads.
 
 -- RLS Policies: Vehicles
 CREATE POLICY "Drivers can view own vehicles"
@@ -74,25 +81,10 @@ CREATE POLICY "Drivers can view own vehicles"
     TO authenticated
     USING (auth.uid() = driver_id);
 
-CREATE POLICY "Drivers can insert own vehicles"
-    ON public.vehicles FOR INSERT
-    TO authenticated
-    WITH CHECK (auth.uid() = driver_id);
-
 -- RLS Policies: Driver Presence
 CREATE POLICY "Drivers can view own presence"
     ON public.driver_presence FOR SELECT
     TO authenticated
     USING (auth.uid() = driver_id);
 
--- Driver can toggle operational_state but CANNOT update current_location directly via REST/RLS bypass.
--- Location updates require authenticated RPC (POST /api/v1/driver/location).
-CREATE POLICY "Drivers can toggle operational state"
-    ON public.driver_presence FOR UPDATE
-    TO authenticated
-    USING (auth.uid() = driver_id)
-    WITH CHECK (
-        auth.uid() = driver_id
-        -- Ensure current_location is NOT modified directly via client REST
-        AND current_location IS NOT DISTINCT FROM (SELECT dp.current_location FROM public.driver_presence dp WHERE dp.driver_id = auth.uid())
-    );
+-- Note: UPDATE direct from client on public.driver_presence (current_location, location_updated_at, operational_state) is DENIED. Location ingestion requires authenticated server RPC.

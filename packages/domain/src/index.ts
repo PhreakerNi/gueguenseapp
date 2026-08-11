@@ -1,2 +1,2 @@
-export * from "./constants.js";
-export * from "./guards.js";
+export * from "./constants";
+export * from "./guards";

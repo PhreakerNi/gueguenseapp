@@ -1,87 +1,134 @@
-name: Güegüense Monorepo CI - Phase 1
+name: CI Quality & Security Gates
 
 on:
   push:
-    branches: [main, "phase/*"]
+    branches: [main, phase/1-foundation]
   pull_request:
-    branches: [main]
+    branches: [main, phase/1-foundation]
 
 jobs:
   quality-gates:
-    name: Code Quality & Type Check
+    name: Code Quality & Monorepo Gates
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 24.x
+      - name: Setup Node.js 24.18.0 LTS
         uses: actions/setup-node@v4
         with:
-          node-version: 24.16.0
+          node-version: "24.18.0"
 
-      - name: Setup pnpm 11
+      - name: Setup pnpm 11.21.0
         uses: pnpm/action-setup@v4
         with:
-          version: 11.21.0
+          version: "11.21.0"
 
       - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
 
       - name: Cache pnpm dependencies
         uses: actions/cache@v4
         with:
-          path: ${{ env.STORE_PATH }}
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Install Dependencies
+      - name: Install Monorepo Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check Formatting
+      - name: Code Formatting Gate
         run: pnpm format:check
 
-      - name: Lint Codebase
+      - name: ESLint Gate
         run: pnpm lint
 
-      - name: Type Check Workspace
+      - name: TypeScript Strict Gate
         run: pnpm typecheck
 
-      - name: Run Unit Tests
+      - name: Domain Unit Tests
         run: pnpm test
 
-      - name: Build Web Applications
+      - name: Next.js Web Production Build
         run: pnpm build
 
-  database-gates:
-    name: Supabase Migration & Database Tests
+  mobile-gates:
+    name: Mobile Apps SDK 57 & Metro Export Gates
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 24.x
+      - name: Setup Node.js 24.18.0 LTS
         uses: actions/setup-node@v4
         with:
-          node-version: 24.16.0
+          node-version: "24.18.0"
 
-      - name: Setup pnpm 11
+      - name: Setup pnpm 11.21.0
         uses: pnpm/action-setup@v4
         with:
-          version: 11.21.0
+          version: "11.21.0"
 
-      - name: Install Dependencies
+      - name: Install Monorepo Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
+      - name: Business Mobile Expo Config Check
+        run: pnpm --filter @gueguense/business-mobile exec expo config
+
+      - name: Business Mobile Expo Doctor Check
+        run: pnpm --filter @gueguense/business-mobile exec expo-doctor
+
+      - name: Business Mobile Android Metro Export Bundle
+        run: pnpm --filter @gueguense/business-mobile exec expo export --platform android --output-dir .expo/android-export
+
+      - name: Driver Mobile Expo Config Check
+        run: pnpm --filter @gueguense/driver-mobile exec expo config
+
+      - name: Driver Mobile Expo Doctor Check
+        run: pnpm --filter @gueguense/driver-mobile exec expo-doctor
+
+      - name: Driver Mobile Android Metro Export Bundle
+        run: pnpm --filter @gueguense/driver-mobile exec expo export --platform android --output-dir .expo/android-export
+
+  database-gates:
+    name: Supabase Foundation DB & pgTAP RLS Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24.18.0 LTS
+        uses: actions/setup-node@v4
         with:
-          version: 2.15.8
+          node-version: "24.18.0"
+
+      - name: Setup pnpm 11.21.0
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.21.0"
+
+      - name: Install Monorepo Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Supabase CLI Exact Version
+        run: pnpm supabase --version
 
       - name: Start Supabase Local Stack
         run: pnpm supabase:start
 
-      - name: Run pgTAP Database Tests
+      - name: Reset Database & Apply Foundation Migrations
+        run: pnpm supabase:reset
+
+      - name: Run pgTAP Database & RLS Security Tests
         run: pnpm supabase:test
+
+      - name: Verify Database Types Sync Drift
+        run: |
+          pnpm db:types
+          git diff --exit-code -- packages/types/src/database.generated.ts
+
+      - name: Stop Supabase Stack
+        if: always()
+        run: pnpm supabase:stop

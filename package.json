@@ -21,12 +21,12 @@
     "db:types": "supabase gen types typescript --local > packages/types/src/database.generated.ts"
   },
   "devDependencies": {
-    "@types/node": "^22.13.4",
-    "eslint": "^9.21.0",
-    "prettier": "^3.5.2",
-    "supabase": "^2.15.8",
-    "turbo": "^2.4.4",
-    "typescript": "^5.8.2",
-    "typescript-eslint": "^8.26.0"
+    "@types/node": "22.13.4",
+    "eslint": "9.21.0",
+    "prettier": "3.5.2",
+    "supabase": "2.15.8",
+    "turbo": "2.4.4",
+    "typescript": "5.8.2",
+    "typescript-eslint": "8.26.0"
   }
 }

@@ -20,6 +20,7 @@
    El token bearer se omite de logs de acceso y analíticas web.
 
 3. **Visibilidad Autorizada del `DELIVERY_OTP` (`OTP_ALLOWED_STATES`):**
+
    - El `DELIVERY_OTP` se genera tras confirmarse la custodia en el negocio (`PICKED_UP`).
    - El cliente destinatario puede consultar su OTP desde el endpoint `GET /api/v1/tracking/{token}/otp` **únicamente si el estado actual de la entrega pertenece al conjunto autorizado:**
      $$\text{OTP\_ALLOWED\_STATES} = \{\text{PICKED\_UP}, \text{TO\_DROPOFF}, \text{ARRIVED\_DROPOFF}\}$$
