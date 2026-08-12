@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(58);
+SELECT plan(60);
 
 -- 1. Schema & Extension Verification (3 assertions)
 SELECT has_schema('public', 'Schema public should exist');
@@ -145,6 +145,11 @@ SELECT is_empty(
   'Outsider B denied reading Business A (Bidirectional isolation)'
 ); -- 1 assertion
 
+SELECT is_empty(
+  'SELECT id FROM public.business_member_locations WHERE business_location_id = ''a1000000-0000-4000-8000-000000000001''',
+  'Outsider B denied viewing Business A business_member_locations assignment (BML B->A)'
+); -- 1 assertion
+
 SET LOCAL "request.jwt.claim.sub" = '11111111-1111-1111-1111-111111111111';
 SELECT is(auth.uid(), '11111111-1111-1111-1111-111111111111'::uuid, 'auth.uid() reset to Owner A'); -- 1 assertion
 
@@ -284,10 +289,17 @@ SELECT is_empty(
 ); -- 1 assertion
 
 SELECT throws_ok(
-  'SELECT private.get_user_business_ids(''11111111-1111-1111-1111-111111111111'')',
+  'SELECT private.is_active_business_member(''aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa''::uuid)',
   '42501',
   NULL,
-  'Direct client invocation of private schema helper by authenticated role denied with 42501'
+  'Authenticated client cannot directly invoke private.is_active_business_member'
+); -- 1 assertion
+
+SELECT throws_ok(
+  'SELECT private.can_access_business_location(''a1000000-0000-4000-8000-000000000001''::uuid)',
+  '42501',
+  NULL,
+  'Authenticated client cannot directly invoke private.can_access_business_location'
 ); -- 1 assertion
 
 SELECT * FROM finish();

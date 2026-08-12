@@ -4,7 +4,7 @@
 **Estado:** FASE 0 — ✅ APROBADA | FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Rama de Desarrollo:** `phase/1-foundation`  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Correccion_v1_4.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Cierre_v1_5.md`
 
 ---
 
@@ -42,11 +42,13 @@ gueguenseapp/
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.4)
+## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.5)
 
 - **Gestor de Paquetes:** `pnpm@11.17.0` (Monorepo Workspaces con un único `pnpm-lock.yaml`)
 - **Orquestador:** `turbo@2.10.7`
-- **Lenguaje:** `TypeScript 5.8.2` (Strict Mode)
+- **Lenguaje / TypeScript Matrix:**
+  - TypeScript (root / web / shared): `5.8.2` (Strict Mode)
+  - TypeScript (Expo mobile apps): `6.0.3` (Expo SDK 57 compatible)
 - **Entorno:** `Node.js 24.18.0 LTS`
 - **Mobile Stack:** `Expo SDK 57` (`react-native` 0.86.2, `react` 19.2.3, Expo Router 57.0.12)
 - **Web Stack:** `Next.js 16.2.12 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.2.12)
