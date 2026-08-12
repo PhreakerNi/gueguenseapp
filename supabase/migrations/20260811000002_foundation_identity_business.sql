@@ -179,3 +179,13 @@ CREATE POLICY "Active business members can view location assignments"
             (SELECT bm.business_id FROM public.business_members bm WHERE bm.id = business_member_locations.business_member_id)
         )
     );
+
+-- Table Grants: authenticated SELECT ONLY
+GRANT SELECT ON TABLE
+    public.profiles,
+    public.businesses,
+    public.business_members,
+    public.business_locations,
+    public.business_member_locations
+TO authenticated;
+

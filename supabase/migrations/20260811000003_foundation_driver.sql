@@ -87,4 +87,13 @@ CREATE POLICY "Drivers can view own presence"
     TO authenticated
     USING (auth.uid() = driver_id);
 
+-- Table Grants: authenticated SELECT ONLY
+GRANT SELECT ON TABLE
+    public.drivers,
+    public.driver_documents,
+    public.vehicles,
+    public.driver_presence
+TO authenticated;
+
 -- Note: UPDATE direct from client on public.driver_presence (current_location, location_updated_at, operational_state) is DENIED. Location ingestion requires authenticated server RPC.
+

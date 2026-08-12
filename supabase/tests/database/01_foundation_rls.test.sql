@@ -147,9 +147,11 @@ SELECT is_empty(
   'Owner A denied reading User B profile'
 ); -- 1 assertion
 
-SELECT is_empty(
-  'UPDATE public.profiles SET platform_role = ''super_admin'' WHERE id = ''11111111-1111-1111-1111-111111111111'' RETURNING id',
-  'Owner A direct UPDATE on profiles platform_role affects 0 rows'
+SELECT throws_ok(
+  'UPDATE public.profiles SET platform_role = ''super_admin'' WHERE id = ''11111111-1111-1111-1111-111111111111''',
+  '42501',
+  NULL,
+  'Owner A direct UPDATE on profiles platform_role denied with 42501'
 ); -- 1 assertion
 
 SET LOCAL ROLE postgres;
@@ -265,14 +267,18 @@ SELECT is_empty(
   'Driver A denied reading Driver B profile'
 ); -- 1 assertion
 
-SELECT is_empty(
-  'UPDATE public.drivers SET verification_status = ''VERIFIED'' WHERE id = ''44444444-4444-4444-4444-444444444444'' RETURNING id',
-  'Driver A direct UPDATE on verification_status affects 0 rows'
+SELECT throws_ok(
+  'UPDATE public.drivers SET verification_status = ''VERIFIED'' WHERE id = ''44444444-4444-4444-4444-444444444444''',
+  '42501',
+  NULL,
+  'Driver A direct UPDATE on verification_status denied with 42501'
 ); -- 1 assertion
 
-SELECT is_empty(
-  'UPDATE public.drivers SET account_status = ''ACTIVE'' WHERE id = ''44444444-4444-4444-4444-444444444444'' RETURNING id',
-  'Driver A direct UPDATE on account_status affects 0 rows'
+SELECT throws_ok(
+  'UPDATE public.drivers SET account_status = ''ACTIVE'' WHERE id = ''44444444-4444-4444-4444-444444444444''',
+  '42501',
+  NULL,
+  'Driver A direct UPDATE on account_status denied with 42501'
 ); -- 1 assertion
 
 SET LOCAL ROLE postgres;
@@ -309,19 +315,25 @@ SELECT throws_ok(
   'Driver A denied direct INSERT on driver_documents with RLS 42501'
 ); -- 1 assertion
 
-SELECT is_empty(
-  'UPDATE public.driver_presence SET current_location = extensions.ST_SetSRID(extensions.ST_MakePoint(-86.25, 12.13), 4326) WHERE driver_id = ''44444444-4444-4444-4444-444444444444'' RETURNING driver_id',
-  'Driver A direct UPDATE on current_location affects 0 rows'
+SELECT throws_ok(
+  'UPDATE public.driver_presence SET current_location = extensions.ST_SetSRID(extensions.ST_MakePoint(-86.25, 12.13), 4326) WHERE driver_id = ''44444444-4444-4444-4444-444444444444''',
+  '42501',
+  NULL,
+  'Driver A direct UPDATE on current_location denied with 42501'
 ); -- 1 assertion
 
-SELECT is_empty(
-  'UPDATE public.driver_presence SET location_updated_at = NOW() WHERE driver_id = ''44444444-4444-4444-4444-444444444444'' RETURNING driver_id',
-  'Driver A direct UPDATE on location_updated_at affects 0 rows'
+SELECT throws_ok(
+  'UPDATE public.driver_presence SET location_updated_at = NOW() WHERE driver_id = ''44444444-4444-4444-4444-444444444444''',
+  '42501',
+  NULL,
+  'Driver A direct UPDATE on location_updated_at denied with 42501'
 ); -- 1 assertion
 
-SELECT is_empty(
-  'UPDATE public.driver_presence SET operational_state = ''AVAILABLE'' WHERE driver_id = ''44444444-4444-4444-4444-444444444444'' RETURNING driver_id',
-  'Driver A direct UPDATE on operational_state affects 0 rows'
+SELECT throws_ok(
+  'UPDATE public.driver_presence SET operational_state = ''AVAILABLE'' WHERE driver_id = ''44444444-4444-4444-4444-444444444444''',
+  '42501',
+  NULL,
+  'Driver A direct UPDATE on operational_state denied with 42501'
 ); -- 1 assertion
 
 SELECT throws_ok(
