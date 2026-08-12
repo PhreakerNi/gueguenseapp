@@ -17,16 +17,52 @@ SELECT has_table('public', 'driver_documents', 'Table driver_documents exists');
 SELECT has_table('public', 'vehicles', 'Table vehicles exists');
 SELECT has_table('public', 'driver_presence', 'Table driver_presence exists');
 
--- 3. RLS Enabled Verification (9 assertions)
-SELECT rls_is_enabled('public', 'profiles', 'RLS enabled on profiles');
-SELECT rls_is_enabled('public', 'businesses', 'RLS enabled on businesses');
-SELECT rls_is_enabled('public', 'business_members', 'RLS enabled on business_members');
-SELECT rls_is_enabled('public', 'business_locations', 'RLS enabled on business_locations');
-SELECT rls_is_enabled('public', 'business_member_locations', 'RLS enabled on business_member_locations');
-SELECT rls_is_enabled('public', 'drivers', 'RLS enabled on drivers');
-SELECT rls_is_enabled('public', 'driver_documents', 'RLS enabled on driver_documents');
-SELECT rls_is_enabled('public', 'vehicles', 'RLS enabled on vehicles');
-SELECT rls_is_enabled('public', 'driver_presence', 'RLS enabled on driver_presence');
+-- 3. RLS Enabled Verification via Catalog (9 assertions)
+SELECT is(
+  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'profiles'),
+  true,
+  'RLS enabled on profiles'
+);
+SELECT is(
+  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'businesses'),
+  true,
+  'RLS enabled on businesses'
+);
+SELECT is(
+  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'business_members'),
+  true,
+  'RLS enabled on business_members'
+);
+SELECT is(
+  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'business_locations'),
+  true,
+  'RLS enabled on business_locations'
+);
+SELECT is(
+  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'business_member_locations'),
+  true,
+  'RLS enabled on business_member_locations'
+);
+SELECT is(
+  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'drivers'),
+  true,
+  'RLS enabled on drivers'
+);
+SELECT is(
+  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'driver_documents'),
+  true,
+  'RLS enabled on driver_documents'
+);
+SELECT is(
+  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'vehicles'),
+  true,
+  'RLS enabled on vehicles'
+);
+SELECT is(
+  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'driver_presence'),
+  true,
+  'RLS enabled on driver_presence'
+);
 
 -- 4. Schema Isolation (1 assertion)
 SELECT schema_privs_are('private', 'authenticated', ARRAY[]::text[], 'authenticated role has zero direct privileges on private schema');

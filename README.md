@@ -4,7 +4,7 @@
 **Estado:** FASE 0 — ✅ APROBADA | FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Rama de Desarrollo:** `phase/1-foundation`  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Cierre_v1_5.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Cierre_Real_v1_6.md`
 
 ---
 
@@ -42,7 +42,7 @@ gueguenseapp/
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.5)
+## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.6)
 
 - **Gestor de Paquetes:** `pnpm@11.17.0` (Monorepo Workspaces con un único `pnpm-lock.yaml`)
 - **Orquestador:** `turbo@2.10.7`
