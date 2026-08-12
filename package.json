@@ -18,7 +18,7 @@
     "supabase:stop": "supabase stop",
     "supabase:reset": "supabase db reset",
     "supabase:test": "supabase test db",
-    "db:types": "supabase gen types typescript --local > packages/types/src/database.generated.ts"
+    "db:types": "supabase gen types typescript --local --schema public > packages/types/src/database.generated.ts"
   },
   "devDependencies": {
     "@types/node": "22.13.4",
