@@ -7,26 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate schemas other than "public"
-  __InternalSupabase: {
-    db: {
-      Tables: {
-        [_ in never]: never
-      }
-      Views: {
-        [_ in never]: never
-      }
-      Functions: {
-        [_ in never]: never
-      }
-      Enums: {
-        [_ in never]: never
-      }
-      CompositeTypes: {
-        [_ in never]: never
-      }
-    }
-  }
   public: {
     Tables: {
       business_locations: {
