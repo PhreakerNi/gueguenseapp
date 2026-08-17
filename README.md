@@ -4,7 +4,7 @@
 **Estado:** FASE 0 — ✅ APROBADA | FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Rama de Desarrollo:** `phase/1-foundation`  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Cierre_DB_Types_v1_8.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Cierre_Final_DB_Types_v1_9.md`
 
 ---
 
@@ -42,7 +42,7 @@ gueguenseapp/
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.8)
+## 🛠️ Stack Tecnológico Congelado (Fase 1 v1.9)
 
 - **Gestor de Paquetes:** `pnpm@11.17.0` (Monorepo Workspaces con un único `pnpm-lock.yaml`)
 - **Orquestador:** `turbo@2.10.7`
@@ -52,7 +52,7 @@ gueguenseapp/
 - **Entorno:** `Node.js 24.18.0 LTS`
 - **Mobile Stack:** `Expo SDK 57` (`react-native` 0.86.2, `react` 19.2.3, Expo Router 57.0.12)
 - **Web Stack:** `Next.js 16.2.12 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.2.12)
-- **Base de Datos & Backend:** `Supabase CLI 2.110.0` (PostGIS, PostgreSQL 15+, RLS denegado por defecto, SELECT grants para `authenticated`, types generados por CLI para `--schema public`)
+- **Base de Datos & Backend:** `Supabase CLI 2.110.0` (PostGIS, PostgreSQL 15+, RLS denegado por defecto, SELECT grants para `authenticated`, types generados por CLI 2.110.0 para `--schema public`)
 - **Diagnostic Tool:** `expo-doctor 1.20.1`
 
 ---
