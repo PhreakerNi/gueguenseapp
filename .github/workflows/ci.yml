@@ -133,7 +133,10 @@ jobs:
       - name: Verify Database Types Sync Drift
         run: |
           pnpm db:types
-          git diff -- packages/types/src/database.generated.ts
+          echo "### Generated Types Diff" >> $GITHUB_STEP_SUMMARY
+          echo '```diff' >> $GITHUB_STEP_SUMMARY
+          git diff -- packages/types/src/database.generated.ts >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
           git diff --exit-code -- packages/types/src/database.generated.ts
 
       - name: Stop Supabase Stack
