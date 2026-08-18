@@ -830,65 +830,48 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       reason: "MFA_REQUIRED",
     });
 
-    // 14e. Enroll in TOTP MFA factor using client with active session
+    // 14e. MFA Client with Admin session header
+    const mfaClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false },
+      global: {
+        headers: {
+          Authorization: `Bearer ${adminLogin.session.access_token}`,
+        },
+      },
+    });
+
     const { data: enrollData, error: enrollError } =
-      await client.auth.mfa.enroll({
+      await mfaClient.auth.mfa.enroll({
         factorType: "totp",
         issuer: "Gueguense",
       });
 
-    assert.strictEqual(
-      enrollError,
-      null,
-      `MFA enrollment error: ${enrollError?.message}`,
-    );
-    assert.ok(enrollData?.id, "Factor ID must exist");
-    assert.ok(enrollData?.totp?.secret, "TOTP secret must exist");
+    assert.strictEqual(enrollError, null, "MFA enrollment should succeed");
+    assert.ok(enrollData, "Enrollment data must exist");
+    assert.ok(enrollData.id, "Factor ID must exist");
+    assert.ok(enrollData.totp?.secret, "TOTP secret must exist");
 
     // 14f. Challenge and verify TOTP code with real secret
     const code = generateTotpCode(enrollData.totp.secret);
-    let verifySuccess = false;
+    const { data: verifyData, error: verifyError } =
+      await mfaClient.auth.mfa.challengeAndVerify({
+        factorId: enrollData.id,
+        code,
+      });
 
-    try {
-      const { data: cvData, error: cvErr } =
-        await client.auth.mfa.challengeAndVerify({
-          factorId: enrollData.id,
-          code,
-        });
-      if (!cvErr && cvData) verifySuccess = true;
-    } catch {
-      // Fallback to separate challenge + verify
-    }
+    assert.strictEqual(
+      verifyError,
+      null,
+      "MFA challenge verification should succeed",
+    );
+    assert.ok(verifyData, "Verify data must exist");
 
-    if (!verifySuccess) {
-      const { data: challengeData, error: challengeError } =
-        await client.auth.mfa.challenge({ factorId: enrollData.id });
-      assert.strictEqual(
-        challengeError,
-        null,
-        `MFA challenge error: ${challengeError?.message}`,
-      );
-      assert.ok(challengeData?.id, "Challenge ID must exist");
-
-      const { data: verifyData, error: verifyError } =
-        await client.auth.mfa.verify({
-          factorId: enrollData.id,
-          challengeId: challengeData.id,
-          code,
-        });
-      assert.strictEqual(
-        verifyError,
-        null,
-        `MFA verify error: ${verifyError?.message}`,
-      );
-      if (verifyData) verifySuccess = true;
-    }
-
-    // 14g. Verify Authenticator Assurance Level reaches AAL2
+    // 14g. Verify Authenticator Assurance Level is AAL2
     const { data: aalData } =
-      await client.auth.mfa.getAuthenticatorAssuranceLevel();
-    assert.ok(
-      aalData?.currentLevel === "aal2" || verifySuccess,
+      await mfaClient.auth.mfa.getAuthenticatorAssuranceLevel();
+    assert.strictEqual(
+      aalData?.currentLevel,
+      "aal2",
       "Session must reach AAL2 after TOTP verification",
     );
 
