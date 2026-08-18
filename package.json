@@ -1,7 +1,7 @@
 {
   "name": "gueguenseapp-monorepo",
   "private": true,
-  "version": "1.0.0-phase1",
+  "version": "1.0.0-phase2",
   "packageManager": "pnpm@11.17.0",
   "engines": {
     "node": ">=24.0.0 <25.0.0"
@@ -12,6 +12,7 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "test:auth-integration": "node --import tsx tests/auth-integration.test.ts",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "supabase:start": "supabase start",
@@ -21,11 +22,13 @@
     "db:types": "supabase gen types typescript --local --schema public > packages/types/src/database.generated.ts"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "2.49.1",
     "@types/node": "22.13.4",
     "eslint": "9.21.0",
     "expo-doctor": "1.20.1",
     "prettier": "3.5.2",
     "supabase": "2.110.0",
+    "tsx": "4.19.3",
     "turbo": "2.10.7",
     "typescript": "5.8.2",
     "typescript-eslint": "8.26.0"

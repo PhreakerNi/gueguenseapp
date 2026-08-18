@@ -1,10 +1,10 @@
 # GÜEGÜENSE — Plataforma Logística y Delivery B2B Bajo Demanda
 
 **Versión:** 1.0.0-phase2  
-**Estado:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — 🟡 EN IMPLEMENTACIÓN / REVISIÓN  
+**Estado:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Rama de Desarrollo:** `phase/2-auth-identity-sessions`  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_v1_0.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_Correccion_v1_1.md`
 
 ---
 
@@ -33,16 +33,16 @@ gueguenseapp/
 │
 ├── supabase/
 │   ├── migrations/         # Migraciones SQL de fundación (identity, business, driver, RLS, PostGIS)
-│   ├── tests/database/     # Suite de pruebas de base de datos pgTAP (Foundation + Auth/Identity)
+│   ├── tests/database/     # Suite de pruebas de base de datos pgTAP Foundation (60/60)
 │   ├── seed.sql            # Semilla sintética de desarrollo
-│   └── config.toml         # Configuración del CLI local de Supabase
+│   └── config.toml         # Configuración del CLI local de Supabase con redirect allowlist
 │
-└── .github/workflows/ci.yml # Quality gates & CI pipeline
+└── .github/workflows/ci.yml # Quality gates, Mobile gates, DB gates & Auth integration gates
 ```
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 2 v1.0)
+## 🛠️ Stack Tecnológico Congelado (Fase 2 v1.1)
 
 - **Gestor de Paquetes:** `pnpm@11.17.0` (Monorepo Workspaces con un único `pnpm-lock.yaml`)
 - **Orquestador:** `turbo@2.10.7`
@@ -88,4 +88,4 @@ pnpm build
 
 - **Commits:** Mensajes bajo la convención _Conventional Commits_ (ej. `feat(auth): ...`, `fix(security): ...`).
 - **Prohibido:** No añadir atribución ni firmas AI en commits ("Co-Authored-By").
-- **Quality Gates:** El código solo puede unirse tras aprobar format, lint, typecheck, unit tests, web build, expo config/doctor/export y pgTAP db test.
+- **Quality Gates:** El código solo puede unirse tras aprobar format, lint, typecheck, unit tests, web build, expo config/doctor/export, pgTAP db test y auth integration test.

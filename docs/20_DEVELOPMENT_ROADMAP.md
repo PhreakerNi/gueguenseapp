@@ -1,12 +1,12 @@
-# Güegüense — Roadmap de Desarrollo Incremental (20 Fases)
+# Güegüense — Roadmap de Desarrollo Incremental (20 Fases: 0–19)
 
 **Versión:** 1.0.0-phase2  
-**Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — 🟡 EN IMPLEMENTACIÓN / REVISIÓN  
-**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_v1_0.md`
+**Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
+**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_Correccion_v1_1.md`
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 2 v1.0)
+## 🛠️ Stack Tecnológico Congelado (Fase 2 v1.1)
 
 - **Node.js:** `24.18.0 LTS`
 - **Gestor de Paquetes:** `pnpm@11.17.0` (Workspaces monorepo con un único `pnpm-lock.yaml`)
@@ -20,7 +20,7 @@
 
 ---
 
-## 🗺️ Fases del Proyecto
+## 🗺️ Fases del Proyecto (0–19 Canónicas)
 
 ### Fase 0 — Especificación y Arquitectura Congelada
 
@@ -34,8 +34,8 @@
 
 ### Fase 2 — Autenticación, Gestión de Identidad y Sesiones
 
-- **Estado:** 🟡 **EN IMPLEMENTACIÓN / REVISIÓN** (`phase/2-auth-identity-sessions`)
-- **Objetivo:** Autenticación Supabase Auth Email/Password, persistencia segura con `expo-secure-store`, modelo compartido `IdentityContext`, route guards por membresía/driver/status, Admin SSR Auth con `@supabase/ssr`, MFA TOTP AAL2 y pgTAP identity tests.
+- **Estado:** 🟡 **EN REVISIÓN / CANDIDATA A APROBACIÓN** (`phase/2-auth-identity-sessions`)
+- **Objetivo:** Autenticación Supabase Auth Email/Password, persistencia segura con `expo-secure-store`, modelo compartido `IdentityContext`, route guards por membresía/driver/status, Admin SSR Auth con `@supabase/ssr`, MFA TOTP AAL2, integration test gate y pgTAP foundation tests.
 
 ### Fase 3 — Onboarding B2B y Registro de Conductores
 
@@ -102,9 +102,5 @@
 - **Estado:** ⏳ Pendiente (No iniciada)
 
 ### Fase 19 — Hardening de Seguridad, Cifrado PII y Auditoría
-
-- **Estado:** ⏳ Pendiente (No iniciada)
-
-### Fase 20 — Despliegue Producción y Documentación Final
 
 - **Estado:** ⏳ Pendiente (No iniciada)

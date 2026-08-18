@@ -16,10 +16,24 @@ export async function middleware(request: NextRequest) {
     },
   });
 
+  const pathname = request.nextUrl.pathname;
+  const isAuthRoute =
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/forgot-password") ||
+    pathname.startsWith("/reset-password");
+  const isMfaRoute = pathname.startsWith("/mfa");
+  const isCallbackRoute = pathname.startsWith("/auth/callback");
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
+    if (!isAuthRoute && !isCallbackRoute) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("error", "AUTH_CONFIGURATION_ERROR");
+      return NextResponse.redirect(url);
+    }
     return response;
   }
 
@@ -47,14 +61,6 @@ export async function middleware(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const pathname = request.nextUrl.pathname;
-  const isAuthRoute =
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/forgot-password") ||
-    pathname.startsWith("/reset-password");
-  const isMfaRoute = pathname.startsWith("/mfa");
-  const isCallbackRoute = pathname.startsWith("/auth/callback");
 
   if (isCallbackRoute) {
     return response;

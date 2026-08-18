@@ -4,11 +4,14 @@ import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "../../../lib/supabase/client";
+import {
+  normalizeAuthError,
+  getAuthErrorMessage,
+} from "@gueguense/domain";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = createClient();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -17,39 +20,42 @@ function LoginForm() {
 
   useEffect(() => {
     const errorParam = searchParams.get("error");
-    if (errorParam === "AUTH_ADMIN_ROLE_REQUIRED") {
-      setErrorMessage(
-        "Acceso denegado: Esta cuenta no posee un rol administrativo asignado.",
-      );
-    } else if (errorParam) {
-      setErrorMessage(errorParam);
+    if (errorParam) {
+      const code = normalizeAuthError(errorParam);
+      setErrorMessage(getAuthErrorMessage(code));
     }
   }, [searchParams]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      setErrorMessage("Por favor completa tu correo y contraseña.");
+      setErrorMessage(getAuthErrorMessage("AUTH_INVALID_CREDENTIALS"));
       return;
     }
 
     setLoading(true);
     setErrorMessage(null);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    setLoading(false);
+      setLoading(false);
 
-    if (error) {
-      setErrorMessage(error.message);
-      return;
+      if (error) {
+        setErrorMessage(getAuthErrorMessage(normalizeAuthError(error)));
+        return;
+      }
+
+      router.push("/mfa");
+      router.refresh();
+    } catch (err) {
+      setLoading(false);
+      setErrorMessage(getAuthErrorMessage(normalizeAuthError(err)));
     }
-
-    router.push("/mfa");
-    router.refresh();
   };
 
   return (

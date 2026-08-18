@@ -20,6 +20,16 @@ port = 54323
 [auth]
 enabled = true
 site_url = "http://localhost:3000"
+additional_redirect_urls = [
+  "gueguense-business://*",
+  "gueguense-driver://*",
+  "http://localhost:3000/*",
+  "http://localhost:3001/*",
+  "http://localhost:3002/*",
+  "http://127.0.0.1:3000/*",
+  "http://127.0.0.1:3001/*",
+  "http://127.0.0.1:3002/*",
+]
 
 [inbucket]
 enabled = true

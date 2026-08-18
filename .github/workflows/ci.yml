@@ -138,3 +138,36 @@ jobs:
       - name: Stop Supabase Stack
         if: always()
         run: pnpm supabase:stop
+
+  auth-integration-gates:
+    name: Phase 2 Auth & Session Integration Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24.18.0 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.18.0"
+
+      - name: Setup pnpm 11.17.0
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.17.0"
+
+      - name: Install Monorepo Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start Supabase Local Stack
+        run: pnpm supabase:start
+
+      - name: Reset Database & Apply Foundation Migrations
+        run: pnpm supabase:reset
+
+      - name: Run Phase 2 Auth & Session Integration Test Suite
+        run: pnpm test:auth-integration
+
+      - name: Stop Supabase Stack
+        if: always()
+        run: pnpm supabase:stop

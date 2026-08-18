@@ -4,10 +4,10 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { createClient } from "../../../lib/supabase/client";
+import { normalizeAuthError, getAuthErrorMessage } from "@gueguense/domain";
 
 export default function AdminMfaPage() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [factorId, setFactorId] = useState<string | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
@@ -21,11 +21,14 @@ export default function AdminMfaPage() {
   useEffect(() => {
     async function setupMfa() {
       try {
+        const supabase = createClient();
         const { data: factorsData, error: factorsError } =
           await supabase.auth.mfa.listFactors();
 
         if (factorsError) {
-          setErrorMessage(factorsError.message);
+          setErrorMessage(
+            getAuthErrorMessage(normalizeAuthError(factorsError)),
+          );
           setInitializing(false);
           return;
         }
@@ -46,47 +49,53 @@ export default function AdminMfaPage() {
             });
 
           if (enrollError) {
-            setErrorMessage(enrollError.message);
+            setErrorMessage(
+              getAuthErrorMessage(normalizeAuthError(enrollError)),
+            );
           } else if (enrollData) {
             setFactorId(enrollData.id);
             setQrCode(enrollData.totp.qr_code);
             setSecret(enrollData.totp.secret);
           }
         }
-      } catch (err: unknown) {
-        setErrorMessage(
-          err instanceof Error ? err.message : "Error al inicializar MFA.",
-        );
+      } catch (err) {
+        setErrorMessage(getAuthErrorMessage(normalizeAuthError(err)));
       } finally {
         setInitializing(false);
       }
     }
 
     setupMfa();
-  }, [supabase]);
+  }, []);
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!factorId || !code) {
-      setErrorMessage("Por favor ingresa el código de 6 dígitos.");
+      setErrorMessage(getAuthErrorMessage("AUTH_MFA_INVALID"));
       return;
     }
 
     setLoading(true);
     setErrorMessage(null);
 
-    const { error } = await supabase.auth.mfa.challengeAndVerify({
-      factorId,
-      code: code.trim(),
-    });
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.mfa.challengeAndVerify({
+        factorId,
+        code: code.trim(),
+      });
 
-    setLoading(false);
+      setLoading(false);
 
-    if (error) {
-      setErrorMessage(error.message);
-    } else {
-      router.push("/");
-      router.refresh();
+      if (error) {
+        setErrorMessage(getAuthErrorMessage(normalizeAuthError(error)));
+      } else {
+        router.push("/");
+        router.refresh();
+      }
+    } catch (err) {
+      setLoading(false);
+      setErrorMessage(getAuthErrorMessage(normalizeAuthError(err)));
     }
   };
 

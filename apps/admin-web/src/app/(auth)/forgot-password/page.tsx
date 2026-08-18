@@ -3,9 +3,9 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { createClient } from "../../../lib/supabase/client";
+import { normalizeAuthError, getAuthErrorMessage } from "@gueguense/domain";
 
 export default function AdminForgotPasswordPage() {
-  const supabase = createClient();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -22,18 +22,27 @@ export default function AdminForgotPasswordPage() {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-
-    setLoading(false);
-
-    if (error) {
-      setErrorMessage(error.message);
-    } else {
-      setSuccessMessage(
-        "Se ha enviado un enlace para restablecer tu contraseña a tu correo.",
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        {
+          redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+        },
       );
+
+      setLoading(false);
+
+      if (error) {
+        setErrorMessage(getAuthErrorMessage(normalizeAuthError(error)));
+      } else {
+        setSuccessMessage(
+          "Se ha enviado un enlace para restablecer tu contraseña a tu correo.",
+        );
+      }
+    } catch (err) {
+      setLoading(false);
+      setErrorMessage(getAuthErrorMessage(normalizeAuthError(err)));
     }
   };
 

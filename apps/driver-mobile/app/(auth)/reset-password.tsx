@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,16 +8,54 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
+import * as Linking from "expo-linking";
 import { useAuth } from "../../src/context/auth-context";
+import { getSupabaseClient } from "../../src/supabase";
+import { getAuthErrorMessage } from "@gueguense/domain";
 
 export default function DriverResetPasswordScreen() {
-  const { updatePassword } = useAuth();
+  const { session, updatePassword } = useAuth();
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionChecking, setSessionChecking] = useState(!session);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function handleDeepLink() {
+      if (session) {
+        setSessionChecking(false);
+        return;
+      }
+      try {
+        const initialUrl = await Linking.getInitialURL();
+        if (initialUrl) {
+          const parsed = Linking.parse(initialUrl);
+          const queryParams = parsed.queryParams || {};
+          const code = queryParams.code as string | undefined;
+
+          // Check if tokens are in hash or query
+          const supabase = getSupabaseClient();
+          if (code) {
+            const { error } = await supabase.auth.exchangeCodeForSession(code);
+            if (error) {
+              setErrorMessage(
+                getAuthErrorMessage("AUTH_PASSWORD_RECOVERY_INVALID"),
+              );
+            }
+          }
+        }
+      } catch {
+        // Continue and check session
+      } finally {
+        setSessionChecking(false);
+      }
+    }
+
+    handleDeepLink();
+  }, [session]);
 
   const handleUpdate = async () => {
     if (!password || !confirmPassword) {
@@ -25,7 +63,7 @@ export default function DriverResetPasswordScreen() {
       return;
     }
     if (password.length < 8) {
-      setErrorMessage("La contraseña debe tener al menos 8 caracteres.");
+      setErrorMessage(getAuthErrorMessage("AUTH_WEAK_PASSWORD"));
       return;
     }
     if (password !== confirmPassword) {
@@ -47,11 +85,22 @@ export default function DriverResetPasswordScreen() {
     }
   };
 
+  if (sessionChecking) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#0066CC" />
+        <Text style={[styles.subtitle, { marginTop: 12 }]}>
+          Validando enlace de recuperación...
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Nueva Contraseña</Text>
       <Text style={styles.subtitle}>
-        Establece una nueva contraseña para tu cuenta
+        Establece una nueva contraseña para tu cuenta de motorizado
       </Text>
 
       {errorMessage && (
@@ -149,7 +198,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   button: {
-    backgroundColor: "#059669",
+    backgroundColor: "#0066CC",
     padding: 16,
     borderRadius: 8,
     alignItems: "center",

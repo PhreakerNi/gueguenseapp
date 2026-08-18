@@ -3,10 +3,10 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
+import { normalizeAuthError, getAuthErrorMessage } from "@gueguense/domain";
 
 export default function AdminResetPasswordPage() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -21,7 +21,7 @@ export default function AdminResetPasswordPage() {
       return;
     }
     if (password.length < 8) {
-      setErrorMessage("La contraseña debe tener al menos 8 caracteres.");
+      setErrorMessage(getAuthErrorMessage("AUTH_WEAK_PASSWORD"));
       return;
     }
     if (password !== confirmPassword) {
@@ -33,19 +33,27 @@ export default function AdminResetPasswordPage() {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const { error } = await supabase.auth.updateUser({
-      password,
-    });
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.updateUser({
+        password,
+      });
 
-    setLoading(false);
+      setLoading(false);
 
-    if (error) {
-      setErrorMessage(error.message);
-    } else {
-      setSuccessMessage("Contraseña actualizada exitosamente. Redirigiendo...");
-      setTimeout(() => {
-        router.push("/login");
-      }, 2000);
+      if (error) {
+        setErrorMessage(getAuthErrorMessage(normalizeAuthError(error)));
+      } else {
+        setSuccessMessage(
+          "Contraseña actualizada exitosamente. Redirigiendo...",
+        );
+        setTimeout(() => {
+          router.push("/login");
+        }, 2000);
+      }
+    } catch (err) {
+      setLoading(false);
+      setErrorMessage(getAuthErrorMessage(normalizeAuthError(err)));
     }
   };
 

@@ -1,4 +1,5 @@
 import {
+  AUTH_ERROR_CODES,
   DELIVERY_STATUSES,
   OTP_ALLOWED_STATES,
   TERMINAL_DELIVERY_STATUSES,
@@ -139,4 +140,115 @@ export function evaluateAdminAccess(
     return { allowed: false, reason: "MFA_REQUIRED" };
   }
   return { allowed: true };
+}
+
+export type AuthErrorCode = (typeof AUTH_ERROR_CODES)[number];
+
+export function normalizeAuthError(error: unknown): AuthErrorCode {
+  if (!error) return "AUTH_INVALID_CREDENTIALS";
+  const msg =
+    typeof error === "string"
+      ? error
+      : (error as { message?: string }).message || "";
+  const lower = msg.toLowerCase();
+
+  if (
+    lower.includes("invalid login credentials") ||
+    lower.includes("invalid credential") ||
+    lower.includes("wrong password")
+  ) {
+    return "AUTH_INVALID_CREDENTIALS";
+  }
+  if (lower.includes("email not confirmed") || lower.includes("unconfirmed")) {
+    return "AUTH_EMAIL_NOT_CONFIRMED";
+  }
+  if (
+    lower.includes("already registered") ||
+    lower.includes("user already exists")
+  ) {
+    return "AUTH_USER_ALREADY_EXISTS";
+  }
+  if (
+    lower.includes("password should be") ||
+    lower.includes("weak password") ||
+    lower.includes("short")
+  ) {
+    return "AUTH_WEAK_PASSWORD";
+  }
+  if (
+    lower.includes("jwt expired") ||
+    lower.includes("session expired") ||
+    lower.includes("token is expired")
+  ) {
+    return "AUTH_SESSION_EXPIRED";
+  }
+  if (
+    lower.includes("recovery") ||
+    lower.includes("reset password") ||
+    lower.includes("invalid link")
+  ) {
+    return "AUTH_PASSWORD_RECOVERY_INVALID";
+  }
+  if (lower.includes("mfa required") || lower.includes("aal2 required")) {
+    return "AUTH_MFA_REQUIRED";
+  }
+  if (
+    lower.includes("invalid code") ||
+    lower.includes("mfa challenge") ||
+    lower.includes("totp")
+  ) {
+    return "AUTH_MFA_INVALID";
+  }
+  if (lower.includes("role") || lower.includes("admin")) {
+    return "AUTH_ADMIN_ROLE_REQUIRED";
+  }
+  if (
+    lower.includes("restricted") ||
+    lower.includes("suspended") ||
+    lower.includes("blocked")
+  ) {
+    return "AUTH_ACCOUNT_RESTRICTED";
+  }
+  if (lower.includes("onboarding") || lower.includes("not completed")) {
+    return "AUTH_ONBOARDING_REQUIRED";
+  }
+  if (
+    lower.includes("network") ||
+    lower.includes("fetch failed") ||
+    lower.includes("connection")
+  ) {
+    return "AUTH_NETWORK_ERROR";
+  }
+  return "AUTH_INVALID_CREDENTIALS";
+}
+
+export function getAuthErrorMessage(code: AuthErrorCode): string {
+  switch (code) {
+    case "AUTH_INVALID_CREDENTIALS":
+      return "Credenciales inválidas. Verifica tu correo y contraseña.";
+    case "AUTH_EMAIL_NOT_CONFIRMED":
+      return "Correo electrónico no confirmado. Revisa tu bandeja de entrada.";
+    case "AUTH_USER_ALREADY_EXISTS":
+      return "Ya existe una cuenta registrada con este correo electrónico.";
+    case "AUTH_WEAK_PASSWORD":
+      return "La contraseña no cumple con los requisitos mínimos de seguridad (al menos 8 caracteres).";
+    case "AUTH_SESSION_EXPIRED":
+      return "Tu sesión ha expirado. Por favor inicia sesión nuevamente.";
+    case "AUTH_PASSWORD_RECOVERY_INVALID":
+      return "El enlace de recuperación es inválido o ha expirado.";
+    case "AUTH_MFA_REQUIRED":
+      return "Se requiere autenticación de dos factores (MFA) para continuar.";
+    case "AUTH_MFA_INVALID":
+      return "Código de autenticación inválido o expirado.";
+    case "AUTH_ADMIN_ROLE_REQUIRED":
+      return "Acceso denegado: Esta cuenta no posee permisos administrativos.";
+    case "AUTH_ACCOUNT_RESTRICTED":
+      return "Tu cuenta se encuentra restringida o suspendida. Contacta a soporte.";
+    case "AUTH_ONBOARDING_REQUIRED":
+      return "Registro incompleto. Por favor completa el proceso de registro.";
+    case "AUTH_NETWORK_ERROR":
+      return "Error de conexión con el servidor. Revisa tu conexión a internet.";
+    default:
+      return "Ocurrió un error inesperado en la autenticación.";
+  }
 }

@@ -12,6 +12,7 @@ import type {
   DriverVerificationStatus,
   DriverAccountStatus,
 } from "@gueguense/types";
+import { normalizeAuthError, getAuthErrorMessage } from "@gueguense/domain";
 import { getSupabaseClient } from "../supabase";
 
 type AuthContextType = {
@@ -53,19 +54,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .eq("id", currentUser.id)
           .single();
 
-        const { data: driverData } = await supabase
+        const { data: driver } = await supabase
           .from("drivers")
           .select("verification_status, account_status")
           .eq("id", currentUser.id)
           .maybeSingle();
-
-        const driver = driverData
-          ? {
-              verificationStatus:
-                driverData.verification_status as DriverVerificationStatus,
-              accountStatus: driverData.account_status as DriverAccountStatus,
-            }
-          : null;
 
         return {
           userId: currentUser.id,
@@ -79,7 +72,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             avatarUrl: profile?.avatar_url ?? null,
           },
           businessMemberships: [],
-          driver,
+          driver: driver
+            ? {
+                verificationStatus:
+                  driver.verification_status as DriverVerificationStatus,
+                accountStatus: driver.account_status as DriverAccountStatus,
+              }
+            : null,
         };
       } catch {
         return null;
@@ -128,14 +127,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [supabase, fetchIdentity]);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) {
-      return { error: error.message };
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) {
+        return { error: getAuthErrorMessage(normalizeAuthError(error)) };
+      }
+      return { error: null };
+    } catch (err) {
+      return { error: getAuthErrorMessage(normalizeAuthError(err)) };
     }
-    return { error: null };
   };
 
   const signUp = async (
@@ -144,47 +147,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fullName: string,
     phone?: string,
   ) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-          phone: phone ?? "",
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            full_name: fullName.trim(),
+            phone: phone ? phone.trim() : "",
+          },
         },
-      },
-    });
-    if (error) {
-      return { error: error.message };
+      });
+      if (error) {
+        return { error: getAuthErrorMessage(normalizeAuthError(error)) };
+      }
+      return { error: null };
+    } catch (err) {
+      return { error: getAuthErrorMessage(normalizeAuthError(err)) };
     }
-    return { error: null };
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setSession(null);
-    setUser(null);
-    setIdentity(null);
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      setSession(null);
+      setUser(null);
+      setIdentity(null);
+    }
   };
 
   const sendPasswordReset = async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "gueguense-driver://(auth)/reset-password",
-    });
-    if (error) {
-      return { error: error.message };
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        {
+          redirectTo: "gueguense-driver://(auth)/reset-password",
+        },
+      );
+      if (error) {
+        return { error: getAuthErrorMessage(normalizeAuthError(error)) };
+      }
+      return { error: null };
+    } catch (err) {
+      return { error: getAuthErrorMessage(normalizeAuthError(err)) };
     }
-    return { error: null };
   };
 
   const updatePassword = async (password: string) => {
-    const { error } = await supabase.auth.updateUser({
-      password,
-    });
-    if (error) {
-      return { error: error.message };
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password,
+      });
+      if (error) {
+        return { error: getAuthErrorMessage(normalizeAuthError(error)) };
+      }
+      return { error: null };
+    } catch (err) {
+      return { error: getAuthErrorMessage(normalizeAuthError(err)) };
     }
-    return { error: null };
   };
 
   return (
