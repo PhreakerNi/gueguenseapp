@@ -167,6 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: email.trim(),
         password,
         options: {
+          emailRedirectTo: "gueguense-business://auth/callback",
           data: {
             full_name: fullName.trim(),
             phone: phone ? phone.trim() : "",
@@ -197,7 +198,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { error } = await supabase.auth.resetPasswordForEmail(
         email.trim(),
         {
-          redirectTo: "gueguense-business://(auth)/reset-password",
+          redirectTo: "gueguense-business://auth/callback?next=/reset-password",
         },
       );
       if (error) {

@@ -1,19 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "../../../lib/supabase/server";
 
-const ALLOWED_NEXT_PATHS = ["/", "/reset-password", "/mfa"];
+const ALLOWED_NEXT_PATHS = new Set(["/", "/reset-password", "/mfa"]);
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const rawNext = searchParams.get("next") ?? "/";
 
-  // Validate next redirect to prevent open redirect vulnerabilities
-  const next =
-    ALLOWED_NEXT_PATHS.includes(rawNext) ||
-    (rawNext.startsWith("/") && !rawNext.startsWith("//"))
-      ? rawNext
-      : "/";
+  // Strict allowlist validation against unapproved redirect targets
+  const next = ALLOWED_NEXT_PATHS.has(rawNext) ? rawNext : "/";
 
   if (code) {
     try {

@@ -5,6 +5,13 @@ import type { PlatformRole } from "@gueguense/types";
 
 export const dynamic = "force-dynamic";
 
+const ADMIN_ALLOWED_ROLES: PlatformRole[] = [
+  "super_admin",
+  "admin",
+  "operator",
+  "verification_agent",
+];
+
 export default async function AdminDashboardPage() {
   const supabase = await createClient();
 
@@ -16,6 +23,7 @@ export default async function AdminDashboardPage() {
     redirect("/login");
   }
 
+  // Server-side revalidation of platform_role
   const { data: rawProfile } = await supabase
     .from("profiles")
     .select("platform_role, full_name, phone")
@@ -28,8 +36,18 @@ export default async function AdminDashboardPage() {
     phone: string | null;
   } | null;
 
+  const platformRole = profile?.platform_role ?? "none";
+  if (!ADMIN_ALLOWED_ROLES.includes(platformRole)) {
+    redirect("/login?error=AUTH_ADMIN_ROLE_REQUIRED");
+  }
+
+  // Server-side revalidation of MFA AAL2
   const { data: aalData } =
     await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+
+  if (aalData?.currentLevel !== "aal2") {
+    redirect("/mfa");
+  }
 
   async function handleSignOut() {
     "use server";

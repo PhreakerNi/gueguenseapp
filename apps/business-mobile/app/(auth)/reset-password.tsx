@@ -36,7 +36,6 @@ export default function BusinessResetPasswordScreen() {
           const queryParams = parsed.queryParams || {};
           const code = queryParams.code as string | undefined;
 
-          // Check if tokens are in hash or query
           const supabase = getSupabaseClient();
           if (code) {
             const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -58,6 +57,12 @@ export default function BusinessResetPasswordScreen() {
   }, [session]);
 
   const handleUpdate = async () => {
+    if (!session) {
+      setErrorMessage(
+        "No se detectó una sesión de recuperación válida. Por favor solicita un nuevo enlace.",
+      );
+      return;
+    }
     if (!password || !confirmPassword) {
       setErrorMessage("Por favor completa todos los campos.");
       return;
@@ -103,6 +108,15 @@ export default function BusinessResetPasswordScreen() {
         Establece una nueva contraseña para tu cuenta
       </Text>
 
+      {!session && !errorMessage && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>
+            No se detectó una sesión activa de recuperación. Por favor utiliza
+            el enlace enviado a tu correo.
+          </Text>
+        </View>
+      )}
+
       {errorMessage && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{errorMessage}</Text>
@@ -116,25 +130,27 @@ export default function BusinessResetPasswordScreen() {
       )}
 
       <TextInput
-        style={styles.input}
+        style={[styles.input, !session && styles.inputDisabled]}
         placeholder="Nueva contraseña (mínimo 8 caracteres)"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
+        editable={!!session}
       />
 
       <TextInput
-        style={styles.input}
+        style={[styles.input, !session && styles.inputDisabled]}
         placeholder="Confirmar nueva contraseña"
         value={confirmPassword}
         onChangeText={setConfirmPassword}
         secureTextEntry
+        editable={!!session}
       />
 
       <TouchableOpacity
-        style={styles.button}
+        style={[styles.button, (!session || loading) && styles.buttonDisabled]}
         onPress={handleUpdate}
-        disabled={loading}
+        disabled={!session || loading}
       >
         {loading ? (
           <ActivityIndicator color="#FFFFFF" />
@@ -142,6 +158,17 @@ export default function BusinessResetPasswordScreen() {
           <Text style={styles.buttonText}>Actualizar Contraseña</Text>
         )}
       </TouchableOpacity>
+
+      {!session && (
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => router.replace("/(auth)/login")}
+        >
+          <Text style={styles.secondaryButtonText}>
+            Volver al Inicio de Sesión
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -197,6 +224,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 16,
   },
+  inputDisabled: {
+    backgroundColor: "#F3F4F6",
+    color: "#9CA3AF",
+  },
   button: {
     backgroundColor: "#0066CC",
     padding: 16,
@@ -204,9 +235,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 8,
   },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
   buttonText: {
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "600",
+  },
+  secondaryButton: {
+    marginTop: 16,
+    padding: 12,
+    alignItems: "center",
+  },
+  secondaryButtonText: {
+    color: "#0066CC",
+    fontSize: 14,
+    fontWeight: "500",
   },
 });

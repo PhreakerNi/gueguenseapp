@@ -4,7 +4,7 @@
 **Estado:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Rama de Desarrollo:** `phase/2-auth-identity-sessions`  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_Correccion_v1_1.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_MicroCorreccion_v1_2.md`
 
 ---
 
@@ -21,7 +21,7 @@ gueguenseapp/
 ├── apps/
 │   ├── business-mobile/    # App móvil Expo SDK 57 (React Native 0.86.2) para comercios con Auth & Session
 │   ├── driver-mobile/      # App móvil Expo SDK 57 (React Native 0.86.2) para motorizados con Auth & Session
-│   ├── admin-web/          # Panel administrativo Next.js 16.2.12 (SSR Auth, Role Guards, MFA TOTP AAL2)
+│   ├── admin-web/          # Panel administrativo Next.js 16.2.12 (SSR Auth, Role Guards, MFA TOTP AAL2, proxy.ts)
 │   └── tracking-web/       # Portal web de seguimiento Next.js 16.2.12 (Bearer Token tracking, sin auth)
 │
 ├── packages/
@@ -42,7 +42,7 @@ gueguenseapp/
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 2 v1.1)
+## 🛠️ Stack Tecnológico Congelado (Fase 2 v1.2)
 
 - **Gestor de Paquetes:** `pnpm@11.17.0` (Monorepo Workspaces con un único `pnpm-lock.yaml`)
 - **Orquestador:** `turbo@2.10.7`
@@ -51,7 +51,7 @@ gueguenseapp/
   - TypeScript (Expo mobile apps): `6.0.3` (Expo SDK 57 compatible)
 - **Entorno:** `Node.js 24.18.0 LTS`
 - **Mobile Stack:** `Expo SDK 57` (`react-native` 0.86.2, `react` 19.2.3, `expo-router` 57.0.14, `expo-secure-store` 57.0.1, Expo 57.0.14)
-- **Web Stack:** `Next.js 16.2.12 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.2.12, `@supabase/ssr`)
+- **Web Stack:** `Next.js 16.2.12 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.2.12, `@supabase/ssr`, `proxy.ts`)
 - **Base de Datos & Backend:** `Supabase CLI 2.110.0` (PostGIS, PostgreSQL 15+, RLS denegado por defecto, SELECT grants para `authenticated`, types generados por CLI 2.110.0 para `--schema public`)
 - **Diagnostic Tool:** `expo-doctor 1.20.1`
 

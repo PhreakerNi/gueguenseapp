@@ -152,6 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: email.trim(),
         password,
         options: {
+          emailRedirectTo: "gueguense-driver://auth/callback",
           data: {
             full_name: fullName.trim(),
             phone: phone ? phone.trim() : "",
@@ -182,7 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { error } = await supabase.auth.resetPasswordForEmail(
         email.trim(),
         {
-          redirectTo: "gueguense-driver://(auth)/reset-password",
+          redirectTo: "gueguense-driver://auth/callback?next=/reset-password",
         },
       );
       if (error) {

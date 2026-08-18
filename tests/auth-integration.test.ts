@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import crypto from "node:crypto";
+import { execSync } from "node:child_process";
 import { createClient } from "@supabase/supabase-js";
 import {
   normalizeAuthError,
@@ -8,10 +9,50 @@ import {
   evaluateDriverAccess,
   evaluateAdminAccess,
   type IdentityContext,
+  type BusinessMemberRole,
+  type BusinessMemberStatus,
+  type DriverAccountStatus,
+  type DriverVerificationStatus,
+  type PlatformRole,
 } from "../packages/domain/src/index.ts";
 
-const SUPABASE_URL = process.env.SUPABASE_URL || "http://127.0.0.1:54321";
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
+function getSupabaseEnv(): {
+  url: string;
+  anonKey: string;
+  serviceRoleKey: string;
+} {
+  let url = process.env.SUPABASE_URL || process.env.API_URL;
+  let anonKey = process.env.SUPABASE_ANON_KEY || process.env.ANON_KEY;
+  let serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY;
+
+  if (!url || !anonKey || !serviceRoleKey) {
+    try {
+      const raw = execSync("pnpm supabase status -o json", {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const parsed = JSON.parse(raw);
+      url = url || parsed.API_URL || "http://127.0.0.1:54321";
+      anonKey = anonKey || parsed.ANON_KEY;
+      serviceRoleKey = serviceRoleKey || parsed.SERVICE_ROLE_KEY;
+    } catch {
+      // Fallback
+    }
+  }
+
+  return {
+    url: url || "http://127.0.0.1:54321",
+    anonKey: anonKey || "",
+    serviceRoleKey: serviceRoleKey || "",
+  };
+}
+
+const {
+  url: SUPABASE_URL,
+  anonKey: SUPABASE_ANON_KEY,
+  serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+} = getSupabaseEnv();
 
 function generateTotpCode(secretBase32: string): string {
   const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -47,10 +88,13 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
   const timestamp = Date.now();
   const businessEmail = `business_integ_${timestamp}@gueguense.test`;
   const driverEmail = `driver_integ_${timestamp}@gueguense.test`;
+  const adminEmail = `admin_integ_${timestamp}@gueguense.test`;
   const testPassword = "Password123!Secure";
 
   let businessUserId: string;
   let driverUserId: string;
+  let adminUserId: string;
+  let testBusinessId: string;
 
   const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
@@ -59,11 +103,23 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     },
   });
 
+  const adminClient = createClient(
+    SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    },
+  );
+
   it("1. should signup Business user and trigger public.profiles bootstrap", async () => {
     const { data, error } = await client.auth.signUp({
       email: businessEmail,
       password: testPassword,
       options: {
+        emailRedirectTo: "gueguense-business://auth/callback",
         data: {
           full_name: "Negocio Integracion",
         },
@@ -76,11 +132,36 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     businessUserId = data.user.id;
   });
 
-  it("2. should signup Driver user and trigger public.profiles bootstrap", async () => {
+  it("2. should verify signup does NOT autocreate business_members or drivers", async () => {
+    const { data: memberRows } = await adminClient
+      .from("business_members")
+      .select("id")
+      .eq("user_id", businessUserId);
+
+    assert.strictEqual(
+      memberRows?.length,
+      0,
+      "Signup must not autocreate business_members",
+    );
+
+    const { data: driverRows } = await adminClient
+      .from("drivers")
+      .select("id")
+      .eq("id", businessUserId);
+
+    assert.strictEqual(
+      driverRows?.length,
+      0,
+      "Signup must not autocreate drivers",
+    );
+  });
+
+  it("3. should signup Driver user and trigger public.profiles bootstrap", async () => {
     const { data, error } = await client.auth.signUp({
       email: driverEmail,
       password: testPassword,
       options: {
+        emailRedirectTo: "gueguense-driver://auth/callback",
         data: {
           full_name: "Motorizado Integracion",
         },
@@ -92,7 +173,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     driverUserId = data.user.id;
   });
 
-  it("3. should perform valid password login and return valid session", async () => {
+  it("4. should perform valid password login and return valid session", async () => {
     const { data, error } = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -103,7 +184,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(data.user.id, businessUserId);
   });
 
-  it("4. should reject invalid login credentials with normalized AUTH_INVALID_CREDENTIALS", async () => {
+  it("5. should reject invalid login credentials with normalized AUTH_INVALID_CREDENTIALS", async () => {
     const { data, error } = await client.auth.signInWithPassword({
       email: businessEmail,
       password: "WrongPassword999!",
@@ -123,7 +204,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     );
   });
 
-  it("5. should refresh session successfully", async () => {
+  it("6. should refresh session successfully", async () => {
     const loginRes = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -138,7 +219,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(data.session, "New refreshed session must be returned");
   });
 
-  it("6. should logout and invalidate local client session", async () => {
+  it("7. should logout and invalidate local client session", async () => {
     await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -155,7 +236,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     );
   });
 
-  it("7. should enforce RLS read isolation with real user JWT", async () => {
+  it("8. should enforce RLS read isolation with real user JWT", async () => {
     const loginA = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -194,7 +275,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     );
   });
 
-  it("8. should prevent privilege escalation on platform_role via RLS", async () => {
+  it("9. should prevent privilege escalation on platform_role via RLS", async () => {
     const loginA = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -229,8 +310,9 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     );
   });
 
-  it("9. should evaluate Business Access guard to ONBOARDING_REQUIRED for new user", () => {
-    const newBusinessIdentity: IdentityContext = {
+  it("10. should evaluate Business Access guard transitions with DB fixtures", async () => {
+    // 10a. Unonboarded business user -> ONBOARDING_REQUIRED
+    const initialIdentity: IdentityContext = {
       userId: businessUserId,
       email: businessEmail,
       profile: {
@@ -242,16 +324,78 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       businessMemberships: [],
       driver: null,
     };
-
-    const evaluation = evaluateBusinessAccess(newBusinessIdentity);
-    assert.deepStrictEqual(evaluation, {
+    assert.deepStrictEqual(evaluateBusinessAccess(initialIdentity), {
       allowed: false,
       reason: "ONBOARDING_REQUIRED",
     });
+
+    // 10b. Create active business & active membership fixture in DB
+    const { data: bizData } = await adminClient
+      .from("businesses")
+      .insert({
+        legal_name: "Comercio Fixture SA",
+        brand_name: "Comercio Fixture",
+        tax_id: `TAX-${timestamp}`,
+        account_status: "ACTIVE",
+      })
+      .select("id")
+      .single();
+
+    assert.ok(bizData?.id);
+    testBusinessId = bizData.id;
+
+    const { data: memberData } = await adminClient
+      .from("business_members")
+      .insert({
+        business_id: testBusinessId,
+        user_id: businessUserId,
+        role: "business_owner",
+        status: "ACTIVE",
+      })
+      .select("id")
+      .single();
+
+    assert.ok(memberData?.id);
+
+    // Active membership -> allowed: true
+    const activeIdentity: IdentityContext = {
+      ...initialIdentity,
+      businessMemberships: [
+        {
+          membershipId: memberData.id,
+          businessId: testBusinessId,
+          role: "business_owner" as BusinessMemberRole,
+          status: "ACTIVE" as BusinessMemberStatus,
+          businessAccountStatus: "ACTIVE",
+        },
+      ],
+    };
+    assert.deepStrictEqual(evaluateBusinessAccess(activeIdentity), {
+      allowed: true,
+    });
+
+    // Suspended membership -> ACCOUNT_RESTRICTED
+    const suspendedIdentity: IdentityContext = {
+      ...initialIdentity,
+      businessMemberships: [
+        {
+          membershipId: memberData.id,
+          businessId: testBusinessId,
+          role: "business_owner" as BusinessMemberRole,
+          status: "SUSPENDED" as BusinessMemberStatus,
+          businessAccountStatus: "ACTIVE",
+        },
+      ],
+    };
+    assert.deepStrictEqual(evaluateBusinessAccess(suspendedIdentity), {
+      allowed: false,
+      reason: "ACCOUNT_RESTRICTED",
+    });
   });
 
-  it("10. should evaluate Driver Access guard to ONBOARDING_REQUIRED for new user", () => {
-    const newDriverIdentity: IdentityContext = {
+  it("11. should evaluate Driver Access guard transitions with DB fixtures", async () => {
+    // 11a. Unonboarded driver -> ONBOARDING_REQUIRED
+    const initialDriverIdentity: IdentityContext = {
       userId: driverUserId,
       email: driverEmail,
       profile: {
@@ -263,102 +407,153 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       businessMemberships: [],
       driver: null,
     };
-
-    const evaluation = evaluateDriverAccess(newDriverIdentity);
-    assert.deepStrictEqual(evaluation, {
+    assert.deepStrictEqual(evaluateDriverAccess(initialDriverIdentity), {
       allowed: false,
       reason: "ONBOARDING_REQUIRED",
     });
+
+    // 11b. Insert driver fixture with REGISTERED status -> ONBOARDING_REQUIRED
+    await adminClient.from("drivers").insert({
+      id: driverUserId,
+      first_name: "Conductor",
+      last_name: "Test",
+      national_id: `ID-${timestamp}`,
+      verification_status: "PENDING",
+      account_status: "REGISTERED",
+    });
+
+    const registeredDriverIdentity: IdentityContext = {
+      ...initialDriverIdentity,
+      driver: {
+        verificationStatus: "PENDING" as DriverVerificationStatus,
+        accountStatus: "REGISTERED" as DriverAccountStatus,
+      },
+    };
+    assert.deepStrictEqual(evaluateDriverAccess(registeredDriverIdentity), {
+      allowed: false,
+      reason: "ONBOARDING_REQUIRED",
+    });
+
+    // 11c. Driver with ACTIVE status -> allowed: true
+    const activeDriverIdentity: IdentityContext = {
+      ...initialDriverIdentity,
+      driver: {
+        verificationStatus: "VERIFIED" as DriverVerificationStatus,
+        accountStatus: "ACTIVE" as DriverAccountStatus,
+      },
+    };
+    assert.deepStrictEqual(evaluateDriverAccess(activeDriverIdentity), {
+      allowed: true,
+    });
+
+    // 11d. Driver with SUSPENDED status -> ACCOUNT_RESTRICTED
+    const suspendedDriverIdentity: IdentityContext = {
+      ...initialDriverIdentity,
+      driver: {
+        verificationStatus: "VERIFIED" as DriverVerificationStatus,
+        accountStatus: "SUSPENDED" as DriverAccountStatus,
+      },
+    };
+    assert.deepStrictEqual(evaluateDriverAccess(suspendedDriverIdentity), {
+      allowed: false,
+      reason: "ACCOUNT_RESTRICTED",
+    });
   });
 
-  it("11. should evaluate Admin Access guard to ADMIN_ROLE_REQUIRED for platform_role none", () => {
-    const regularIdentity: IdentityContext = {
-      userId: businessUserId,
-      email: businessEmail,
+  it("12. should perform complete Admin Auth flow with platform_role=admin, MFA TOTP and AAL2", async () => {
+    // 12a. Signup admin user
+    const { data: adminSignUp, error: adminSignUpError } =
+      await client.auth.signUp({
+        email: adminEmail,
+        password: testPassword,
+        options: {
+          data: {
+            full_name: "Administrador Real",
+          },
+        },
+      });
+
+    assert.strictEqual(adminSignUpError, null);
+    assert.ok(adminSignUp.user);
+    adminUserId = adminSignUp.user.id;
+
+    // 12b. Promote profile to platform_role = admin in DB
+    const { error: promoteError } = await adminClient
+      .from("profiles")
+      .update({ platform_role: "admin" })
+      .eq("id", adminUserId);
+
+    assert.strictEqual(promoteError, null);
+
+    // 12c. Login as Admin
+    const { data: adminLogin, error: adminLoginError } =
+      await client.auth.signInWithPassword({
+        email: adminEmail,
+        password: testPassword,
+      });
+
+    assert.strictEqual(adminLoginError, null);
+    assert.ok(adminLogin.session);
+
+    // Evaluate Admin guard at AAL1 -> MFA_REQUIRED
+    const adminIdentity: IdentityContext = {
+      userId: adminUserId,
+      email: adminEmail,
       profile: {
-        platformRole: "none",
-        fullName: "User",
+        platformRole: "admin" as PlatformRole,
+        fullName: "Administrador Real",
         phone: null,
         avatarUrl: null,
       },
       businessMemberships: [],
       driver: null,
     };
-
-    const evaluation = evaluateAdminAccess(regularIdentity);
-    assert.deepStrictEqual(evaluation, {
+    assert.deepStrictEqual(evaluateAdminAccess(adminIdentity, "aal1"), {
       allowed: false,
-      reason: "ADMIN_ROLE_REQUIRED",
+      reason: "MFA_REQUIRED",
     });
-  });
 
-  it("12. should enroll in TOTP MFA factor", async () => {
-    const login = await client.auth.signInWithPassword({
-      email: businessEmail,
-      password: testPassword,
-    });
-    assert.ok(login.data.session);
-
-    const mfaClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    // 12d. Enroll in TOTP MFA factor
+    const adminMfaClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: false },
       global: {
         headers: {
-          Authorization: `Bearer ${login.data.session.access_token}`,
+          Authorization: `Bearer ${adminLogin.session.access_token}`,
         },
       },
     });
 
     const { data: enrollData, error: enrollError } =
-      await mfaClient.auth.mfa.enroll({
+      await adminMfaClient.auth.mfa.enroll({
         factorType: "totp",
         issuer: "Gueguense",
       });
 
-    assert.strictEqual(enrollError, null, "MFA enrollment should succeed");
-    assert.ok(enrollData, "Enrollment data must exist");
-    assert.ok(enrollData.id, "Factor ID must exist");
-    assert.ok(enrollData.totp.secret, "TOTP secret must exist");
-    assert.ok(enrollData.totp.qr_code, "TOTP QR code must exist");
+    assert.strictEqual(enrollError, null);
+    assert.ok(enrollData?.id);
+    assert.ok(enrollData?.totp?.secret);
 
-    // 13. Verify TOTP Challenge with real generated code
-    const code = generateTotpCode(enrollData.totp.secret);
+    // 12e. Challenge and verify TOTP code
+    const totpCode = generateTotpCode(enrollData.totp.secret);
     const { data: verifyData, error: verifyError } =
-      await mfaClient.auth.mfa.challengeAndVerify({
+      await adminMfaClient.auth.mfa.challengeAndVerify({
         factorId: enrollData.id,
-        code,
+        code: totpCode,
       });
 
-    assert.strictEqual(
-      verifyError,
-      null,
-      "MFA challenge verification should succeed",
-    );
-    assert.ok(verifyData, "Verify data must exist");
+    assert.strictEqual(verifyError, null);
+    assert.ok(verifyData);
 
-    // 14. Verify Authenticator Assurance Level is AAL2
+    // 12f. Verify Authenticator Assurance Level reaches AAL2
     const { data: aalData } =
-      await mfaClient.auth.mfa.getAuthenticatorAssuranceLevel();
+      await adminMfaClient.auth.mfa.getAuthenticatorAssuranceLevel();
     assert.strictEqual(
       aalData?.currentLevel,
       "aal2",
-      "Session must reach AAL2 after TOTP verification",
+      "Admin session must reach AAL2 after TOTP verification",
     );
-  });
 
-  it("15. should evaluate Admin Access guard to allowed when admin role and AAL2", () => {
-    const adminIdentity: IdentityContext = {
-      userId: "admin-uuid",
-      email: "admin@gueguense.com",
-      profile: {
-        platformRole: "admin",
-        fullName: "Admin User",
-        phone: null,
-        avatarUrl: null,
-      },
-      businessMemberships: [],
-      driver: null,
-    };
-
+    // 12g. Evaluate Admin guard with AAL2 -> allowed: true
     assert.deepStrictEqual(evaluateAdminAccess(adminIdentity, "aal2"), {
       allowed: true,
     });

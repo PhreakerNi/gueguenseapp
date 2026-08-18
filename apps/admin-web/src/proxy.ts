@@ -9,7 +9,7 @@ const ADMIN_ALLOWED_ROLES: PlatformRole[] = [
   "verification_agent",
 ];
 
-export async function middleware(request: NextRequest) {
+export default async function proxy(request: NextRequest) {
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -75,7 +75,7 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // User is authenticated, check platform role
+  // Server-side verification of allowed platform role
   const { data: rawProfile } = await supabase
     .from("profiles")
     .select("platform_role")
@@ -95,7 +95,7 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // Check MFA Authenticator Assurance Level
+  // Server-side verification of MFA Authenticator Assurance Level (AAL2)
   const { data: aalData } =
     await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   const currentAal = aalData?.currentLevel;
