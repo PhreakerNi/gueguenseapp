@@ -789,9 +789,16 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
 
     assert.strictEqual(promoteError, null);
 
-    // 14c. Login as Admin user with password
+    // 14c. Login as Admin user on dedicated adminClient with password
+    const adminClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+
     const { data: adminLogin, error: adminLoginError } =
-      await client.auth.signInWithPassword({
+      await adminClient.auth.signInWithPassword({
         email: adminEmail,
         password: testPassword,
       });
@@ -829,23 +836,18 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       reason: "MFA_REQUIRED",
     });
 
-    // 14e. Enroll in TOTP MFA factor using the authenticated session header
-    const mfaClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false },
-      global: {
-        headers: {
-          Authorization: `Bearer ${adminLogin.session.access_token}`,
-        },
-      },
-    });
-
+    // 14e. Enroll in TOTP MFA factor using the authenticated adminClient
     const { data: enrollData, error: enrollError } =
-      await mfaClient.auth.mfa.enroll({
+      await adminClient.auth.mfa.enroll({
         factorType: "totp",
         issuer: "Gueguense",
       });
 
-    assert.strictEqual(enrollError, null, "MFA enrollment should succeed");
+    assert.strictEqual(
+      enrollError,
+      null,
+      `MFA enrollment error: ${enrollError?.message}`,
+    );
     assert.ok(enrollData, "Enrollment data must exist");
     assert.ok(enrollData.id, "Factor ID must exist");
     assert.ok(enrollData.totp.secret, "TOTP secret must exist");
@@ -854,7 +856,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     // 14f. Challenge and verify TOTP code with real secret
     const code = generateTotpCode(enrollData.totp.secret);
     const { data: verifyData, error: verifyError } =
-      await mfaClient.auth.mfa.challengeAndVerify({
+      await adminClient.auth.mfa.challengeAndVerify({
         factorId: enrollData.id,
         code,
       });
@@ -862,13 +864,13 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(
       verifyError,
       null,
-      "MFA challenge verification should succeed",
+      `MFA challenge verification error: ${verifyError?.message}`,
     );
     assert.ok(verifyData, "Verify data must exist");
 
     // 14g. Verify Authenticator Assurance Level is AAL2
     const { data: aalData } =
-      await mfaClient.auth.mfa.getAuthenticatorAssuranceLevel();
+      await adminClient.auth.mfa.getAuthenticatorAssuranceLevel();
     assert.strictEqual(
       aalData?.currentLevel,
       "aal2",
