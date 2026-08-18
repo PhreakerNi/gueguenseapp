@@ -139,10 +139,12 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
   let driverUserId: string;
   let adminUserId: string;
 
+  const clientStorage = new MemoryStorage();
   const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
+      storage: clientStorage,
       autoRefreshToken: false,
-      persistSession: false,
+      persistSession: true,
     },
   });
 
@@ -814,9 +816,18 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     if (promoteError) console.error("Test 14b promote error:", promoteError);
     assert.strictEqual(promoteError, null);
 
-    // 14c. Login as Admin user
+    // 14c. Login as Admin user with dedicated client
+    const adminStorage = new MemoryStorage();
+    const adminClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        storage: adminStorage,
+        autoRefreshToken: false,
+        persistSession: true,
+      },
+    });
+
     const { data: adminLogin, error: adminLoginError } =
-      await client.auth.signInWithPassword({
+      await adminClient.auth.signInWithPassword({
         email: adminEmail,
         password: testPassword,
       });
@@ -858,9 +869,9 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       reason: "MFA_REQUIRED",
     });
 
-    // 14e. MFA TOTP Enrollment on authenticated client
+    // 14e. MFA TOTP Enrollment on authenticated admin client
     const { data: enrollData, error: enrollError } =
-      await client.auth.mfa.enroll({
+      await adminClient.auth.mfa.enroll({
         factorType: "totp",
         issuer: "Gueguense",
       });
@@ -873,9 +884,24 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
 
     // 14f. Challenge and verify TOTP code with real secret
     const code = generateTotpCode(enrollData.totp.secret);
-    const { data: verifyData, error: verifyError } =
-      await client.auth.mfa.challengeAndVerify({
+    const { data: challengeData, error: challengeError } =
+      await adminClient.auth.mfa.challenge({
         factorId: enrollData.id,
+      });
+
+    if (challengeError)
+      console.error("Test 14f challenge error:", challengeError);
+    assert.strictEqual(
+      challengeError,
+      null,
+      "MFA challenge creation should succeed",
+    );
+    assert.ok(challengeData?.id, "Challenge ID must exist");
+
+    const { data: verifyData, error: verifyError } =
+      await adminClient.auth.mfa.verify({
+        factorId: enrollData.id,
+        challengeId: challengeData.id,
         code,
       });
 
@@ -890,7 +916,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
 
     // 14g. Verify Authenticator Assurance Level is AAL2
     const { data: aalData } =
-      await client.auth.mfa.getAuthenticatorAssuranceLevel();
+      await adminClient.auth.mfa.getAuthenticatorAssuranceLevel();
     assert.strictEqual(
       aalData?.currentLevel,
       "aal2",
