@@ -16,6 +16,29 @@ import {
   type PlatformRole,
 } from "../packages/domain/src/index.ts";
 
+function createLocalAnonJwt(): string {
+  const header = Buffer.from(
+    JSON.stringify({ alg: "HS256", typ: "JWT" }),
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      iss: "supabase",
+      ref: "127.0.0.1",
+      role: "anon",
+      iat: Math.floor(Date.now() / 1000) - 60,
+      exp: Math.floor(Date.now() / 1000) + 3600 * 24 * 365,
+    }),
+  ).toString("base64url");
+  const signature = crypto
+    .createHmac(
+      "sha256",
+      "super-secret-jwt-token-with-at-least-32-characters-long",
+    )
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+  return `${header}.${payload}.${signature}`;
+}
+
 function createLocalServiceRoleJwt(): string {
   const header = Buffer.from(
     JSON.stringify({ alg: "HS256", typ: "JWT" }),
@@ -69,14 +92,17 @@ function getSupabaseEnv(): {
     }
   }
 
+  if (!anonKey) {
+    anonKey = createLocalAnonJwt();
+  }
   if (!serviceRoleKey) {
     serviceRoleKey = createLocalServiceRoleJwt();
   }
 
   return {
     url: url || "http://127.0.0.1:54321",
-    anonKey: anonKey || "",
-    serviceRoleKey: serviceRoleKey || createLocalServiceRoleJwt(),
+    anonKey,
+    serviceRoleKey,
   };
 }
 
