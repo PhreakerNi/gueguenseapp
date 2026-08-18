@@ -174,6 +174,14 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         autoRefreshToken: false,
         persistSession: false,
       },
+      global: {
+        headers: SUPABASE_SERVICE_ROLE_KEY
+          ? {
+              Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+              apikey: SUPABASE_SERVICE_ROLE_KEY,
+            }
+          : undefined,
+      },
     },
   );
 
@@ -567,26 +575,15 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
 
     assert.strictEqual(promoteError, null);
 
-    // 12c. Login as Admin with admin auth client instance
-    const adminAuthClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
-
+    // 12c. Login as Admin
     const { data: adminLogin, error: adminLoginError } =
-      await adminAuthClient.auth.signInWithPassword({
+      await client.auth.signInWithPassword({
         email: adminEmail,
         password: testPassword,
       });
 
     assert.strictEqual(adminLoginError, null);
     assert.ok(adminLogin.session);
-
-    if (adminLogin?.session) {
-      await adminAuthClient.auth.setSession(adminLogin.session);
-    }
 
     // Evaluate Admin guard at AAL1 -> MFA_REQUIRED
     const adminIdentity: IdentityContext = {
@@ -606,9 +603,18 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       reason: "MFA_REQUIRED",
     });
 
-    // 12d. Enroll in TOTP MFA factor using the authenticated admin client
+    // 12d. Enroll in TOTP MFA factor using the authenticated session header
+    const mfaAdminClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false },
+      global: {
+        headers: {
+          Authorization: `Bearer ${adminLogin.session.access_token}`,
+        },
+      },
+    });
+
     const { data: enrollData, error: enrollError } =
-      await adminAuthClient.auth.mfa.enroll({
+      await mfaAdminClient.auth.mfa.enroll({
         factorType: "totp",
         issuer: "Gueguense",
       });
@@ -617,27 +623,37 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(enrollData?.id);
     assert.ok(enrollData?.totp?.secret);
 
-    // 12e. Challenge and verify TOTP code
+    // 12e. Challenge MFA factor
+    const { data: challengeData, error: challengeError } =
+      await mfaAdminClient.auth.mfa.challenge({
+        factorId: enrollData.id,
+      });
+
+    assert.strictEqual(challengeError, null);
+    assert.ok(challengeData?.id);
+
+    // 12f. Verify TOTP code with challengeId
     const totpCode = generateTotpCode(enrollData.totp.secret);
     const { data: verifyData, error: verifyError } =
-      await adminAuthClient.auth.mfa.challengeAndVerify({
+      await mfaAdminClient.auth.mfa.verify({
         factorId: enrollData.id,
+        challengeId: challengeData.id,
         code: totpCode,
       });
 
     assert.strictEqual(verifyError, null);
     assert.ok(verifyData);
 
-    // 12f. Verify Authenticator Assurance Level reaches AAL2
+    // 12g. Verify Authenticator Assurance Level reaches AAL2
     const { data: aalData } =
-      await adminAuthClient.auth.mfa.getAuthenticatorAssuranceLevel();
+      await mfaAdminClient.auth.mfa.getAuthenticatorAssuranceLevel();
     assert.strictEqual(
       aalData?.currentLevel,
       "aal2",
       "Admin session must reach AAL2 after TOTP verification",
     );
 
-    // 12g. Evaluate Admin guard with AAL2 -> allowed: true
+    // 12h. Evaluate Admin guard with AAL2 -> allowed: true
     assert.deepStrictEqual(evaluateAdminAccess(adminIdentity, "aal2"), {
       allowed: true,
     });
