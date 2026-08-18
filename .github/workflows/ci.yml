@@ -170,7 +170,7 @@ jobs:
 
       - name: Run Phase 2 Auth & Session Integration Test Suite
         run: |
-          pnpm supabase status -o json > supabase_status.json
+          node -e "const { execSync } = require('node:child_process'); const raw = execSync('pnpm supabase status -o json', { encoding: 'utf8' }); const match = raw.match(/\{[\s\S]*\}/); require('node:fs').writeFileSync('supabase_status.json', match ? match[0] : '{}');"
           cat supabase_status.json
           export SUPABASE_URL=$(jq -r '.API_URL // .api_url // "http://127.0.0.1:54321"' supabase_status.json)
           export SUPABASE_ANON_KEY=$(jq -r '.ANON_KEY // .anon_key // empty' supabase_status.json)
