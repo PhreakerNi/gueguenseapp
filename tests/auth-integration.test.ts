@@ -79,8 +79,9 @@ function getSupabaseEnv(): {
         stdio: ["ignore", "pipe", "ignore"],
       });
       const firstBrace = raw.indexOf("{");
-      if (firstBrace !== -1) {
-        const jsonText = raw.substring(firstBrace);
+      const lastBrace = raw.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1) {
+        const jsonText = raw.substring(firstBrace, lastBrace + 1);
         const parsed = JSON.parse(jsonText);
         url =
           url || parsed.API_URL || parsed.api_url || "http://127.0.0.1:54321";
@@ -197,10 +198,12 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       },
     });
 
+    if (error) console.error("Test 1 SignUp Error:", error);
     assert.strictEqual(error, null, "Business signup should succeed");
     assert.ok(data.user, "User object must be returned");
     assert.ok(data.user.id, "User ID must be generated");
     businessUserId = data.user.id;
+    console.log("✓ Test 1: Business signup & profiles bootstrap verified");
   });
 
   it("2. should verify signup does NOT autocreate business_members or drivers", async () => {
@@ -209,6 +212,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .select("id")
       .eq("user_id", businessUserId);
 
+    if (memberErr) console.error("Test 2 member check error:", memberErr);
     assert.strictEqual(memberErr, null);
     assert.strictEqual(
       memberRows?.length,
@@ -221,12 +225,14 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .select("id")
       .eq("id", businessUserId);
 
+    if (driverErr) console.error("Test 2 driver check error:", driverErr);
     assert.strictEqual(driverErr, null);
     assert.strictEqual(
       driverRows?.length,
       0,
       "Signup must not autocreate drivers",
     );
+    console.log("✓ Test 2: No-autocreate business_members / drivers verified");
   });
 
   it("3. should signup Driver user and trigger public.profiles bootstrap", async () => {
@@ -241,9 +247,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       },
     });
 
+    if (error) console.error("Test 3 SignUp Error:", error);
     assert.strictEqual(error, null, "Driver signup should succeed");
     assert.ok(data.user, "User object must be returned");
     driverUserId = data.user.id;
+    console.log("✓ Test 3: Driver signup & profiles bootstrap verified");
   });
 
   it("4. should perform valid password login and return valid session", async () => {
@@ -252,9 +260,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       password: testPassword,
     });
 
+    if (error) console.error("Test 4 login error:", error);
     assert.strictEqual(error, null, "Valid login should not error");
     assert.ok(data.session, "Session must be returned");
     assert.strictEqual(data.user.id, businessUserId);
+    console.log("✓ Test 4: Valid login verified");
   });
 
   it("5. should reject invalid login credentials with normalized AUTH_INVALID_CREDENTIALS", async () => {
@@ -275,6 +285,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       "AUTH_INVALID_CREDENTIALS",
       "Must normalize to AUTH_INVALID_CREDENTIALS",
     );
+    console.log("✓ Test 5: Invalid credentials rejection verified");
   });
 
   it("6. should refresh session successfully", async () => {
@@ -288,8 +299,10 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       refresh_token: loginRes.data.session.refresh_token,
     });
 
+    if (error) console.error("Test 6 refresh error:", error);
     assert.strictEqual(error, null, "Refresh session should succeed");
     assert.ok(data.session, "New refreshed session must be returned");
+    console.log("✓ Test 6: Session refresh verified");
   });
 
   it("7. should logout and invalidate local client session", async () => {
@@ -307,6 +320,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       null,
       "Session must be null after sign out",
     );
+    console.log("✓ Test 7: Logout and session invalidation verified");
   });
 
   it("8. should enforce RLS read isolation with real user JWT", async () => {
@@ -346,6 +360,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       0,
       "User A must not be allowed to read User B profile",
     );
+    console.log("✓ Test 8: RLS isolation between users verified");
   });
 
   it("9. should prevent privilege escalation on platform_role via RLS", async () => {
@@ -381,6 +396,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       "none",
       "platform_role must remain 'none'",
     );
+    console.log("✓ Test 9: Anti-escalation RLS protection verified");
   });
 
   it("10. should evaluate Business Access guard transitions with DB fixtures", async () => {
@@ -414,6 +430,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .select("id")
       .single();
 
+    if (bizErr) console.error("Test 10b biz insert error:", bizErr);
     assert.strictEqual(
       bizErr,
       null,
@@ -433,6 +450,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .select("id")
       .single();
 
+    if (memberErr) console.error("Test 10b member insert error:", memberErr);
     assert.strictEqual(
       memberErr,
       null,
@@ -474,6 +492,9 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       allowed: false,
       reason: "ACCOUNT_RESTRICTED",
     });
+    console.log(
+      "✓ Test 10: Business Access DB fixtures & transitions verified",
+    );
   });
 
   it("11. should evaluate Driver Access guard transitions with DB fixtures", async () => {
@@ -506,6 +527,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         account_status: "REGISTERED",
       });
 
+    if (driverInsertError)
+      console.error("Test 11b driver insert error:", driverInsertError);
     assert.strictEqual(
       driverInsertError,
       null,
@@ -548,6 +571,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       allowed: false,
       reason: "ACCOUNT_RESTRICTED",
     });
+    console.log("✓ Test 11: Driver Access DB fixtures & transitions verified");
   });
 
   it("12. should perform complete Admin Auth flow with platform_role=admin, MFA TOTP and AAL2", async () => {
@@ -563,6 +587,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         },
       });
 
+    if (adminSignUpError)
+      console.error("Test 12a signup error:", adminSignUpError);
     assert.strictEqual(adminSignUpError, null);
     assert.ok(adminSignUp.user);
     adminUserId = adminSignUp.user.id;
@@ -573,6 +599,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .update({ platform_role: "admin" })
       .eq("id", adminUserId);
 
+    if (promoteError) console.error("Test 12b promote error:", promoteError);
     assert.strictEqual(promoteError, null);
 
     // 12c. Login as Admin
@@ -582,6 +609,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         password: testPassword,
       });
 
+    if (adminLoginError)
+      console.error("Test 12c login error:", adminLoginError);
     assert.strictEqual(adminLoginError, null);
     assert.ok(adminLogin.session);
 
@@ -619,6 +648,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         issuer: "Gueguense",
       });
 
+    if (enrollError) console.error("Test 12d enroll error:", enrollError);
     assert.strictEqual(enrollError, null);
     assert.ok(enrollData?.id);
     assert.ok(enrollData?.totp?.secret);
@@ -629,6 +659,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         factorId: enrollData.id,
       });
 
+    if (challengeError)
+      console.error("Test 12e challenge error:", challengeError);
     assert.strictEqual(challengeError, null);
     assert.ok(challengeData?.id);
 
@@ -641,6 +673,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         code: totpCode,
       });
 
+    if (verifyError) console.error("Test 12f verify error:", verifyError);
     assert.strictEqual(verifyError, null);
     assert.ok(verifyData);
 
@@ -657,5 +690,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.deepStrictEqual(evaluateAdminAccess(adminIdentity, "aal2"), {
       allowed: true,
     });
+    console.log(
+      "✓ Test 12: Complete Admin Auth flow (platform_role=admin + TOTP + AAL2) verified",
+    );
   });
 });
