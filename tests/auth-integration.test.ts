@@ -29,6 +29,24 @@ function getSupabaseEnv(): {
 
   if (!url || !anonKey || !serviceRoleKey) {
     try {
+      const fs = require("node:fs");
+      if (fs.existsSync("supabase_status.json")) {
+        const raw = fs.readFileSync("supabase_status.json", "utf8");
+        const parsed = JSON.parse(raw);
+        url = url || parsed.API_URL || parsed.api_url;
+        anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key;
+        serviceRoleKey =
+          serviceRoleKey ||
+          parsed.SERVICE_ROLE_KEY ||
+          parsed.service_role_key ||
+          parsed.SERVICE_KEY ||
+          parsed.service_key;
+      }
+    } catch {}
+  }
+
+  if (!url || !anonKey || !serviceRoleKey) {
+    try {
       const raw = execSync("pnpm supabase status -o json", {
         encoding: "utf-8",
         stdio: ["ignore", "pipe", "ignore"],
@@ -46,9 +64,7 @@ function getSupabaseEnv(): {
           parsed.SERVICE_KEY ||
           parsed.service_key;
       }
-    } catch {
-      // Handled by assertions below
-    }
+    } catch {}
   }
 
   assert.ok(url, "SUPABASE_URL must be defined");
@@ -140,6 +156,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       },
     });
 
+    if (error) console.error("Test 1 error:", error);
     assert.strictEqual(error, null, "Business signup should succeed");
     assert.ok(data.user, "User object must be returned");
     assert.ok(data.user.id, "User ID must be generated");
@@ -152,6 +169,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .eq("id", businessUserId)
       .single();
 
+    if (profileErr) console.error("Test 1 profile error:", profileErr);
     assert.strictEqual(profileErr, null);
     assert.strictEqual(profileRow?.id, businessUserId);
     assert.strictEqual(profileRow?.platform_role, "none");
@@ -196,6 +214,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       },
     });
 
+    if (error) console.error("Test 3 error:", error);
     assert.strictEqual(error, null, "Driver signup should succeed");
     assert.ok(data.user, "User object must be returned");
     driverUserId = data.user.id;
@@ -207,6 +226,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .eq("id", driverUserId)
       .single();
 
+    if (profileErr) console.error("Test 3 profile error:", profileErr);
     assert.strictEqual(profileErr, null);
     assert.strictEqual(profileRow?.id, driverUserId);
     assert.strictEqual(profileRow?.platform_role, "none");
@@ -245,6 +265,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       password: testPassword,
     });
 
+    if (error) console.error("Test 5 error:", error);
     assert.strictEqual(error, null, "Valid login should not error");
     assert.ok(data.session, "Session must be returned");
     assert.strictEqual(data.user.id, businessUserId);
@@ -281,6 +302,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       refresh_token: loginRes.data.session.refresh_token,
     });
 
+    if (error) console.error("Test 7 error:", error);
     assert.strictEqual(error, null, "Refresh session should succeed");
     assert.ok(data.session, "New refreshed session must be returned");
   });
@@ -409,11 +431,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .select("id")
       .single();
 
-    assert.strictEqual(
-      bizErr,
-      null,
-      `Business insert error: ${bizErr?.message}`,
-    );
+    if (bizErr) console.error("Test 11b biz insert error:", bizErr);
+    assert.strictEqual(bizErr, null);
     assert.ok(bizRow?.id);
     const testBusinessId = bizRow.id;
 
@@ -428,11 +447,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .select("id")
       .single();
 
-    assert.strictEqual(
-      memberErr,
-      null,
-      `Member insert error: ${memberErr?.message}`,
-    );
+    if (memberErr) console.error("Test 11b member insert error:", memberErr);
+    assert.strictEqual(memberErr, null);
     assert.ok(memberRow?.id);
     const testMemberId = memberRow.id;
 
@@ -597,11 +613,9 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         account_status: "REGISTERED",
       });
 
-    assert.strictEqual(
-      insertDriverErr,
-      null,
-      `Driver insert error: ${insertDriverErr?.message}`,
-    );
+    if (insertDriverErr)
+      console.error("Test 12b driver insert error:", insertDriverErr);
+    assert.strictEqual(insertDriverErr, null);
 
     const { data: registeredDriverRow } = await trustedAdminClient
       .from("drivers")
@@ -772,6 +786,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         },
       });
 
+    if (adminSignUpError)
+      console.error("Test 14a signup error:", adminSignUpError);
     assert.strictEqual(adminSignUpError, null);
     assert.ok(adminSignUp.user);
     adminUserId = adminSignUp.user.id;
@@ -782,6 +798,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .update({ platform_role: "admin" })
       .eq("id", adminUserId);
 
+    if (promoteError) console.error("Test 14b promote error:", promoteError);
     assert.strictEqual(promoteError, null);
 
     // 14c. Login as Admin user
@@ -791,6 +808,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         password: testPassword,
       });
 
+    if (adminLoginError)
+      console.error("Test 14c admin login error:", adminLoginError);
     assert.strictEqual(adminLoginError, null);
     assert.ok(adminLogin?.session?.access_token);
 
@@ -802,6 +821,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         .eq("id", adminUserId)
         .single();
 
+    if (adminProfileErr)
+      console.error("Test 14d admin profile error:", adminProfileErr);
     assert.strictEqual(adminProfileErr, null);
     assert.strictEqual(adminProfile?.platform_role, "admin");
 
@@ -836,6 +857,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       access_token: adminLogin.session.access_token,
       refresh_token: adminLogin.session.refresh_token,
     });
+    if (setSessionErr)
+      console.error("Test 14e setSession error:", setSessionErr);
     assert.strictEqual(
       setSessionErr,
       null,
@@ -848,6 +871,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         issuer: "Gueguense",
       });
 
+    if (enrollError) console.error("Test 14e mfa enroll error:", enrollError);
     assert.strictEqual(enrollError, null, "MFA enrollment should succeed");
     assert.ok(enrollData, "Enrollment data must exist");
     assert.ok(enrollData.id, "Factor ID must exist");
@@ -861,6 +885,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         code,
       });
 
+    if (verifyError)
+      console.error("Test 14f challenge verify error:", verifyError);
     assert.strictEqual(
       verifyError,
       null,
