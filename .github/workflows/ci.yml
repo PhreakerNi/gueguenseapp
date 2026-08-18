@@ -170,10 +170,10 @@ jobs:
 
       - name: Run Phase 2 Auth & Session Integration Test Suite
         run: |
-          pnpm exec supabase status -o json > supabase_status.json
-          export SUPABASE_URL=$(node -e "const fs = require('fs'); const raw = fs.readFileSync('supabase_status.json','utf8'); const jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1); const s = JSON.parse(jsonStr); console.log(s.API_URL || s.api_url || 'http://127.0.0.1:54321');")
-          export SUPABASE_ANON_KEY=$(node -e "const fs = require('fs'); const raw = fs.readFileSync('supabase_status.json','utf8'); const jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1); const s = JSON.parse(jsonStr); console.log(s.ANON_KEY || s.anon_key || '');")
-          export SUPABASE_SERVICE_ROLE_KEY=$(node -e "const fs = require('fs'); const raw = fs.readFileSync('supabase_status.json','utf8'); const jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1); const s = JSON.parse(jsonStr); console.log(s.SERVICE_ROLE_KEY || s.service_role_key || s.SERVICE_KEY || s.service_key || '');")
+          STATUS_JSON=$(pnpm supabase status -o json)
+          export SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')
+          export SUPABASE_ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')
+          export SUPABASE_SERVICE_ROLE_KEY=$(echo "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY')
           pnpm test:auth-integration
 
       - name: Stop Supabase Stack

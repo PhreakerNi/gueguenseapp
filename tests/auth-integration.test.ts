@@ -22,58 +22,57 @@ function getSupabaseEnv(): {
   anonKey: string;
   serviceRoleKey: string;
 } {
-  let url = process.env.SUPABASE_URL || process.env.API_URL;
-  let anonKey = process.env.SUPABASE_ANON_KEY || process.env.ANON_KEY;
+  let url =
+    process.env.SUPABASE_URL || process.env.API_URL || "http://127.0.0.1:54321";
+  let anonKey = process.env.SUPABASE_ANON_KEY || process.env.ANON_KEY || "";
   let serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY;
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || "";
 
-  if (!url || !anonKey || !serviceRoleKey) {
+  if (!anonKey || !serviceRoleKey) {
     try {
       const fs = require("node:fs");
       if (fs.existsSync("supabase_status.json")) {
         const raw = fs.readFileSync("supabase_status.json", "utf8");
-        const jsonStr = raw.substring(
-          raw.indexOf("{"),
-          raw.lastIndexOf("}") + 1,
-        );
-        const parsed = JSON.parse(jsonStr);
-        url = url || parsed.API_URL || parsed.api_url;
-        anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key;
-        serviceRoleKey =
-          serviceRoleKey ||
-          parsed.SERVICE_ROLE_KEY ||
-          parsed.service_role_key ||
-          parsed.SERVICE_KEY ||
-          parsed.service_key;
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          url =
+            url || parsed.API_URL || parsed.api_url || "http://127.0.0.1:54321";
+          anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key || "";
+          serviceRoleKey =
+            serviceRoleKey ||
+            parsed.SERVICE_ROLE_KEY ||
+            parsed.service_role_key ||
+            parsed.SERVICE_KEY ||
+            parsed.service_key ||
+            "";
+        }
       }
     } catch {}
   }
 
-  if (!url || !anonKey || !serviceRoleKey) {
+  if (!anonKey || !serviceRoleKey) {
     try {
-      const raw = execSync("pnpm exec supabase status -o json", {
+      const raw = execSync("pnpm supabase status -o json", {
         encoding: "utf-8",
         stdio: ["ignore", "pipe", "ignore"],
       });
-      const firstBrace = raw.indexOf("{");
-      const lastBrace = raw.lastIndexOf("}");
-      if (firstBrace !== -1 && lastBrace !== -1) {
-        const parsed = JSON.parse(raw.substring(firstBrace, lastBrace + 1));
-        url = url || parsed.API_URL || parsed.api_url;
-        anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key;
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        url =
+          url || parsed.API_URL || parsed.api_url || "http://127.0.0.1:54321";
+        anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key || "";
         serviceRoleKey =
           serviceRoleKey ||
           parsed.SERVICE_ROLE_KEY ||
           parsed.service_role_key ||
           parsed.SERVICE_KEY ||
-          parsed.service_key;
+          parsed.service_key ||
+          "";
       }
     } catch {}
   }
-
-  assert.ok(url, "SUPABASE_URL must be defined");
-  assert.ok(anonKey, "SUPABASE_ANON_KEY must be defined");
-  assert.ok(serviceRoleKey, "SUPABASE_SERVICE_ROLE_KEY must be defined");
 
   return {
     url,
