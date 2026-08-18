@@ -176,6 +176,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
   );
 
   it("1. should signup Business user and trigger public.profiles bootstrap", async () => {
+    console.log(">>> [TEST 1 START] Signup Business user");
     const { data, error } = await client.auth.signUp({
       email: businessEmail,
       password: testPassword,
@@ -205,9 +206,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(profileRow?.id, businessUserId);
     assert.strictEqual(profileRow?.platform_role, "none");
     assert.strictEqual(profileRow?.full_name, "Negocio Integracion");
+    console.log(">>> [TEST 1 SUCCESS]");
   });
 
   it("2. should verify Business signup does NOT autocreate business_members or drivers", async () => {
+    console.log(">>> [TEST 2 START] Signup Business isolation");
     const { data: memberRows, error: memberErr } = await trustedAdminClient
       .from("business_members")
       .select("id")
@@ -231,9 +234,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       0,
       "Business signup must not autocreate drivers",
     );
+    console.log(">>> [TEST 2 SUCCESS]");
   });
 
   it("3. should signup Driver user and trigger public.profiles bootstrap", async () => {
+    console.log(">>> [TEST 3 START] Signup Driver user");
     const { data, error } = await client.auth.signUp({
       email: driverEmail,
       password: testPassword,
@@ -262,9 +267,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(profileRow?.id, driverUserId);
     assert.strictEqual(profileRow?.platform_role, "none");
     assert.strictEqual(profileRow?.full_name, "Motorizado Integracion");
+    console.log(">>> [TEST 3 SUCCESS]");
   });
 
   it("4. should verify Driver signup does NOT autocreate drivers or business_members", async () => {
+    console.log(">>> [TEST 4 START] Signup Driver isolation");
     const { data: driverRows, error: driverErr } = await trustedAdminClient
       .from("drivers")
       .select("id")
@@ -288,9 +295,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       0,
       "Driver signup must not autocreate business_members",
     );
+    console.log(">>> [TEST 4 SUCCESS]");
   });
 
   it("5. should perform valid password login and return valid session", async () => {
+    console.log(">>> [TEST 5 START] Valid login");
     const { data, error } = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -300,9 +309,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(error, null, "Valid login should not error");
     assert.ok(data.session, "Session must be returned");
     assert.strictEqual(data.user.id, businessUserId);
+    console.log(">>> [TEST 5 SUCCESS]");
   });
 
   it("6. should reject invalid login credentials with normalized AUTH_INVALID_CREDENTIALS", async () => {
+    console.log(">>> [TEST 6 START] Invalid login");
     const { data, error } = await client.auth.signInWithPassword({
       email: businessEmail,
       password: "WrongPassword999!",
@@ -320,9 +331,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       "AUTH_INVALID_CREDENTIALS",
       "Must normalize to AUTH_INVALID_CREDENTIALS",
     );
+    console.log(">>> [TEST 6 SUCCESS]");
   });
 
   it("7. should refresh session successfully", async () => {
+    console.log(">>> [TEST 7 START] Refresh session");
     const loginRes = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -336,9 +349,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     if (error) console.error("Test 7 error:", error);
     assert.strictEqual(error, null, "Refresh session should succeed");
     assert.ok(data.session, "New refreshed session must be returned");
+    console.log(">>> [TEST 7 SUCCESS]");
   });
 
   it("8. should logout and invalidate local client session", async () => {
+    console.log(">>> [TEST 8 START] Logout");
     await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -353,9 +368,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       null,
       "Session must be null after sign out",
     );
+    console.log(">>> [TEST 8 SUCCESS]");
   });
 
   it("9. should enforce RLS read isolation with real user JWT", async () => {
+    console.log(">>> [TEST 9 START] RLS Read Isolation");
     const loginA = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -392,9 +409,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       0,
       "User A must not be allowed to read User B profile",
     );
+    console.log(">>> [TEST 9 SUCCESS]");
   });
 
   it("10. should prevent privilege escalation on platform_role via RLS", async () => {
+    console.log(">>> [TEST 10 START] RLS Platform Role Escalation Prevention");
     const loginA = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -427,9 +446,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       "none",
       "platform_role must remain 'none'",
     );
+    console.log(">>> [TEST 10 SUCCESS]");
   });
 
   it("11. should evaluate Business Access guard transitions with real DB fixtures (ACTIVE, SUSPENDED, BLOCKED, CLOSED)", async () => {
+    console.log(">>> [TEST 11 START] Business Guard Fixtures");
     // 11a. Unonboarded business user -> ONBOARDING_REQUIRED
     const unonboardedIdentity: IdentityContext = {
       userId: businessUserId,
@@ -611,9 +632,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       allowed: false,
       reason: "ACCOUNT_RESTRICTED",
     });
+    console.log(">>> [TEST 11 SUCCESS]");
   });
 
   it("12. should evaluate Driver Access guard transitions with real DB fixtures (REGISTERED, ACTIVE, SUSPENDED, BLOCKED, CLOSED)", async () => {
+    console.log(">>> [TEST 12 START] Driver Guard Fixtures");
     // 12a. Unonboarded driver (no row in drivers table) -> ONBOARDING_REQUIRED
     const unonboardedDriverIdentity: IdentityContext = {
       userId: driverUserId,
@@ -781,9 +804,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       allowed: false,
       reason: "ACCOUNT_RESTRICTED",
     });
+    console.log(">>> [TEST 12 SUCCESS]");
   });
 
   it("13. should evaluate Admin Access guard to ADMIN_ROLE_REQUIRED for platform_role none", () => {
+    console.log(">>> [TEST 13 START] Admin Role None Guard");
     const regularIdentity: IdentityContext = {
       userId: businessUserId,
       email: businessEmail,
@@ -802,9 +827,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       allowed: false,
       reason: "ADMIN_ROLE_REQUIRED",
     });
+    console.log(">>> [TEST 13 SUCCESS]");
   });
 
   it("14. should perform real Admin Auth, promote platform_role=admin in DB, verify MFA TOTP and achieve AAL2", async () => {
+    console.log(">>> [TEST 14 START] Real Admin Auth & Real MFA TOTP");
     // 14a. Signup Admin user
     const { data: adminSignUp, error: adminSignUpError } =
       await client.auth.signUp({
@@ -952,5 +979,6 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.deepStrictEqual(evaluateAdminAccess(adminIdentity, "aal2"), {
       allowed: true,
     });
+    console.log(">>> [TEST 14 SUCCESS]");
   });
 });
