@@ -504,9 +504,16 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
 
     assert.strictEqual(promoteError, null);
 
-    // 12c. Login as Admin
+    // 12c. Login as Admin with admin auth client instance
+    const adminAuthClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+
     const { data: adminLogin, error: adminLoginError } =
-      await client.auth.signInWithPassword({
+      await adminAuthClient.auth.signInWithPassword({
         email: adminEmail,
         password: testPassword,
       });
@@ -532,18 +539,9 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       reason: "MFA_REQUIRED",
     });
 
-    // 12d. Enroll in TOTP MFA factor
-    const adminMfaClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false },
-      global: {
-        headers: {
-          Authorization: `Bearer ${adminLogin.session.access_token}`,
-        },
-      },
-    });
-
+    // 12d. Enroll in TOTP MFA factor using the authenticated admin client
     const { data: enrollData, error: enrollError } =
-      await adminMfaClient.auth.mfa.enroll({
+      await adminAuthClient.auth.mfa.enroll({
         factorType: "totp",
         issuer: "Gueguense",
       });
@@ -555,7 +553,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     // 12e. Challenge and verify TOTP code
     const totpCode = generateTotpCode(enrollData.totp.secret);
     const { data: verifyData, error: verifyError } =
-      await adminMfaClient.auth.mfa.challengeAndVerify({
+      await adminAuthClient.auth.mfa.challengeAndVerify({
         factorId: enrollData.id,
         code: totpCode,
       });
@@ -565,7 +563,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
 
     // 12f. Verify Authenticator Assurance Level reaches AAL2
     const { data: aalData } =
-      await adminMfaClient.auth.mfa.getAuthenticatorAssuranceLevel();
+      await adminAuthClient.auth.mfa.getAuthenticatorAssuranceLevel();
     assert.strictEqual(
       aalData?.currentLevel,
       "aal2",
