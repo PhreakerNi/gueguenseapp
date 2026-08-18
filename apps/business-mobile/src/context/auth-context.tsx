@@ -29,6 +29,8 @@ type AuthContextType = {
   user: User | null;
   identity: IdentityContext | null;
   isLoading: boolean;
+  isPasswordRecovery: boolean;
+  setRecoveryContext: (isRecovery: boolean) => void;
   signIn: (
     email: string,
     password: string,
@@ -53,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [identity, setIdentity] = useState<IdentityContext | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   const fetchIdentity = useCallback(
     async (currentUser: User): Promise<IdentityContext | null> => {
@@ -109,6 +112,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user, fetchIdentity]);
 
+  const setRecoveryContext = useCallback((isRecovery: boolean) => {
+    setIsPasswordRecovery(isRecovery);
+  }, []);
+
   useEffect(() => {
     supabase.auth
       .getSession()
@@ -124,9 +131,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
+      if (event === "PASSWORD_RECOVERY") {
+        setIsPasswordRecovery(true);
+      }
       if (newSession?.user) {
         const idContext = await fetchIdentity(newSession.user);
         setIdentity(idContext);
@@ -185,6 +195,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     try {
+      setIsPasswordRecovery(false);
       await supabase.auth.signOut();
     } finally {
       setSession(null);
@@ -198,7 +209,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { error } = await supabase.auth.resetPasswordForEmail(
         email.trim(),
         {
-          redirectTo: "gueguense-business://auth/callback?next=/reset-password",
+          redirectTo:
+            "gueguense-business://auth/callback?next=/reset-password&type=recovery",
         },
       );
       if (error) {
@@ -218,6 +230,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         return { error: getAuthErrorMessage(normalizeAuthError(error)) };
       }
+      setIsPasswordRecovery(false);
+      await supabase.auth.signOut();
+      setSession(null);
+      setUser(null);
+      setIdentity(null);
       return { error: null };
     } catch (err) {
       return { error: getAuthErrorMessage(normalizeAuthError(err)) };
@@ -231,6 +248,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         identity,
         isLoading,
+        isPasswordRecovery,
+        setRecoveryContext,
         signIn,
         signUp,
         signOut,

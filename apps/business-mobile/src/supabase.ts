@@ -36,8 +36,8 @@ const ExpoSecureStoreAdapter = {
 let lockPromise: Promise<unknown> = Promise.resolve();
 
 const processLock = async <R>(
-  _name: string,
-  _acquireTimeout: number,
+  name: string,
+  acquireTimeout: number,
   fn: () => Promise<R>,
 ): Promise<R> => {
   const prev = lockPromise;
@@ -45,8 +45,27 @@ const processLock = async <R>(
   lockPromise = new Promise((res) => {
     resolveNext = res as () => void;
   });
+
   try {
-    await prev;
+    if (acquireTimeout > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new Error(
+              `Timeout acquiring client lock "${name}" after ${acquireTimeout}ms`,
+            ),
+          );
+        }, acquireTimeout);
+      });
+      try {
+        await Promise.race([prev, timeoutPromise]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    } else {
+      await prev;
+    }
     return await fn();
   } finally {
     resolveNext!();
@@ -61,16 +80,11 @@ export function getSupabaseClient(): AppSupabaseClient {
     return clientInstance;
   }
 
-  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const supabaseUrl =
+    process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || "";
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error(
-      "Missing Supabase configuration: EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY must be defined.",
-    );
-  }
-
-  const client = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+  clientInstance = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     auth: {
       storage: ExpoSecureStoreAdapter,
       autoRefreshToken: true,
@@ -80,15 +94,13 @@ export function getSupabaseClient(): AppSupabaseClient {
     },
   });
 
-  clientInstance = client;
-
   AppState.addEventListener("change", (state) => {
     if (state === "active") {
-      client.auth.startAutoRefresh();
+      clientInstance?.auth.startAutoRefresh();
     } else {
-      client.auth.stopAutoRefresh();
+      clientInstance?.auth.stopAutoRefresh();
     }
   });
 
-  return client;
+  return clientInstance;
 }

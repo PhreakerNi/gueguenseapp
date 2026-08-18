@@ -11,42 +11,23 @@ import {
   type IdentityContext,
   type BusinessMemberRole,
   type BusinessMemberStatus,
+  type BusinessAccountStatus,
   type DriverAccountStatus,
   type DriverVerificationStatus,
   type PlatformRole,
 } from "../packages/domain/src/index.ts";
 
-function createLocalAnonJwt(): string {
-  const header = Buffer.from(
-    JSON.stringify({ alg: "HS256", typ: "JWT" }),
-  ).toString("base64url");
-  const payload = Buffer.from(
-    JSON.stringify({
-      iss: "supabase",
-      ref: "127.0.0.1",
-      role: "anon",
-      iat: Math.floor(Date.now() / 1000) - 60,
-      exp: Math.floor(Date.now() / 1000) + 3600 * 24 * 365,
-    }),
-  ).toString("base64url");
-  const signature = crypto
-    .createHmac(
-      "sha256",
-      "super-secret-jwt-token-with-at-least-32-characters-long",
-    )
-    .update(`${header}.${payload}`)
-    .digest("base64url");
-  return `${header}.${payload}.${signature}`;
-}
-
 function getSupabaseEnv(): {
   url: string;
   anonKey: string;
+  serviceRoleKey: string;
 } {
   let url = process.env.SUPABASE_URL || process.env.API_URL;
   let anonKey = process.env.SUPABASE_ANON_KEY || process.env.ANON_KEY;
+  let serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY;
 
-  if (!url || !anonKey) {
+  if (!url || !anonKey || !serviceRoleKey) {
     try {
       const raw = execSync("pnpm supabase status -o json", {
         encoding: "utf-8",
@@ -55,28 +36,37 @@ function getSupabaseEnv(): {
       const firstBrace = raw.indexOf("{");
       const lastBrace = raw.lastIndexOf("}");
       if (firstBrace !== -1 && lastBrace !== -1) {
-        const jsonText = raw.substring(firstBrace, lastBrace + 1);
-        const parsed = JSON.parse(jsonText);
-        url =
-          url || parsed.API_URL || parsed.api_url || "http://127.0.0.1:54321";
+        const parsed = JSON.parse(raw.substring(firstBrace, lastBrace + 1));
+        url = url || parsed.API_URL || parsed.api_url;
         anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key;
+        serviceRoleKey =
+          serviceRoleKey ||
+          parsed.SERVICE_ROLE_KEY ||
+          parsed.service_role_key ||
+          parsed.SERVICE_KEY ||
+          parsed.service_key;
       }
     } catch {
-      // Fallback
+      // Ignored if executed directly
     }
   }
 
-  if (!anonKey) {
-    anonKey = createLocalAnonJwt();
-  }
+  assert.ok(url, "SUPABASE_URL must be defined");
+  assert.ok(anonKey, "SUPABASE_ANON_KEY must be defined");
+  assert.ok(serviceRoleKey, "SUPABASE_SERVICE_ROLE_KEY must be defined");
 
   return {
-    url: url || "http://127.0.0.1:54321",
+    url,
     anonKey,
+    serviceRoleKey,
   };
 }
 
-const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = getSupabaseEnv();
+const {
+  url: SUPABASE_URL,
+  anonKey: SUPABASE_ANON_KEY,
+  serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+} = getSupabaseEnv();
 
 function generateTotpCode(secretBase32: string): string {
   const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -110,9 +100,9 @@ function generateTotpCode(secretBase32: string): string {
 
 describe("Phase 2 — Auth & Session Integration Gates", () => {
   const timestamp = Date.now();
-  const businessEmail = `business_integ_${timestamp}@gueguense.test`;
-  const driverEmail = `driver_integ_${timestamp}@gueguense.test`;
-  const adminEmail = `admin_integ_${timestamp}@gueguense.test`;
+  const businessEmail = `biz_integ_${timestamp}@gueguense.test`;
+  const driverEmail = `drv_integ_${timestamp}@gueguense.test`;
+  const adminEmail = `adm_integ_${timestamp}@gueguense.test`;
   const testPassword = "Password123!Secure";
 
   let businessUserId: string;
@@ -125,6 +115,17 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       persistSession: false,
     },
   });
+
+  const trustedAdminClient = createClient(
+    SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    },
+  );
 
   it("1. should signup Business user and trigger public.profiles bootstrap", async () => {
     const { data, error } = await client.auth.signUp({
@@ -142,24 +143,22 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(data.user, "User object must be returned");
     assert.ok(data.user.id, "User ID must be generated");
     businessUserId = data.user.id;
+
+    // Verify profile bootstrap
+    const { data: profileRow, error: profileErr } = await trustedAdminClient
+      .from("profiles")
+      .select("id, platform_role, full_name")
+      .eq("id", businessUserId)
+      .single();
+
+    assert.strictEqual(profileErr, null);
+    assert.strictEqual(profileRow?.id, businessUserId);
+    assert.strictEqual(profileRow?.platform_role, "none");
+    assert.strictEqual(profileRow?.full_name, "Negocio Integracion");
   });
 
-  it("2. should verify signup does NOT autocreate business_members or drivers", async () => {
-    const loginRes = await client.auth.signInWithPassword({
-      email: businessEmail,
-      password: testPassword,
-    });
-    assert.ok(loginRes.data.session);
-
-    const authedClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: {
-        headers: {
-          Authorization: `Bearer ${loginRes.data.session.access_token}`,
-        },
-      },
-    });
-
-    const { data: memberRows, error: memberErr } = await authedClient
+  it("2. should verify Business signup does NOT autocreate business_members or drivers", async () => {
+    const { data: memberRows, error: memberErr } = await trustedAdminClient
       .from("business_members")
       .select("id")
       .eq("user_id", businessUserId);
@@ -168,10 +167,10 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(
       memberRows?.length,
       0,
-      "Signup must not autocreate business_members",
+      "Business signup must not autocreate business_members",
     );
 
-    const { data: driverRows, error: driverErr } = await authedClient
+    const { data: driverRows, error: driverErr } = await trustedAdminClient
       .from("drivers")
       .select("id")
       .eq("id", businessUserId);
@@ -180,7 +179,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(
       driverRows?.length,
       0,
-      "Signup must not autocreate drivers",
+      "Business signup must not autocreate drivers",
     );
   });
 
@@ -199,9 +198,47 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(error, null, "Driver signup should succeed");
     assert.ok(data.user, "User object must be returned");
     driverUserId = data.user.id;
+
+    // Verify profile bootstrap
+    const { data: profileRow, error: profileErr } = await trustedAdminClient
+      .from("profiles")
+      .select("id, platform_role, full_name")
+      .eq("id", driverUserId)
+      .single();
+
+    assert.strictEqual(profileErr, null);
+    assert.strictEqual(profileRow?.id, driverUserId);
+    assert.strictEqual(profileRow?.platform_role, "none");
+    assert.strictEqual(profileRow?.full_name, "Motorizado Integracion");
   });
 
-  it("4. should perform valid password login and return valid session", async () => {
+  it("4. should verify Driver signup does NOT autocreate drivers or business_members", async () => {
+    const { data: driverRows, error: driverErr } = await trustedAdminClient
+      .from("drivers")
+      .select("id")
+      .eq("id", driverUserId);
+
+    assert.strictEqual(driverErr, null);
+    assert.strictEqual(
+      driverRows?.length,
+      0,
+      "Driver signup must not autocreate drivers",
+    );
+
+    const { data: memberRows, error: memberErr } = await trustedAdminClient
+      .from("business_members")
+      .select("id")
+      .eq("user_id", driverUserId);
+
+    assert.strictEqual(memberErr, null);
+    assert.strictEqual(
+      memberRows?.length,
+      0,
+      "Driver signup must not autocreate business_members",
+    );
+  });
+
+  it("5. should perform valid password login and return valid session", async () => {
     const { data, error } = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -212,7 +249,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(data.user.id, businessUserId);
   });
 
-  it("5. should reject invalid login credentials with normalized AUTH_INVALID_CREDENTIALS", async () => {
+  it("6. should reject invalid login credentials with normalized AUTH_INVALID_CREDENTIALS", async () => {
     const { data, error } = await client.auth.signInWithPassword({
       email: businessEmail,
       password: "WrongPassword999!",
@@ -232,7 +269,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     );
   });
 
-  it("6. should refresh session successfully", async () => {
+  it("7. should refresh session successfully", async () => {
     const loginRes = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -247,7 +284,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(data.session, "New refreshed session must be returned");
   });
 
-  it("7. should logout and invalidate local client session", async () => {
+  it("8. should logout and invalidate local client session", async () => {
     await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -264,7 +301,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     );
   });
 
-  it("8. should enforce RLS read isolation with real user JWT", async () => {
+  it("9. should enforce RLS read isolation with real user JWT", async () => {
     const loginA = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -303,7 +340,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     );
   });
 
-  it("9. should prevent privilege escalation on platform_role via RLS", async () => {
+  it("10. should prevent privilege escalation on platform_role via RLS", async () => {
     const loginA = await client.auth.signInWithPassword({
       email: businessEmail,
       password: testPassword,
@@ -338,120 +375,375 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     );
   });
 
-  it("10. should evaluate Business Access guard transitions (onboarding required, active, suspended)", () => {
-    // 10a. Unonboarded business user -> ONBOARDING_REQUIRED
-    const initialIdentity: IdentityContext = {
+  it("11. should evaluate Business Access guard transitions with real DB fixtures (ACTIVE, SUSPENDED, BLOCKED, CLOSED)", async () => {
+    // 11a. Unonboarded business user -> ONBOARDING_REQUIRED
+    const { data: initialMemberships } = await trustedAdminClient
+      .from("business_members")
+      .select("id, business_id, role, status, businesses (account_status)")
+      .eq("user_id", businessUserId);
+
+    const unonboardedIdentity: IdentityContext = {
       userId: businessUserId,
       email: businessEmail,
       profile: {
         platformRole: "none",
-        fullName: "Negocio",
+        fullName: "Negocio Integracion",
         phone: null,
         avatarUrl: null,
       },
-      businessMemberships: [],
+      businessMemberships: (initialMemberships ?? []).map((m: any) => ({
+        membershipId: m.id,
+        businessId: m.business_id,
+        role: m.role as BusinessMemberRole,
+        status: m.status as BusinessMemberStatus,
+        businessAccountStatus: m.businesses
+          ?.account_status as BusinessAccountStatus,
+      })),
       driver: null,
     };
-    assert.deepStrictEqual(evaluateBusinessAccess(initialIdentity), {
+
+    assert.deepStrictEqual(evaluateBusinessAccess(unonboardedIdentity), {
       allowed: false,
       reason: "ONBOARDING_REQUIRED",
     });
 
-    // 10b. Active membership -> allowed: true
+    // 11b. Insert real business and real membership with ACTIVE status
+    const { data: bizRow, error: bizErr } = await trustedAdminClient
+      .from("businesses")
+      .insert({
+        legal_name: "Comercio Real SA",
+        brand_name: "Comercio Real",
+        tax_id: `TAX-BIZ-${timestamp}`,
+        account_status: "ACTIVE",
+        verification_status: "VERIFIED",
+      })
+      .select("id")
+      .single();
+
+    assert.strictEqual(
+      bizErr,
+      null,
+      `Business insert error: ${bizErr?.message}`,
+    );
+    assert.ok(bizRow?.id);
+    const testBusinessId = bizRow.id;
+
+    const { data: memberRow, error: memberErr } = await trustedAdminClient
+      .from("business_members")
+      .insert({
+        business_id: testBusinessId,
+        user_id: businessUserId,
+        role: "business_owner",
+        status: "ACTIVE",
+      })
+      .select("id")
+      .single();
+
+    assert.strictEqual(
+      memberErr,
+      null,
+      `Member insert error: ${memberErr?.message}`,
+    );
+    assert.ok(memberRow?.id);
+    const testMemberId = memberRow.id;
+
+    // Fetch from real DB and test ACTIVE -> allowed: true
+    const { data: activeMembers } = await trustedAdminClient
+      .from("business_members")
+      .select("id, business_id, role, status, businesses (account_status)")
+      .eq("user_id", businessUserId);
+
     const activeIdentity: IdentityContext = {
-      ...initialIdentity,
-      businessMemberships: [
-        {
-          membershipId: "member-fixture-1",
-          businessId: "business-fixture-1",
-          role: "business_owner" as BusinessMemberRole,
-          status: "ACTIVE" as BusinessMemberStatus,
-          businessAccountStatus: "ACTIVE",
-        },
-      ],
+      ...unonboardedIdentity,
+      businessMemberships: (activeMembers ?? []).map((m: any) => ({
+        membershipId: m.id,
+        businessId: m.business_id,
+        role: m.role as BusinessMemberRole,
+        status: m.status as BusinessMemberStatus,
+        businessAccountStatus: m.businesses
+          ?.account_status as BusinessAccountStatus,
+      })),
     };
+
     assert.deepStrictEqual(evaluateBusinessAccess(activeIdentity), {
       allowed: true,
     });
 
-    // 10c. Suspended membership -> ACCOUNT_RESTRICTED
+    // 11c. Update membership status to SUSPENDED in DB
+    await trustedAdminClient
+      .from("business_members")
+      .update({ status: "SUSPENDED" })
+      .eq("id", testMemberId);
+
+    const { data: suspendedMembers } = await trustedAdminClient
+      .from("business_members")
+      .select("id, business_id, role, status, businesses (account_status)")
+      .eq("user_id", businessUserId);
+
     const suspendedIdentity: IdentityContext = {
-      ...initialIdentity,
-      businessMemberships: [
-        {
-          membershipId: "member-fixture-1",
-          businessId: "business-fixture-1",
-          role: "business_owner" as BusinessMemberRole,
-          status: "SUSPENDED" as BusinessMemberStatus,
-          businessAccountStatus: "ACTIVE",
-        },
-      ],
+      ...unonboardedIdentity,
+      businessMemberships: (suspendedMembers ?? []).map((m: any) => ({
+        membershipId: m.id,
+        businessId: m.business_id,
+        role: m.role as BusinessMemberRole,
+        status: m.status as BusinessMemberStatus,
+        businessAccountStatus: m.businesses
+          ?.account_status as BusinessAccountStatus,
+      })),
     };
+
     assert.deepStrictEqual(evaluateBusinessAccess(suspendedIdentity), {
+      allowed: false,
+      reason: "ACCOUNT_RESTRICTED",
+    });
+
+    // 11d. Restore membership status to ACTIVE but update business account_status to BLOCKED in DB
+    await trustedAdminClient
+      .from("business_members")
+      .update({ status: "ACTIVE" })
+      .eq("id", testMemberId);
+
+    await trustedAdminClient
+      .from("businesses")
+      .update({ account_status: "BLOCKED" })
+      .eq("id", testBusinessId);
+
+    const { data: blockedBizMembers } = await trustedAdminClient
+      .from("business_members")
+      .select("id, business_id, role, status, businesses (account_status)")
+      .eq("user_id", businessUserId);
+
+    const blockedBizIdentity: IdentityContext = {
+      ...unonboardedIdentity,
+      businessMemberships: (blockedBizMembers ?? []).map((m: any) => ({
+        membershipId: m.id,
+        businessId: m.business_id,
+        role: m.role as BusinessMemberRole,
+        status: m.status as BusinessMemberStatus,
+        businessAccountStatus: m.businesses
+          ?.account_status as BusinessAccountStatus,
+      })),
+    };
+
+    assert.deepStrictEqual(evaluateBusinessAccess(blockedBizIdentity), {
+      allowed: false,
+      reason: "ACCOUNT_RESTRICTED",
+    });
+
+    // 11e. Update business account_status to CLOSED in DB
+    await trustedAdminClient
+      .from("businesses")
+      .update({ account_status: "CLOSED" })
+      .eq("id", testBusinessId);
+
+    const { data: closedBizMembers } = await trustedAdminClient
+      .from("business_members")
+      .select("id, business_id, role, status, businesses (account_status)")
+      .eq("user_id", businessUserId);
+
+    const closedBizIdentity: IdentityContext = {
+      ...unonboardedIdentity,
+      businessMemberships: (closedBizMembers ?? []).map((m: any) => ({
+        membershipId: m.id,
+        businessId: m.business_id,
+        role: m.role as BusinessMemberRole,
+        status: m.status as BusinessMemberStatus,
+        businessAccountStatus: m.businesses
+          ?.account_status as BusinessAccountStatus,
+      })),
+    };
+
+    assert.deepStrictEqual(evaluateBusinessAccess(closedBizIdentity), {
       allowed: false,
       reason: "ACCOUNT_RESTRICTED",
     });
   });
 
-  it("11. should evaluate Driver Access guard transitions (onboarding required, registered, active, suspended)", () => {
-    // 11a. Unonboarded driver -> ONBOARDING_REQUIRED
-    const initialDriverIdentity: IdentityContext = {
+  it("12. should evaluate Driver Access guard transitions with real DB fixtures (REGISTERED, ACTIVE, SUSPENDED, BLOCKED, CLOSED)", async () => {
+    // 12a. Unonboarded driver (no row in drivers table) -> ONBOARDING_REQUIRED
+    const { data: initialDriver } = await trustedAdminClient
+      .from("drivers")
+      .select("verification_status, account_status")
+      .eq("id", driverUserId)
+      .maybeSingle();
+
+    const unonboardedDriverIdentity: IdentityContext = {
       userId: driverUserId,
       email: driverEmail,
       profile: {
         platformRole: "none",
-        fullName: "Motorizado",
+        fullName: "Motorizado Integracion",
         phone: null,
         avatarUrl: null,
       },
       businessMemberships: [],
-      driver: null,
+      driver: initialDriver
+        ? {
+            verificationStatus:
+              initialDriver.verification_status as DriverVerificationStatus,
+            accountStatus: initialDriver.account_status as DriverAccountStatus,
+          }
+        : null,
     };
-    assert.deepStrictEqual(evaluateDriverAccess(initialDriverIdentity), {
+
+    assert.deepStrictEqual(evaluateDriverAccess(unonboardedDriverIdentity), {
       allowed: false,
       reason: "ONBOARDING_REQUIRED",
     });
 
-    // 11b. Registered driver -> ONBOARDING_REQUIRED
+    // 12b. Insert driver with REGISTERED account_status in DB -> ONBOARDING_REQUIRED
+    const { error: insertDriverErr } = await trustedAdminClient
+      .from("drivers")
+      .insert({
+        id: driverUserId,
+        national_id_number: `NID-${timestamp}`,
+        license_number: `LIC-${timestamp}`,
+        verification_status: "PENDING",
+        account_status: "REGISTERED",
+      });
+
+    assert.strictEqual(
+      insertDriverErr,
+      null,
+      `Driver insert error: ${insertDriverErr?.message}`,
+    );
+
+    const { data: registeredDriverRow } = await trustedAdminClient
+      .from("drivers")
+      .select("verification_status, account_status")
+      .eq("id", driverUserId)
+      .single();
+
     const registeredDriverIdentity: IdentityContext = {
-      ...initialDriverIdentity,
+      ...unonboardedDriverIdentity,
       driver: {
-        verificationStatus: "PENDING" as DriverVerificationStatus,
-        accountStatus: "REGISTERED" as DriverAccountStatus,
+        verificationStatus:
+          registeredDriverRow?.verification_status as DriverVerificationStatus,
+        accountStatus:
+          registeredDriverRow?.account_status as DriverAccountStatus,
       },
     };
+
     assert.deepStrictEqual(evaluateDriverAccess(registeredDriverIdentity), {
       allowed: false,
       reason: "ONBOARDING_REQUIRED",
     });
 
-    // 11c. Driver with ACTIVE status -> allowed: true
+    // 12c. Update driver in DB to VERIFIED & ACTIVE -> allowed: true
+    await trustedAdminClient
+      .from("drivers")
+      .update({
+        verification_status: "VERIFIED",
+        account_status: "ACTIVE",
+      })
+      .eq("id", driverUserId);
+
+    const { data: activeDriverRow } = await trustedAdminClient
+      .from("drivers")
+      .select("verification_status, account_status")
+      .eq("id", driverUserId)
+      .single();
+
     const activeDriverIdentity: IdentityContext = {
-      ...initialDriverIdentity,
+      ...unonboardedDriverIdentity,
       driver: {
-        verificationStatus: "VERIFIED" as DriverVerificationStatus,
-        accountStatus: "ACTIVE" as DriverAccountStatus,
+        verificationStatus:
+          activeDriverRow?.verification_status as DriverVerificationStatus,
+        accountStatus: activeDriverRow?.account_status as DriverAccountStatus,
       },
     };
+
     assert.deepStrictEqual(evaluateDriverAccess(activeDriverIdentity), {
       allowed: true,
     });
 
-    // 11d. Driver with SUSPENDED status -> ACCOUNT_RESTRICTED
+    // 12d. Update driver in DB to SUSPENDED -> ACCOUNT_RESTRICTED
+    await trustedAdminClient
+      .from("drivers")
+      .update({
+        account_status: "SUSPENDED",
+      })
+      .eq("id", driverUserId);
+
+    const { data: suspendedDriverRow } = await trustedAdminClient
+      .from("drivers")
+      .select("verification_status, account_status")
+      .eq("id", driverUserId)
+      .single();
+
     const suspendedDriverIdentity: IdentityContext = {
-      ...initialDriverIdentity,
+      ...unonboardedDriverIdentity,
       driver: {
-        verificationStatus: "VERIFIED" as DriverVerificationStatus,
-        accountStatus: "SUSPENDED" as DriverAccountStatus,
+        verificationStatus:
+          suspendedDriverRow?.verification_status as DriverVerificationStatus,
+        accountStatus:
+          suspendedDriverRow?.account_status as DriverAccountStatus,
       },
     };
+
     assert.deepStrictEqual(evaluateDriverAccess(suspendedDriverIdentity), {
+      allowed: false,
+      reason: "ACCOUNT_RESTRICTED",
+    });
+
+    // 12e. Update driver in DB to BLOCKED -> ACCOUNT_RESTRICTED
+    await trustedAdminClient
+      .from("drivers")
+      .update({
+        account_status: "BLOCKED",
+      })
+      .eq("id", driverUserId);
+
+    const { data: blockedDriverRow } = await trustedAdminClient
+      .from("drivers")
+      .select("verification_status, account_status")
+      .eq("id", driverUserId)
+      .single();
+
+    const blockedDriverIdentity: IdentityContext = {
+      ...unonboardedDriverIdentity,
+      driver: {
+        verificationStatus:
+          blockedDriverRow?.verification_status as DriverVerificationStatus,
+        accountStatus: blockedDriverRow?.account_status as DriverAccountStatus,
+      },
+    };
+
+    assert.deepStrictEqual(evaluateDriverAccess(blockedDriverIdentity), {
+      allowed: false,
+      reason: "ACCOUNT_RESTRICTED",
+    });
+
+    // 12f. Update driver in DB to CLOSED -> ACCOUNT_RESTRICTED
+    await trustedAdminClient
+      .from("drivers")
+      .update({
+        account_status: "CLOSED",
+      })
+      .eq("id", driverUserId);
+
+    const { data: closedDriverRow } = await trustedAdminClient
+      .from("drivers")
+      .select("verification_status, account_status")
+      .eq("id", driverUserId)
+      .single();
+
+    const closedDriverIdentity: IdentityContext = {
+      ...unonboardedDriverIdentity,
+      driver: {
+        verificationStatus:
+          closedDriverRow?.verification_status as DriverVerificationStatus,
+        accountStatus: closedDriverRow?.account_status as DriverAccountStatus,
+      },
+    };
+
+    assert.deepStrictEqual(evaluateDriverAccess(closedDriverIdentity), {
       allowed: false,
       reason: "ACCOUNT_RESTRICTED",
     });
   });
 
-  it("12. should evaluate Admin Access guard to ADMIN_ROLE_REQUIRED for platform_role none", () => {
+  it("13. should evaluate Admin Access guard to ADMIN_ROLE_REQUIRED for platform_role none", () => {
     const regularIdentity: IdentityContext = {
       userId: businessUserId,
       email: businessEmail,
@@ -472,7 +764,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
   });
 
-  it("13. should perform complete Admin MFA TOTP enrollment, verification and achieve AAL2", async () => {
+  it("14. should perform real Admin Auth, promote platform_role=admin in DB, verify MFA TOTP and achieve AAL2", async () => {
+    // 14a. Signup Admin user
     const { data: adminSignUp, error: adminSignUpError } =
       await client.auth.signUp({
         email: adminEmail,
@@ -488,17 +781,60 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(adminSignUp.user);
     adminUserId = adminSignUp.user.id;
 
-    const loginRes = await client.auth.signInWithPassword({
-      email: adminEmail,
-      password: testPassword,
-    });
-    assert.ok(loginRes.data.session);
+    // 14b. Promote profile to platform_role = admin in real DB via trustedAdminClient
+    const { error: promoteError } = await trustedAdminClient
+      .from("profiles")
+      .update({ platform_role: "admin" })
+      .eq("id", adminUserId);
 
+    assert.strictEqual(promoteError, null);
+
+    // 14c. Login as Admin user with password
+    const { data: adminLogin, error: adminLoginError } =
+      await client.auth.signInWithPassword({
+        email: adminEmail,
+        password: testPassword,
+      });
+
+    assert.strictEqual(adminLoginError, null);
+    assert.ok(adminLogin.session);
+
+    // 14d. Build Admin IdentityContext from real DB profile
+    const { data: adminProfile, error: adminProfileErr } =
+      await trustedAdminClient
+        .from("profiles")
+        .select("id, platform_role, full_name, phone, avatar_url")
+        .eq("id", adminUserId)
+        .single();
+
+    assert.strictEqual(adminProfileErr, null);
+    assert.strictEqual(adminProfile?.platform_role, "admin");
+
+    const adminIdentity: IdentityContext = {
+      userId: adminUserId,
+      email: adminEmail,
+      profile: {
+        platformRole: adminProfile.platform_role as PlatformRole,
+        fullName: adminProfile.full_name,
+        phone: adminProfile.phone,
+        avatarUrl: adminProfile.avatar_url,
+      },
+      businessMemberships: [],
+      driver: null,
+    };
+
+    // Before MFA at AAL1 -> MFA_REQUIRED
+    assert.deepStrictEqual(evaluateAdminAccess(adminIdentity, "aal1"), {
+      allowed: false,
+      reason: "MFA_REQUIRED",
+    });
+
+    // 14e. Enroll in TOTP MFA factor using the authenticated session header
     const mfaClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: false },
       global: {
         headers: {
-          Authorization: `Bearer ${loginRes.data.session.access_token}`,
+          Authorization: `Bearer ${adminLogin.session.access_token}`,
         },
       },
     });
@@ -515,7 +851,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(enrollData.totp.secret, "TOTP secret must exist");
     assert.ok(enrollData.totp.qr_code, "TOTP QR code must exist");
 
-    // Challenge and verify code
+    // 14f. Challenge and verify TOTP code with real secret
     const code = generateTotpCode(enrollData.totp.secret);
     const { data: verifyData, error: verifyError } =
       await mfaClient.auth.mfa.challengeAndVerify({
@@ -530,7 +866,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     );
     assert.ok(verifyData, "Verify data must exist");
 
-    // Verify Authenticator Assurance Level is AAL2
+    // 14g. Verify Authenticator Assurance Level is AAL2
     const { data: aalData } =
       await mfaClient.auth.mfa.getAuthenticatorAssuranceLevel();
     assert.strictEqual(
@@ -538,22 +874,8 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       "aal2",
       "Session must reach AAL2 after TOTP verification",
     );
-  });
 
-  it("14. should evaluate Admin Access guard to allowed when admin role and AAL2", () => {
-    const adminIdentity: IdentityContext = {
-      userId: adminUserId || "admin-uuid",
-      email: adminEmail,
-      profile: {
-        platformRole: "admin" as PlatformRole,
-        fullName: "Administrador Real",
-        phone: null,
-        avatarUrl: null,
-      },
-      businessMemberships: [],
-      driver: null,
-    };
-
+    // 14h. Evaluate Admin guard with AAL2 -> allowed: true
     assert.deepStrictEqual(evaluateAdminAccess(adminIdentity, "aal2"), {
       allowed: true,
     });

@@ -15,11 +15,18 @@ import type {
 import { normalizeAuthError, getAuthErrorMessage } from "@gueguense/domain";
 import { getSupabaseClient } from "../supabase";
 
+type RawDriver = {
+  verification_status: string;
+  account_status: string;
+};
+
 type AuthContextType = {
   session: Session | null;
   user: User | null;
   identity: IdentityContext | null;
   isLoading: boolean;
+  isPasswordRecovery: boolean;
+  setRecoveryContext: (isRecovery: boolean) => void;
   signIn: (
     email: string,
     password: string,
@@ -44,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [identity, setIdentity] = useState<IdentityContext | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   const fetchIdentity = useCallback(
     async (currentUser: User): Promise<IdentityContext | null> => {
@@ -54,11 +62,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .eq("id", currentUser.id)
           .single();
 
-        const { data: driver } = await supabase
+        const { data: driverData } = await supabase
           .from("drivers")
           .select("verification_status, account_status")
           .eq("id", currentUser.id)
-          .maybeSingle();
+          .single();
+
+        const rawDriver = driverData as unknown as RawDriver | null;
+
+        const driver = rawDriver
+          ? {
+              verificationStatus:
+                rawDriver.verification_status as DriverVerificationStatus,
+              accountStatus: rawDriver.account_status as DriverAccountStatus,
+            }
+          : null;
 
         return {
           userId: currentUser.id,
@@ -72,13 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             avatarUrl: profile?.avatar_url ?? null,
           },
           businessMemberships: [],
-          driver: driver
-            ? {
-                verificationStatus:
-                  driver.verification_status as DriverVerificationStatus,
-                accountStatus: driver.account_status as DriverAccountStatus,
-              }
-            : null,
+          driver,
         };
       } catch {
         return null;
@@ -93,6 +105,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIdentity(idContext);
     }
   }, [user, fetchIdentity]);
+
+  const setRecoveryContext = useCallback((isRecovery: boolean) => {
+    setIsPasswordRecovery(isRecovery);
+  }, []);
 
   useEffect(() => {
     supabase.auth
@@ -109,9 +125,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
+      if (event === "PASSWORD_RECOVERY") {
+        setIsPasswordRecovery(true);
+      }
       if (newSession?.user) {
         const idContext = await fetchIdentity(newSession.user);
         setIdentity(idContext);
@@ -170,6 +189,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     try {
+      setIsPasswordRecovery(false);
       await supabase.auth.signOut();
     } finally {
       setSession(null);
@@ -183,7 +203,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { error } = await supabase.auth.resetPasswordForEmail(
         email.trim(),
         {
-          redirectTo: "gueguense-driver://auth/callback?next=/reset-password",
+          redirectTo:
+            "gueguense-driver://auth/callback?next=/reset-password&type=recovery",
         },
       );
       if (error) {
@@ -203,6 +224,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         return { error: getAuthErrorMessage(normalizeAuthError(error)) };
       }
+      setIsPasswordRecovery(false);
+      await supabase.auth.signOut();
+      setSession(null);
+      setUser(null);
+      setIdentity(null);
       return { error: null };
     } catch (err) {
       return { error: getAuthErrorMessage(normalizeAuthError(err)) };
@@ -216,6 +242,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         identity,
         isLoading,
+        isPasswordRecovery,
+        setRecoveryContext,
         signIn,
         signUp,
         signOut,

@@ -2,11 +2,11 @@
 
 **Versión:** 1.0.0-phase2  
 **Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_MicroCorreccion_v1_2.md`
+**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_Cierre_v1_3.md`
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 2 v1.2)
+## 🛠️ Stack Tecnológico Congelado (Fase 2 v1.3)
 
 - **Node.js:** `24.18.0 LTS`
 - **Gestor de Paquetes:** `pnpm@11.17.0` (Workspaces monorepo con un único `pnpm-lock.yaml`)
@@ -35,7 +35,7 @@
 ### Fase 2 — Autenticación, Gestión de Identidad y Sesiones
 
 - **Estado:** 🟡 **EN REVISIÓN / CANDIDATA A APROBACIÓN** (`phase/2-auth-identity-sessions`)
-- **Objetivo:** Autenticación Supabase Auth Email/Password, persistencia segura con `expo-secure-store`, modelo compartido `IdentityContext`, route guards por membresía/driver/status, Admin SSR Auth con `@supabase/ssr` y `proxy.ts`, MFA TOTP AAL2, integration test gate y pgTAP foundation tests.
+- **Objetivo:** Autenticación Supabase Auth Email/Password, persistencia segura con `expo-secure-store`, modelo compartido `IdentityContext`, route guards por membresía/driver/status con DB fixtures reales, Admin SSR Auth con `@supabase/ssr` y `proxy.ts`, MFA TOTP AAL2 real, integration test gate y pgTAP foundation tests.
 
 ### Fase 3 — Onboarding B2B y Registro de Conductores
 
@@ -77,30 +77,30 @@
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 13 — Motor de Tarifas y Recargos Dinámicos (Pricing Engine)
+### Fase 13 — Motor de Tarifación Avanzada (Pricing Engine)
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 14 — Ledger Contable Doble Entrada y Registro Financiero
+### Fase 14 — Libro Mayor Financiero (Financial Ledger)
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 15 — Liquidaciones de Efectivo y Métricas de Cobro (Cash Settlements)
+### Fase 15 — Liquidaciones en Efectivo y Cobros
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 16 — Payouts y Desembolsos a Motorizados
+### Fase 16 — Solicitud y Procesamiento de Payouts
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 17 — Push Notifications y Eventos en Tiempo Real
+### Fase 17 — Sistema de Notificaciones y Push
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 18 — Panel Web de Administración y Auditoría
+### Fase 18 — Panel de Operaciones Administrativas (Admin Web)
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 19 — Despliegue de Infraestructura y Producción
+### Fase 19 — Despliegue de Infraestructura y Producción (Deployment)
 
 - **Estado:** ⏳ Pendiente (No iniciada)

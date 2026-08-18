@@ -4,7 +4,7 @@
 **Estado:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
 **Rama de Desarrollo:** `phase/2-auth-identity-sessions`  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_MicroCorreccion_v1_2.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_Cierre_v1_3.md`
 
 ---
 

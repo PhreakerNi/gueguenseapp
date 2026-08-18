@@ -8,56 +8,28 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
-import * as Linking from "expo-linking";
 import { useAuth } from "../../src/context/auth-context";
-import { getSupabaseClient } from "../../src/supabase";
 import { getAuthErrorMessage } from "@gueguense/domain";
 
 export default function BusinessResetPasswordScreen() {
-  const { session, updatePassword } = useAuth();
+  const { isPasswordRecovery, updatePassword, isLoading } = useAuth();
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sessionChecking, setSessionChecking] = useState(!session);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    async function handleDeepLink() {
-      if (session) {
-        setSessionChecking(false);
-        return;
-      }
-      try {
-        const initialUrl = await Linking.getInitialURL();
-        if (initialUrl) {
-          const parsed = Linking.parse(initialUrl);
-          const queryParams = parsed.queryParams || {};
-          const code = queryParams.code as string | undefined;
-
-          const supabase = getSupabaseClient();
-          if (code) {
-            const { error } = await supabase.auth.exchangeCodeForSession(code);
-            if (error) {
-              setErrorMessage(
-                getAuthErrorMessage("AUTH_PASSWORD_RECOVERY_INVALID"),
-              );
-            }
-          }
-        }
-      } catch {
-        // Continue and check session
-      } finally {
-        setSessionChecking(false);
-      }
+    if (!isLoading && !isPasswordRecovery) {
+      setErrorMessage(
+        "No se detectó un contexto de recuperación válido. Por favor solicita un nuevo enlace de recuperación.",
+      );
     }
-
-    handleDeepLink();
-  }, [session]);
+  }, [isLoading, isPasswordRecovery]);
 
   const handleUpdate = async () => {
-    if (!session) {
+    if (!isPasswordRecovery) {
       setErrorMessage(
         "No se detectó una sesión de recuperación válida. Por favor solicita un nuevo enlace.",
       );
@@ -83,19 +55,21 @@ export default function BusinessResetPasswordScreen() {
     if (error) {
       setErrorMessage(error);
     } else {
-      setSuccessMessage("Contraseña actualizada exitosamente. Redirigiendo...");
+      setSuccessMessage(
+        "Contraseña actualizada exitosamente. Redirigiendo al inicio de sesión...",
+      );
       setTimeout(() => {
         router.replace("/(auth)/login");
-      }, 2000);
+      }, 1500);
     }
   };
 
-  if (sessionChecking) {
+  if (isLoading) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#0066CC" />
         <Text style={[styles.subtitle, { marginTop: 12 }]}>
-          Validando enlace de recuperación...
+          Validando estado de sesión...
         </Text>
       </View>
     );
@@ -105,13 +79,13 @@ export default function BusinessResetPasswordScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>Nueva Contraseña</Text>
       <Text style={styles.subtitle}>
-        Establece una nueva contraseña para tu cuenta
+        Establece una nueva contraseña para tu cuenta de negocio
       </Text>
 
-      {!session && !errorMessage && (
+      {!isPasswordRecovery && !errorMessage && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>
-            No se detectó una sesión activa de recuperación. Por favor utiliza
+            No se detectó un contexto de recuperación activo. Por favor utiliza
             el enlace enviado a tu correo.
           </Text>
         </View>
@@ -130,27 +104,30 @@ export default function BusinessResetPasswordScreen() {
       )}
 
       <TextInput
-        style={[styles.input, !session && styles.inputDisabled]}
+        style={[styles.input, !isPasswordRecovery && styles.inputDisabled]}
         placeholder="Nueva contraseña (mínimo 8 caracteres)"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
-        editable={!!session}
+        editable={isPasswordRecovery && !loading}
       />
 
       <TextInput
-        style={[styles.input, !session && styles.inputDisabled]}
+        style={[styles.input, !isPasswordRecovery && styles.inputDisabled]}
         placeholder="Confirmar nueva contraseña"
         value={confirmPassword}
         onChangeText={setConfirmPassword}
         secureTextEntry
-        editable={!!session}
+        editable={isPasswordRecovery && !loading}
       />
 
       <TouchableOpacity
-        style={[styles.button, (!session || loading) && styles.buttonDisabled]}
+        style={[
+          styles.button,
+          (!isPasswordRecovery || loading) && styles.buttonDisabled,
+        ]}
         onPress={handleUpdate}
-        disabled={!session || loading}
+        disabled={!isPasswordRecovery || loading}
       >
         {loading ? (
           <ActivityIndicator color="#FFFFFF" />
@@ -159,16 +136,12 @@ export default function BusinessResetPasswordScreen() {
         )}
       </TouchableOpacity>
 
-      {!session && (
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={() => router.replace("/(auth)/login")}
-        >
-          <Text style={styles.secondaryButtonText}>
-            Volver al Inicio de Sesión
-          </Text>
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={() => router.replace("/(auth)/login")}
+      >
+        <Text style={styles.backButtonText}>Volver al Inicio de Sesión</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -176,81 +149,84 @@ export default function BusinessResetPasswordScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: "center",
     padding: 24,
-    backgroundColor: "#F9FAFB",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
   },
   title: {
     fontSize: 24,
     fontWeight: "bold",
-    color: "#111827",
-    textAlign: "center",
+    color: "#0F172A",
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: "#6B7280",
-    textAlign: "center",
+    color: "#64748B",
     marginBottom: 24,
   },
-  errorBanner: {
-    backgroundColor: "#FEE2E2",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  errorText: {
-    color: "#B91C1C",
-    fontSize: 14,
-    textAlign: "center",
-  },
-  successBanner: {
-    backgroundColor: "#D1FAE5",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  successText: {
-    color: "#065F46",
-    fontSize: 14,
-    textAlign: "center",
-  },
   input: {
-    backgroundColor: "#FFFFFF",
+    height: 48,
     borderWidth: 1,
-    borderColor: "#D1D5DB",
+    borderColor: "#CBD5E1",
     borderRadius: 8,
-    padding: 14,
-    fontSize: 16,
+    paddingHorizontal: 16,
     marginBottom: 16,
+    fontSize: 16,
+    backgroundColor: "#FFFFFF",
   },
   inputDisabled: {
-    backgroundColor: "#F3F4F6",
-    color: "#9CA3AF",
+    backgroundColor: "#F1F5F9",
+    borderColor: "#E2E8F0",
+    color: "#94A3B8",
   },
   button: {
+    height: 48,
     backgroundColor: "#0066CC",
-    padding: 16,
     borderRadius: 8,
+    justifyContent: "center",
     alignItems: "center",
     marginTop: 8,
   },
   buttonDisabled: {
-    opacity: 0.5,
+    backgroundColor: "#94A3B8",
   },
   buttonText: {
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "600",
   },
-  secondaryButton: {
+  backButton: {
     marginTop: 16,
-    padding: 12,
     alignItems: "center",
+    padding: 8,
   },
-  secondaryButtonText: {
+  backButtonText: {
     color: "#0066CC",
     fontSize: 14,
     fontWeight: "500",
+  },
+  errorBanner: {
+    backgroundColor: "#FEE2E2",
+    borderColor: "#EF4444",
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorText: {
+    color: "#991B1B",
+    fontSize: 14,
+  },
+  successBanner: {
+    backgroundColor: "#DCFCE7",
+    borderColor: "#22C55E",
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  successText: {
+    color: "#166534",
+    fontSize: 14,
   },
 });
