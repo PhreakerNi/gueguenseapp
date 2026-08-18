@@ -97,7 +97,7 @@ const {
   serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
 } = getSupabaseEnv();
 
-function generateTotpCode(secretBase32: string): string {
+function generateTotpCode(secretBase32: string, timeStepOffset = 0): string {
   const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   const cleanSecret = secretBase32.replace(/[\s=]/g, "").toUpperCase();
   let bits = "";
@@ -112,7 +112,7 @@ function generateTotpCode(secretBase32: string): string {
     bytes.push(parseInt(bits.slice(i, i + 8), 2));
   }
   const key = Buffer.from(bytes);
-  const counter = Math.floor(Date.now() / 1000 / 30);
+  const counter = Math.floor(Date.now() / 1000 / 30) + timeStepOffset;
   const counterBuffer = Buffer.alloc(8);
   counterBuffer.writeBigInt64BE(BigInt(counter));
 
@@ -898,37 +898,46 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(enrollData.id, "Factor ID must exist");
     assert.ok(enrollData.totp?.secret, "TOTP secret must exist");
 
-    // 14f. Challenge and verify TOTP code with real secret
-    const code = generateTotpCode(enrollData.totp.secret);
-    const { data: challengeData, error: challengeError } =
-      await adminClient.auth.mfa.challenge({
-        factorId: enrollData.id,
-      });
+    // 14f. Challenge and verify TOTP code with real secret across standard time window
+    let verified = false;
+    let lastVerifyError: any = null;
 
-    if (challengeError)
-      console.error("Test 14f challenge error:", challengeError);
+    for (const offset of [0, -1, 1]) {
+      const code = generateTotpCode(enrollData.totp.secret, offset);
+      const { data: challengeData, error: challengeError } =
+        await adminClient.auth.mfa.challenge({
+          factorId: enrollData.id,
+        });
+
+      if (challengeError) {
+        console.error("Test 14f challenge error:", challengeError);
+        continue;
+      }
+
+      const { data: verifyData, error: verifyError } =
+        await adminClient.auth.mfa.verify({
+          factorId: enrollData.id,
+          challengeId: challengeData.id,
+          code,
+        });
+
+      if (!verifyError && verifyData) {
+        verified = true;
+        lastVerifyError = null;
+        break;
+      } else {
+        lastVerifyError = verifyError;
+      }
+    }
+
+    if (lastVerifyError) {
+      console.error("Test 14f last verify error:", lastVerifyError);
+    }
     assert.strictEqual(
-      challengeError,
-      null,
-      "MFA challenge creation should succeed",
+      verified,
+      true,
+      `MFA challenge verification should succeed: ${lastVerifyError?.message || ""}`,
     );
-    assert.ok(challengeData?.id, "Challenge ID must exist");
-
-    const { data: verifyData, error: verifyError } =
-      await adminClient.auth.mfa.verify({
-        factorId: enrollData.id,
-        challengeId: challengeData.id,
-        code,
-      });
-
-    if (verifyError)
-      console.error("Test 14f challenge verify error:", verifyError);
-    assert.strictEqual(
-      verifyError,
-      null,
-      "MFA challenge verification should succeed",
-    );
-    assert.ok(verifyData, "Verify data must exist");
 
     // 14g. Verify Authenticator Assurance Level is AAL2
     const { data: aalData } =
