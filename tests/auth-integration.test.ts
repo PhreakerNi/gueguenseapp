@@ -70,9 +70,10 @@ const {
 
 function generateTotpCode(secretBase32: string): string {
   const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const cleanSecret = secretBase32.replace(/[\s=]/g, "").toUpperCase();
   let bits = "";
-  for (let i = 0; i < secretBase32.length; i++) {
-    const val = base32chars.indexOf(secretBase32.charAt(i).toUpperCase());
+  for (let i = 0; i < cleanSecret.length; i++) {
+    const val = base32chars.indexOf(cleanSecret.charAt(i));
     if (val >= 0) {
       bits += val.toString(2).padStart(5, "0");
     }

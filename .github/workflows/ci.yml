@@ -167,10 +167,10 @@ jobs:
 
       - name: Run Phase 2 Auth & Session Integration Test Suite
         run: |
-          STATUS_JSON=$(pnpm supabase status -o json)
-          export SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL // .api_url // "http://127.0.0.1:54321"')
-          export SUPABASE_ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY // .anon_key // ""')
-          export SUPABASE_SERVICE_ROLE_KEY=$(echo "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY // .service_role_key // .SERVICE_KEY // .service_key // ""')
+          pnpm supabase status -o json > supabase_status.json
+          export SUPABASE_URL=$(node -e "const s = JSON.parse(require('fs').readFileSync('supabase_status.json','utf8')); console.log(s.API_URL || s.api_url || 'http://127.0.0.1:54321');")
+          export SUPABASE_ANON_KEY=$(node -e "const s = JSON.parse(require('fs').readFileSync('supabase_status.json','utf8')); console.log(s.ANON_KEY || s.anon_key || '');")
+          export SUPABASE_SERVICE_ROLE_KEY=$(node -e "const s = JSON.parse(require('fs').readFileSync('supabase_status.json','utf8')); console.log(s.SERVICE_ROLE_KEY || s.service_role_key || s.SERVICE_KEY || s.service_key || '');")
           pnpm test:auth-integration
 
       - name: Stop Supabase Stack
