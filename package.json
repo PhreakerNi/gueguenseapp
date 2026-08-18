@@ -12,7 +12,7 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "test:auth-integration": "node --test --import tsx tests/auth-integration.test.ts",
+    "test:auth-integration": "node --import tsx tests/auth-integration.test.ts",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "supabase:start": "supabase start",

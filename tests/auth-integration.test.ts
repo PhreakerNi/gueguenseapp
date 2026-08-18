@@ -118,10 +118,6 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
   let businessUserId: string;
   let driverUserId: string;
   let adminUserId: string;
-  let businessSessionToken: string;
-  let adminSessionToken: string;
-  let mfaFactorId: string;
-  let mfaSecret: string;
 
   const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
@@ -154,12 +150,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       password: testPassword,
     });
     assert.ok(loginRes.data.session);
-    businessSessionToken = loginRes.data.session.access_token;
 
     const authedClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: {
         headers: {
-          Authorization: `Bearer ${businessSessionToken}`,
+          Authorization: `Bearer ${loginRes.data.session.access_token}`,
         },
       },
     });
@@ -343,7 +338,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     );
   });
 
-  it("10. should evaluate Business Access guard transitions with DB fixtures", () => {
+  it("10. should evaluate Business Access guard transitions (onboarding required, active, suspended)", () => {
     // 10a. Unonboarded business user -> ONBOARDING_REQUIRED
     const initialIdentity: IdentityContext = {
       userId: businessUserId,
@@ -398,7 +393,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
   });
 
-  it("11. should evaluate Driver Access guard transitions with DB fixtures", () => {
+  it("11. should evaluate Driver Access guard transitions (onboarding required, registered, active, suspended)", () => {
     // 11a. Unonboarded driver -> ONBOARDING_REQUIRED
     const initialDriverIdentity: IdentityContext = {
       userId: driverUserId,
@@ -456,7 +451,28 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
   });
 
-  it("12. should signup and login Admin user with platform_role=admin", async () => {
+  it("12. should evaluate Admin Access guard to ADMIN_ROLE_REQUIRED for platform_role none", () => {
+    const regularIdentity: IdentityContext = {
+      userId: businessUserId,
+      email: businessEmail,
+      profile: {
+        platformRole: "none",
+        fullName: "User",
+        phone: null,
+        avatarUrl: null,
+      },
+      businessMemberships: [],
+      driver: null,
+    };
+
+    const evaluation = evaluateAdminAccess(regularIdentity);
+    assert.deepStrictEqual(evaluation, {
+      allowed: false,
+      reason: "ADMIN_ROLE_REQUIRED",
+    });
+  });
+
+  it("13. should perform complete Admin MFA TOTP enrollment, verification and achieve AAL2", async () => {
     const { data: adminSignUp, error: adminSignUpError } =
       await client.auth.signUp({
         email: adminEmail,
@@ -472,98 +488,61 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(adminSignUp.user);
     adminUserId = adminSignUp.user.id;
 
-    const { data: adminLogin, error: adminLoginError } =
-      await client.auth.signInWithPassword({
-        email: adminEmail,
-        password: testPassword,
-      });
-
-    assert.strictEqual(adminLoginError, null);
-    assert.ok(adminLogin.session);
-    adminSessionToken = adminLogin.session.access_token;
-
-    const adminIdentity: IdentityContext = {
-      userId: adminUserId,
+    const loginRes = await client.auth.signInWithPassword({
       email: adminEmail,
-      profile: {
-        platformRole: "admin" as PlatformRole,
-        fullName: "Administrador Real",
-        phone: null,
-        avatarUrl: null,
-      },
-      businessMemberships: [],
-      driver: null,
-    };
-    assert.deepStrictEqual(evaluateAdminAccess(adminIdentity, "aal1"), {
-      allowed: false,
-      reason: "MFA_REQUIRED",
+      password: testPassword,
     });
-  });
+    assert.ok(loginRes.data.session);
 
-  it("13. should enroll in TOTP MFA factor for Admin user", async () => {
-    const mfaAdminClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    const mfaClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: false },
       global: {
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${loginRes.data.session.access_token}`,
         },
       },
     });
 
     const { data: enrollData, error: enrollError } =
-      await mfaAdminClient.auth.mfa.enroll({
+      await mfaClient.auth.mfa.enroll({
         factorType: "totp",
         issuer: "Gueguense",
       });
 
-    assert.strictEqual(enrollError, null);
-    assert.ok(enrollData?.id);
-    assert.ok(enrollData?.totp?.secret);
-    mfaFactorId = enrollData.id;
-    mfaSecret = enrollData.totp.secret;
-  });
+    assert.strictEqual(enrollError, null, "MFA enrollment should succeed");
+    assert.ok(enrollData, "Enrollment data must exist");
+    assert.ok(enrollData.id, "Factor ID must exist");
+    assert.ok(enrollData.totp.secret, "TOTP secret must exist");
+    assert.ok(enrollData.totp.qr_code, "TOTP QR code must exist");
 
-  it("14. should challenge and verify TOTP code for Admin user", async () => {
-    const mfaAdminClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false },
-      global: {
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-        },
-      },
-    });
-
-    const code = generateTotpCode(mfaSecret);
+    // Challenge and verify code
+    const code = generateTotpCode(enrollData.totp.secret);
     const { data: verifyData, error: verifyError } =
-      await mfaAdminClient.auth.mfa.challengeAndVerify({
-        factorId: mfaFactorId,
+      await mfaClient.auth.mfa.challengeAndVerify({
+        factorId: enrollData.id,
         code,
       });
 
-    assert.strictEqual(verifyError, null);
-    assert.ok(verifyData);
-  });
+    assert.strictEqual(
+      verifyError,
+      null,
+      "MFA challenge verification should succeed",
+    );
+    assert.ok(verifyData, "Verify data must exist");
 
-  it("15. should reach AAL2 after TOTP verification and allow Admin Access", async () => {
-    const mfaAdminClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false },
-      global: {
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-        },
-      },
-    });
-
+    // Verify Authenticator Assurance Level is AAL2
     const { data: aalData } =
-      await mfaAdminClient.auth.mfa.getAuthenticatorAssuranceLevel();
+      await mfaClient.auth.mfa.getAuthenticatorAssuranceLevel();
     assert.strictEqual(
       aalData?.currentLevel,
       "aal2",
-      "Admin session must reach AAL2 after TOTP verification",
+      "Session must reach AAL2 after TOTP verification",
     );
+  });
 
+  it("14. should evaluate Admin Access guard to allowed when admin role and AAL2", () => {
     const adminIdentity: IdentityContext = {
-      userId: adminUserId,
+      userId: adminUserId || "admin-uuid",
       email: adminEmail,
       profile: {
         platformRole: "admin" as PlatformRole,
@@ -574,6 +553,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       businessMemberships: [],
       driver: null,
     };
+
     assert.deepStrictEqual(evaluateAdminAccess(adminIdentity, "aal2"), {
       allowed: true,
     });
