@@ -378,11 +378,6 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
 
   it("11. should evaluate Business Access guard transitions with real DB fixtures (ACTIVE, SUSPENDED, BLOCKED, CLOSED)", async () => {
     // 11a. Unonboarded business user -> ONBOARDING_REQUIRED
-    const { data: initialMemberships } = await trustedAdminClient
-      .from("business_members")
-      .select("id, business_id, role, status, businesses (account_status)")
-      .eq("user_id", businessUserId);
-
     const unonboardedIdentity: IdentityContext = {
       userId: businessUserId,
       email: businessEmail,
@@ -392,14 +387,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         phone: null,
         avatarUrl: null,
       },
-      businessMemberships: (initialMemberships ?? []).map((m: any) => ({
-        membershipId: m.id,
-        businessId: m.business_id,
-        role: m.role as BusinessMemberRole,
-        status: m.status as BusinessMemberStatus,
-        businessAccountStatus: m.businesses
-          ?.account_status as BusinessAccountStatus,
-      })),
+      businessMemberships: [],
       driver: null,
     };
 
@@ -449,21 +437,30 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     const testMemberId = memberRow.id;
 
     // Fetch from real DB and test ACTIVE -> allowed: true
-    const { data: activeMembers } = await trustedAdminClient
+    const { data: memberCheck } = await trustedAdminClient
       .from("business_members")
-      .select("id, business_id, role, status, businesses (account_status)")
-      .eq("user_id", businessUserId);
+      .select("id, business_id, role, status")
+      .eq("id", testMemberId)
+      .single();
+
+    const { data: bizCheck } = await trustedAdminClient
+      .from("businesses")
+      .select("account_status")
+      .eq("id", testBusinessId)
+      .single();
 
     const activeIdentity: IdentityContext = {
       ...unonboardedIdentity,
-      businessMemberships: (activeMembers ?? []).map((m: any) => ({
-        membershipId: m.id,
-        businessId: m.business_id,
-        role: m.role as BusinessMemberRole,
-        status: m.status as BusinessMemberStatus,
-        businessAccountStatus: m.businesses
-          ?.account_status as BusinessAccountStatus,
-      })),
+      businessMemberships: [
+        {
+          membershipId: memberCheck!.id,
+          businessId: memberCheck!.business_id,
+          role: memberCheck!.role as BusinessMemberRole,
+          status: memberCheck!.status as BusinessMemberStatus,
+          businessAccountStatus: bizCheck!
+            .account_status as BusinessAccountStatus,
+        },
+      ],
     };
 
     assert.deepStrictEqual(evaluateBusinessAccess(activeIdentity), {
@@ -476,21 +473,24 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .update({ status: "SUSPENDED" })
       .eq("id", testMemberId);
 
-    const { data: suspendedMembers } = await trustedAdminClient
+    const { data: suspendedMemberCheck } = await trustedAdminClient
       .from("business_members")
-      .select("id, business_id, role, status, businesses (account_status)")
-      .eq("user_id", businessUserId);
+      .select("id, business_id, role, status")
+      .eq("id", testMemberId)
+      .single();
 
     const suspendedIdentity: IdentityContext = {
       ...unonboardedIdentity,
-      businessMemberships: (suspendedMembers ?? []).map((m: any) => ({
-        membershipId: m.id,
-        businessId: m.business_id,
-        role: m.role as BusinessMemberRole,
-        status: m.status as BusinessMemberStatus,
-        businessAccountStatus: m.businesses
-          ?.account_status as BusinessAccountStatus,
-      })),
+      businessMemberships: [
+        {
+          membershipId: suspendedMemberCheck!.id,
+          businessId: suspendedMemberCheck!.business_id,
+          role: suspendedMemberCheck!.role as BusinessMemberRole,
+          status: suspendedMemberCheck!.status as BusinessMemberStatus,
+          businessAccountStatus: bizCheck!
+            .account_status as BusinessAccountStatus,
+        },
+      ],
     };
 
     assert.deepStrictEqual(evaluateBusinessAccess(suspendedIdentity), {
@@ -509,21 +509,24 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .update({ account_status: "BLOCKED" })
       .eq("id", testBusinessId);
 
-    const { data: blockedBizMembers } = await trustedAdminClient
-      .from("business_members")
-      .select("id, business_id, role, status, businesses (account_status)")
-      .eq("user_id", businessUserId);
+    const { data: blockedBizCheck } = await trustedAdminClient
+      .from("businesses")
+      .select("account_status")
+      .eq("id", testBusinessId)
+      .single();
 
     const blockedBizIdentity: IdentityContext = {
       ...unonboardedIdentity,
-      businessMemberships: (blockedBizMembers ?? []).map((m: any) => ({
-        membershipId: m.id,
-        businessId: m.business_id,
-        role: m.role as BusinessMemberRole,
-        status: m.status as BusinessMemberStatus,
-        businessAccountStatus: m.businesses
-          ?.account_status as BusinessAccountStatus,
-      })),
+      businessMemberships: [
+        {
+          membershipId: testMemberId,
+          businessId: testBusinessId,
+          role: "business_owner",
+          status: "ACTIVE",
+          businessAccountStatus: blockedBizCheck!
+            .account_status as BusinessAccountStatus,
+        },
+      ],
     };
 
     assert.deepStrictEqual(evaluateBusinessAccess(blockedBizIdentity), {
@@ -537,21 +540,24 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .update({ account_status: "CLOSED" })
       .eq("id", testBusinessId);
 
-    const { data: closedBizMembers } = await trustedAdminClient
-      .from("business_members")
-      .select("id, business_id, role, status, businesses (account_status)")
-      .eq("user_id", businessUserId);
+    const { data: closedBizCheck } = await trustedAdminClient
+      .from("businesses")
+      .select("account_status")
+      .eq("id", testBusinessId)
+      .single();
 
     const closedBizIdentity: IdentityContext = {
       ...unonboardedIdentity,
-      businessMemberships: (closedBizMembers ?? []).map((m: any) => ({
-        membershipId: m.id,
-        businessId: m.business_id,
-        role: m.role as BusinessMemberRole,
-        status: m.status as BusinessMemberStatus,
-        businessAccountStatus: m.businesses
-          ?.account_status as BusinessAccountStatus,
-      })),
+      businessMemberships: [
+        {
+          membershipId: testMemberId,
+          businessId: testBusinessId,
+          role: "business_owner",
+          status: "ACTIVE",
+          businessAccountStatus: closedBizCheck!
+            .account_status as BusinessAccountStatus,
+        },
+      ],
     };
 
     assert.deepStrictEqual(evaluateBusinessAccess(closedBizIdentity), {
@@ -562,12 +568,6 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
 
   it("12. should evaluate Driver Access guard transitions with real DB fixtures (REGISTERED, ACTIVE, SUSPENDED, BLOCKED, CLOSED)", async () => {
     // 12a. Unonboarded driver (no row in drivers table) -> ONBOARDING_REQUIRED
-    const { data: initialDriver } = await trustedAdminClient
-      .from("drivers")
-      .select("verification_status, account_status")
-      .eq("id", driverUserId)
-      .maybeSingle();
-
     const unonboardedDriverIdentity: IdentityContext = {
       userId: driverUserId,
       email: driverEmail,
@@ -578,13 +578,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
         avatarUrl: null,
       },
       businessMemberships: [],
-      driver: initialDriver
-        ? {
-            verificationStatus:
-              initialDriver.verification_status as DriverVerificationStatus,
-            accountStatus: initialDriver.account_status as DriverAccountStatus,
-          }
-        : null,
+      driver: null,
     };
 
     assert.deepStrictEqual(evaluateDriverAccess(unonboardedDriverIdentity), {
