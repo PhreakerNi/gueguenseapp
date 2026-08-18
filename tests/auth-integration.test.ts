@@ -28,6 +28,9 @@ function getSupabaseEnv(): {
   let serviceRoleKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || "";
 
+  if (anonKey === "null") anonKey = "";
+  if (serviceRoleKey === "null") serviceRoleKey = "";
+
   if (!anonKey || !serviceRoleKey) {
     try {
       const fs = require("node:fs");
@@ -73,6 +76,13 @@ function getSupabaseEnv(): {
       }
     } catch {}
   }
+
+  console.log("Integration test using Supabase URL:", url);
+  console.log("Integration test anon key length:", anonKey.length);
+  console.log(
+    "Integration test service role key length:",
+    serviceRoleKey.length,
+  );
 
   return {
     url,
