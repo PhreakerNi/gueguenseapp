@@ -133,22 +133,24 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
   });
 
   it("2. should verify signup does NOT autocreate business_members or drivers", async () => {
-    const { data: memberRows } = await adminClient
+    const { data: memberRows, error: memberErr } = await adminClient
       .from("business_members")
       .select("id")
       .eq("user_id", businessUserId);
 
+    assert.strictEqual(memberErr, null);
     assert.strictEqual(
       memberRows?.length,
       0,
       "Signup must not autocreate business_members",
     );
 
-    const { data: driverRows } = await adminClient
+    const { data: driverRows, error: driverErr } = await adminClient
       .from("drivers")
       .select("id")
       .eq("id", businessUserId);
 
+    assert.strictEqual(driverErr, null);
     assert.strictEqual(
       driverRows?.length,
       0,
@@ -330,7 +332,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
 
     // 10b. Create active business & active membership fixture in DB
-    const { data: bizData } = await adminClient
+    const { data: bizData, error: bizErr } = await adminClient
       .from("businesses")
       .insert({
         legal_name: "Comercio Fixture SA",
@@ -341,10 +343,15 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .select("id")
       .single();
 
+    assert.strictEqual(
+      bizErr,
+      null,
+      `Business insert should succeed: ${bizErr?.message}`,
+    );
     assert.ok(bizData?.id);
     testBusinessId = bizData.id;
 
-    const { data: memberData } = await adminClient
+    const { data: memberData, error: memberErr } = await adminClient
       .from("business_members")
       .insert({
         business_id: testBusinessId,
@@ -355,6 +362,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .select("id")
       .single();
 
+    assert.strictEqual(
+      memberErr,
+      null,
+      `Member insert should succeed: ${memberErr?.message}`,
+    );
     assert.ok(memberData?.id);
 
     // Active membership -> allowed: true
@@ -413,14 +425,21 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
 
     // 11b. Insert driver fixture with REGISTERED status -> ONBOARDING_REQUIRED
-    await adminClient.from("drivers").insert({
-      id: driverUserId,
-      first_name: "Conductor",
-      last_name: "Test",
-      national_id: `ID-${timestamp}`,
-      verification_status: "PENDING",
-      account_status: "REGISTERED",
-    });
+    const { error: driverInsertError } = await adminClient
+      .from("drivers")
+      .insert({
+        id: driverUserId,
+        national_id_number: `ID-${timestamp}`,
+        license_number: `LIC-${timestamp}`,
+        verification_status: "PENDING",
+        account_status: "REGISTERED",
+      });
+
+    assert.strictEqual(
+      driverInsertError,
+      null,
+      `Driver insert should succeed: ${driverInsertError?.message}`,
+    );
 
     const registeredDriverIdentity: IdentityContext = {
       ...initialDriverIdentity,
