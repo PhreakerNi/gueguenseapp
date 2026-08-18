@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import crypto from "node:crypto";
+import { execSync } from "node:child_process";
 import { createClient } from "@supabase/supabase-js";
 import {
   normalizeAuthError,
@@ -8,13 +9,40 @@ import {
   evaluateDriverAccess,
   evaluateAdminAccess,
   type IdentityContext,
-} from "./packages/domain/src/index.js";
+} from "./packages/domain/src/index.ts";
 
-// Standard Supabase Local Stack configuration
-const SUPABASE_URL = process.env.SUPABASE_URL || "http://127.0.0.1:54321";
-const SUPABASE_ANON_KEY =
-  process.env.SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM3OTIwMDB9.CRX_dummy_or_standard_local_key";
+function getSupabaseEnv(): { url: string; anonKey: string } {
+  if (process.env.SUPABASE_ANON_KEY && process.env.SUPABASE_URL) {
+    return {
+      url: process.env.SUPABASE_URL,
+      anonKey: process.env.SUPABASE_ANON_KEY,
+    };
+  }
+  if (process.env.ANON_KEY && process.env.API_URL) {
+    return {
+      url: process.env.API_URL,
+      anonKey: process.env.ANON_KEY,
+    };
+  }
+  try {
+    const raw = execSync("pnpm supabase status -o json", {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const parsed = JSON.parse(raw);
+    return {
+      url: parsed.API_URL || "http://127.0.0.1:54321",
+      anonKey: parsed.ANON_KEY,
+    };
+  } catch {
+    return {
+      url: "http://127.0.0.1:54321",
+      anonKey: process.env.SUPABASE_ANON_KEY || "",
+    };
+  }
+}
+
+const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = getSupabaseEnv();
 
 function generateTotpCode(secretBase32: string): string {
   const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
