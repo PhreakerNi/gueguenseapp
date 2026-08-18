@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [main, phase/1-foundation]
 
-permissions:
-  contents: write
-
 jobs:
   quality-gates:
     name: Code Quality & Monorepo Gates
@@ -136,16 +133,7 @@ jobs:
       - name: Verify Database Types Sync Drift
         run: |
           pnpm db:types
-          if ! git diff --exit-code -- packages/types/src/database.generated.ts; then
-            echo "Drift detected. Auto-syncing canonical Linux CLI generated types..."
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add packages/types/src/database.generated.ts
-            git commit -m "fix(types): sync canonical database.generated.ts from Linux CI"
-            git push origin phase/1-foundation
-            exit 1
-          fi
-          echo "Generated DB types are in sync."
+          git diff --exit-code -- packages/types/src/database.generated.ts
 
       - name: Stop Supabase Stack
         if: always()
