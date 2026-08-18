@@ -815,15 +815,16 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(promoteError, null);
 
     // 14c. Login as Admin user
-    const adminLoginRes = await client.auth.signInWithPassword({
-      email: adminEmail,
-      password: testPassword,
-    });
+    const { data: adminLogin, error: adminLoginError } =
+      await client.auth.signInWithPassword({
+        email: adminEmail,
+        password: testPassword,
+      });
 
-    if (adminLoginRes.error)
-      console.error("Test 14c admin login error:", adminLoginRes.error);
-    assert.strictEqual(adminLoginRes.error, null);
-    assert.ok(adminLoginRes.data.session);
+    if (adminLoginError)
+      console.error("Test 14c admin login error:", adminLoginError);
+    assert.strictEqual(adminLoginError, null);
+    assert.ok(adminLogin?.session);
 
     // 14d. Build Admin IdentityContext from real DB profile
     const { data: adminProfile, error: adminProfileErr } =
@@ -857,18 +858,9 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       reason: "MFA_REQUIRED",
     });
 
-    // 14e. MFA Client with Admin session Authorization header
-    const mfaClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false },
-      global: {
-        headers: {
-          Authorization: `Bearer ${adminLoginRes.data.session.access_token}`,
-        },
-      },
-    });
-
+    // 14e. MFA TOTP Enrollment on authenticated client
     const { data: enrollData, error: enrollError } =
-      await mfaClient.auth.mfa.enroll({
+      await client.auth.mfa.enroll({
         factorType: "totp",
         issuer: "Gueguense",
       });
@@ -882,7 +874,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     // 14f. Challenge and verify TOTP code with real secret
     const code = generateTotpCode(enrollData.totp.secret);
     const { data: verifyData, error: verifyError } =
-      await mfaClient.auth.mfa.challengeAndVerify({
+      await client.auth.mfa.challengeAndVerify({
         factorId: enrollData.id,
         code,
       });
@@ -898,7 +890,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
 
     // 14g. Verify Authenticator Assurance Level is AAL2
     const { data: aalData } =
-      await mfaClient.auth.mfa.getAuthenticatorAssuranceLevel();
+      await client.auth.mfa.getAuthenticatorAssuranceLevel();
     assert.strictEqual(
       aalData?.currentLevel,
       "aal2",
