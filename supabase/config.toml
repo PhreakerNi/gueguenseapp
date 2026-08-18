@@ -40,6 +40,6 @@ enable_confirmations = false
 enroll_enabled = true
 verify_enabled = true
 
-[inbucket]
+[local_smtp]
 enabled = true
 port = 54324

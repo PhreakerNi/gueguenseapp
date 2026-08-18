@@ -78,15 +78,20 @@ function getSupabaseEnv(): {
         encoding: "utf-8",
         stdio: ["ignore", "pipe", "ignore"],
       });
-      const parsed = JSON.parse(raw);
-      url = url || parsed.API_URL || parsed.api_url || "http://127.0.0.1:54321";
-      anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key;
-      serviceRoleKey =
-        serviceRoleKey ||
-        parsed.SERVICE_ROLE_KEY ||
-        parsed.service_role_key ||
-        parsed.SERVICE_KEY ||
-        parsed.service_key;
+      const firstBrace = raw.indexOf("{");
+      if (firstBrace !== -1) {
+        const jsonText = raw.substring(firstBrace);
+        const parsed = JSON.parse(jsonText);
+        url =
+          url || parsed.API_URL || parsed.api_url || "http://127.0.0.1:54321";
+        anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key;
+        serviceRoleKey =
+          serviceRoleKey ||
+          parsed.SERVICE_ROLE_KEY ||
+          parsed.service_role_key ||
+          parsed.SERVICE_KEY ||
+          parsed.service_key;
+      }
     } catch {
       // Fallback
     }
