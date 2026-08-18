@@ -4,10 +4,7 @@ import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "../../../lib/supabase/client";
-import {
-  normalizeAuthError,
-  getAuthErrorMessage,
-} from "@gueguense/domain";
+import { normalizeAuthError, getAuthErrorMessage } from "@gueguense/domain";
 
 function LoginForm() {
   const router = useRouter();
