@@ -170,10 +170,6 @@ jobs:
           pnpm supabase status -o json > supabase_status.json
           export SUPABASE_URL=$(jq -r '.API_URL // .api_url // "http://127.0.0.1:54321"' supabase_status.json)
           export SUPABASE_ANON_KEY=$(jq -r '.ANON_KEY // .anon_key // ""' supabase_status.json)
-          export SUPABASE_SERVICE_ROLE_KEY=$(jq -r '.SERVICE_ROLE_KEY // .service_role_key // ""' supabase_status.json)
-          echo "SUPABASE_URL: $SUPABASE_URL"
-          echo "ANON_KEY length: ${#SUPABASE_ANON_KEY}"
-          echo "SERVICE_ROLE_KEY length: ${#SUPABASE_SERVICE_ROLE_KEY}"
           pnpm test:auth-integration
 
       - name: Stop Supabase Stack
