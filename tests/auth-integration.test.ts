@@ -16,6 +16,29 @@ import {
   type PlatformRole,
 } from "../packages/domain/src/index.ts";
 
+function createLocalServiceRoleJwt(): string {
+  const header = Buffer.from(
+    JSON.stringify({ alg: "HS256", typ: "JWT" }),
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      iss: "supabase",
+      ref: "127.0.0.1",
+      role: "service_role",
+      iat: Math.floor(Date.now() / 1000) - 60,
+      exp: Math.floor(Date.now() / 1000) + 3600 * 24 * 365,
+    }),
+  ).toString("base64url");
+  const signature = crypto
+    .createHmac(
+      "sha256",
+      "super-secret-jwt-token-with-at-least-32-characters-long",
+    )
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+  return `${header}.${payload}.${signature}`;
+}
+
 function getSupabaseEnv(): {
   url: string;
   anonKey: string;
@@ -33,18 +56,27 @@ function getSupabaseEnv(): {
         stdio: ["ignore", "pipe", "ignore"],
       });
       const parsed = JSON.parse(raw);
-      url = url || parsed.API_URL || "http://127.0.0.1:54321";
-      anonKey = anonKey || parsed.ANON_KEY;
-      serviceRoleKey = serviceRoleKey || parsed.SERVICE_ROLE_KEY;
+      url = url || parsed.API_URL || parsed.api_url || "http://127.0.0.1:54321";
+      anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key;
+      serviceRoleKey =
+        serviceRoleKey ||
+        parsed.SERVICE_ROLE_KEY ||
+        parsed.service_role_key ||
+        parsed.SERVICE_KEY ||
+        parsed.service_key;
     } catch {
       // Fallback
     }
   }
 
+  if (!serviceRoleKey) {
+    serviceRoleKey = createLocalServiceRoleJwt();
+  }
+
   return {
     url: url || "http://127.0.0.1:54321",
     anonKey: anonKey || "",
-    serviceRoleKey: serviceRoleKey || "",
+    serviceRoleKey: serviceRoleKey || createLocalServiceRoleJwt(),
   };
 }
 
@@ -520,6 +552,10 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
 
     assert.strictEqual(adminLoginError, null);
     assert.ok(adminLogin.session);
+
+    if (adminLogin?.session) {
+      await adminAuthClient.auth.setSession(adminLogin.session);
+    }
 
     // Evaluate Admin guard at AAL1 -> MFA_REQUIRED
     const adminIdentity: IdentityContext = {

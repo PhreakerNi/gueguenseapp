@@ -168,9 +168,9 @@ jobs:
       - name: Run Phase 2 Auth & Session Integration Test Suite
         run: |
           STATUS_JSON=$(pnpm supabase status -o json)
-          export SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')
-          export SUPABASE_ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')
-          export SUPABASE_SERVICE_ROLE_KEY=$(echo "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY')
+          export SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL // .api_url // "http://127.0.0.1:54321"')
+          export SUPABASE_ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY // .anon_key // ""')
+          export SUPABASE_SERVICE_ROLE_KEY=$(echo "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY // .service_role_key // .SERVICE_KEY // .service_key // ""')
           pnpm test:auth-integration
 
       - name: Stop Supabase Stack
