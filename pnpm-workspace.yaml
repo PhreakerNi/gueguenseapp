@@ -3,9 +3,12 @@ packages:
   - "packages/*"
 overrides:
   expo: "~57.0.14"
+  expo-asset: "~57.0.12"
   expo-constants: "~57.0.12"
   expo-linking: "~57.0.6"
   expo-router: "~57.0.14"
+  expo-secure-store: "~57.0.1"
+  expo-status-bar: "~57.0.1"
 allowBuilds:
   esbuild: true
   sharp: true
@@ -23,6 +26,7 @@ minimumReleaseAgeExclude:
   - expo-asset@57.0.10 || 57.0.12
   - expo-constants@57.0.10 || 57.0.12
   - expo-router@57.0.12 || 57.0.14
+  - expo-secure-store@57.0.1
   - expo-server@57.0.2
   - expo@57.0.12 || 57.0.14
   - "@expo/config@57.0.8"

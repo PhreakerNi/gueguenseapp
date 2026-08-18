@@ -2,9 +2,9 @@ name: CI Quality & Security Gates
 
 on:
   push:
-    branches: [main, phase/1-foundation]
+    branches: [main, phase/1-foundation, phase/2-auth-identity-sessions]
   pull_request:
-    branches: [main, phase/1-foundation]
+    branches: [main, phase/1-foundation, phase/2-auth-identity-sessions]
 
 jobs:
   quality-gates:

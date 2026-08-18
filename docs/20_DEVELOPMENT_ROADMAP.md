@@ -1,12 +1,12 @@
 # Güegüense — Roadmap de Desarrollo Incremental (20 Fases)
 
-**Versión:** 1.0.0-phase1  
-**Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase1_Cierre_CI_Real_v2_0.md`
+**Versión:** 1.0.0-phase2  
+**Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — 🟡 EN IMPLEMENTACIÓN / REVISIÓN  
+**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_v1_0.md`
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 1 v2.0)
+## 🛠️ Stack Tecnológico Congelado (Fase 2 v1.0)
 
 - **Node.js:** `24.18.0 LTS`
 - **Gestor de Paquetes:** `pnpm@11.17.0` (Workspaces monorepo con un único `pnpm-lock.yaml`)
@@ -14,8 +14,8 @@
 - **Lenguaje / TypeScript Matrix:**
   - TypeScript (root / web / shared): `5.8.2` (Strict Mode)
   - TypeScript (Expo mobile apps): `6.0.3` (Expo SDK 57 compatible)
-- **Framework Mobile:** `Expo SDK 57` (`57.0.14`, `react-native` 0.86.2, `react` 19.2.3, `expo-router` 57.0.14, `expo-doctor` 1.20.1)
-- **Framework Web:** `Next.js 16.2.12 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.2.12)
+- **Framework Mobile:** `Expo SDK 57` (`57.0.14`, `react-native` 0.86.2, `react` 19.2.3, `expo-router` 57.0.14, `expo-secure-store` 57.0.1, `expo-doctor` 1.20.1)
+- **Framework Web:** `Next.js 16.2.12 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.2.12, `@supabase/ssr`)
 - **Backend / DB:** `Supabase CLI 2.110.0` (PostgreSQL 15+, PostGIS, RLS Deny por defecto, SELECT grants para `authenticated`, types generados por CLI 2.110.0 para `--schema public`)
 
 ---
@@ -29,12 +29,13 @@
 
 ### Fase 1 — Fundación y Estructura Core Monorepo
 
-- **Estado:** 🟡 **EN REVISIÓN / CANDIDATA A APROBACIÓN** (`phase/1-foundation`)
-- **Objetivo:** Monorepo funcional con 4 aplicaciones, 5 paquetes compartidos, migraciones local Supabase (9 tablas foundation + RLS + pgTAP), types generados y CI pipeline.
+- **Estado:** ✅ **APROBADA** (Commit `49a6ee9` / Run `32086480941`)
+- **Entregables:** Monorepo funcional con 4 aplicaciones, 5 paquetes compartidos, migraciones local Supabase (9 tablas foundation + RLS + 60/60 pgTAP), types generados reproducibles y CI pipeline.
 
 ### Fase 2 — Autenticación, Gestión de Identidad y Sesiones
 
-- **Estado:** ⏳ Pendiente (No iniciada)
+- **Estado:** 🟡 **EN IMPLEMENTACIÓN / REVISIÓN** (`phase/2-auth-identity-sessions`)
+- **Objetivo:** Autenticación Supabase Auth Email/Password, persistencia segura con `expo-secure-store`, modelo compartido `IdentityContext`, route guards por membresía/driver/status, Admin SSR Auth con `@supabase/ssr`, MFA TOTP AAL2 y pgTAP identity tests.
 
 ### Fase 3 — Onboarding B2B y Registro de Conductores
 
@@ -68,38 +69,42 @@
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 11 — Transferencias Handoff entre Conductores
+### Fase 11 — Transferencias Controladas en Ruta (Controlled Handoff)
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 12 — Gestión de Incidentes e Intervención Administrativa
+### Fase 12 — Gestión de Incidentes Operativos Desacoplados
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 13 — Motor de Tarifación Avanzada (Pricing Engine)
+### Fase 13 — Motor de Tarifas y Recargos Dinámicos (Pricing Engine)
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 14 — Libro Mayor Financiero (Financial Ledger)
+### Fase 14 — Ledger Contable Doble Entrada y Registro Financiero
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 15 — Liquidaciones en Efectivo y Cobros
+### Fase 15 — Liquidaciones de Efectivo y Métricas de Cobro (Cash Settlements)
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 16 — Solicitud y Procesamiento de Payouts
+### Fase 16 — Payouts y Desembolsos a Motorizados
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 17 — Sistema de Notificaciones y Push
+### Fase 17 — Push Notifications y Eventos en Tiempo Real
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 18 — Panel de Operaciones Administrativas (Admin Web)
+### Fase 18 — Panel Web de Administración y Auditoría
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 19 — Despliegue de Infraestructura y Producción (Deployment)
+### Fase 19 — Hardening de Seguridad, Cifrado PII y Auditoría
+
+- **Estado:** ⏳ Pendiente (No iniciada)
+
+### Fase 20 — Despliegue Producción y Documentación Final
 
 - **Estado:** ⏳ Pendiente (No iniciada)
