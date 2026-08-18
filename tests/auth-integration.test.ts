@@ -128,6 +128,22 @@ function generateTotpCode(secretBase32: string): string {
   return otp.toString().padStart(6, "0");
 }
 
+class MemoryStorage {
+  private store = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.store.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.store.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+}
+
 describe("Phase 2 — Auth & Session Integration Gates", () => {
   const timestamp = Date.now();
   const businessEmail = `biz_integ_${timestamp}@gueguense.test`;
