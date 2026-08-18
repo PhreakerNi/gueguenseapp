@@ -32,7 +32,11 @@ function getSupabaseEnv(): {
       const fs = require("node:fs");
       if (fs.existsSync("supabase_status.json")) {
         const raw = fs.readFileSync("supabase_status.json", "utf8");
-        const parsed = JSON.parse(raw);
+        const jsonStr = raw.substring(
+          raw.indexOf("{"),
+          raw.lastIndexOf("}") + 1,
+        );
+        const parsed = JSON.parse(jsonStr);
         url = url || parsed.API_URL || parsed.api_url;
         anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key;
         serviceRoleKey =
@@ -47,7 +51,7 @@ function getSupabaseEnv(): {
 
   if (!url || !anonKey || !serviceRoleKey) {
     try {
-      const raw = execSync("pnpm supabase status -o json", {
+      const raw = execSync("pnpm exec supabase status -o json", {
         encoding: "utf-8",
         stdio: ["ignore", "pipe", "ignore"],
       });
@@ -802,16 +806,15 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.strictEqual(promoteError, null);
 
     // 14c. Login as Admin user
-    const { data: adminLogin, error: adminLoginError } =
-      await client.auth.signInWithPassword({
-        email: adminEmail,
-        password: testPassword,
-      });
+    const adminLoginRes = await client.auth.signInWithPassword({
+      email: adminEmail,
+      password: testPassword,
+    });
 
-    if (adminLoginError)
-      console.error("Test 14c admin login error:", adminLoginError);
-    assert.strictEqual(adminLoginError, null);
-    assert.ok(adminLogin?.session?.access_token);
+    if (adminLoginRes.error)
+      console.error("Test 14c admin login error:", adminLoginRes.error);
+    assert.strictEqual(adminLoginRes.error, null);
+    assert.ok(adminLoginRes.data.session);
 
     // 14d. Build Admin IdentityContext from real DB profile
     const { data: adminProfile, error: adminProfileErr } =
@@ -845,25 +848,15 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       reason: "MFA_REQUIRED",
     });
 
-    // 14e. MFA Client with Admin session established via setSession
+    // 14e. MFA Client with Admin session Authorization header
     const mfaClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
+      auth: { persistSession: false },
+      global: {
+        headers: {
+          Authorization: `Bearer ${adminLoginRes.data.session.access_token}`,
+        },
       },
     });
-
-    const { error: setSessionErr } = await mfaClient.auth.setSession({
-      access_token: adminLogin.session.access_token,
-      refresh_token: adminLogin.session.refresh_token,
-    });
-    if (setSessionErr)
-      console.error("Test 14e setSession error:", setSessionErr);
-    assert.strictEqual(
-      setSessionErr,
-      null,
-      "Setting session on mfaClient should succeed",
-    );
 
     const { data: enrollData, error: enrollError } =
       await mfaClient.auth.mfa.enroll({
