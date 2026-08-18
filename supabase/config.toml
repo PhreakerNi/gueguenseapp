@@ -31,6 +31,15 @@ additional_redirect_urls = [
   "http://127.0.0.1:3002/*",
 ]
 
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
 [inbucket]
 enabled = true
 port = 54324

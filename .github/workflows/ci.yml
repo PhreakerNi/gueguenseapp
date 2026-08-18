@@ -166,7 +166,11 @@ jobs:
         run: pnpm supabase:reset
 
       - name: Run Phase 2 Auth & Session Integration Test Suite
-        run: pnpm test:auth-integration
+        run: |
+          STATUS_JSON=$(pnpm supabase status -o json)
+          export SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')
+          export SUPABASE_ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')
+          pnpm test:auth-integration
 
       - name: Stop Supabase Stack
         if: always()
