@@ -170,10 +170,10 @@ jobs:
 
       - name: Run Phase 2 Auth & Session Integration Test Suite
         run: |
-          pnpm supabase status -o json > supabase_status.json
-          export SUPABASE_URL=$(node -e "const s = JSON.parse(require('fs').readFileSync('supabase_status.json','utf8')); console.log(s.API_URL || s.api_url || 'http://127.0.0.1:54321');")
-          export SUPABASE_ANON_KEY=$(node -e "const s = JSON.parse(require('fs').readFileSync('supabase_status.json','utf8')); console.log(s.ANON_KEY || s.anon_key || '');")
-          export SUPABASE_SERVICE_ROLE_KEY=$(node -e "const s = JSON.parse(require('fs').readFileSync('supabase_status.json','utf8')); console.log(s.SERVICE_ROLE_KEY || s.service_role_key || s.SERVICE_KEY || s.service_key || '');")
+          pnpm exec supabase status -o json > supabase_status.json
+          export SUPABASE_URL=$(node -e "const fs = require('fs'); const raw = fs.readFileSync('supabase_status.json','utf8'); const jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1); const s = JSON.parse(jsonStr); console.log(s.API_URL || s.api_url || 'http://127.0.0.1:54321');")
+          export SUPABASE_ANON_KEY=$(node -e "const fs = require('fs'); const raw = fs.readFileSync('supabase_status.json','utf8'); const jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1); const s = JSON.parse(jsonStr); console.log(s.ANON_KEY || s.anon_key || '');")
+          export SUPABASE_SERVICE_ROLE_KEY=$(node -e "const fs = require('fs'); const raw = fs.readFileSync('supabase_status.json','utf8'); const jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1); const s = JSON.parse(jsonStr); console.log(s.SERVICE_ROLE_KEY || s.service_role_key || s.SERVICE_KEY || s.service_key || '');")
           pnpm test:auth-integration
 
       - name: Stop Supabase Stack
