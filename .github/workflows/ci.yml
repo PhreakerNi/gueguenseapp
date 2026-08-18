@@ -159,11 +159,11 @@ jobs:
       - name: Install Monorepo Dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check Supabase CLI Exact Version
+        run: pnpm supabase --version
+
       - name: Start Supabase Local Stack
         run: pnpm supabase:start
-
-      - name: Reset Database & Apply Foundation Migrations
-        run: pnpm supabase:reset
 
       - name: Run Phase 2 Auth & Session Integration Test Suite
         run: |
