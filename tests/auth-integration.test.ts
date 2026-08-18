@@ -824,15 +824,23 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       reason: "MFA_REQUIRED",
     });
 
-    // 14e. MFA Client with Admin session header
+    // 14e. MFA Client with Admin session established via setSession
     const mfaClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false },
-      global: {
-        headers: {
-          Authorization: `Bearer ${adminLogin.session.access_token}`,
-        },
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
       },
     });
+
+    const { error: setSessionErr } = await mfaClient.auth.setSession({
+      access_token: adminLogin.session.access_token,
+      refresh_token: adminLogin.session.refresh_token,
+    });
+    assert.strictEqual(
+      setSessionErr,
+      null,
+      "Setting session on mfaClient should succeed",
+    );
 
     const { data: enrollData, error: enrollError } =
       await mfaClient.auth.mfa.enroll({
