@@ -175,10 +175,17 @@ jobs:
           export SUPABASE_URL=$(jq -r '.API_URL // .api_url // "http://127.0.0.1:54321"' supabase_status.json)
           export SUPABASE_ANON_KEY=$(jq -r '.ANON_KEY // .anon_key // empty' supabase_status.json)
           export SUPABASE_SERVICE_ROLE_KEY=$(jq -r '.SERVICE_ROLE_KEY // .service_role_key // .SERVICE_KEY // .service_key // empty' supabase_status.json)
+          echo "SUPABASE_URL=$SUPABASE_URL" >> $GITHUB_ENV
+          echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> $GITHUB_ENV
+          echo "SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY" >> $GITHUB_ENV
           echo "SUPABASE_URL: $SUPABASE_URL"
           echo "SUPABASE_ANON_KEY length: ${#SUPABASE_ANON_KEY}"
           echo "SUPABASE_SERVICE_ROLE_KEY length: ${#SUPABASE_SERVICE_ROLE_KEY}"
-          pnpm test:auth-integration
+          pnpm test:auth-integration 2>&1 | tee test.log || (echo "### Auth Integration Test Failure Logs" >> $GITHUB_STEP_SUMMARY && echo '```' >> $GITHUB_STEP_SUMMARY && cat test.log >> $GITHUB_STEP_SUMMARY && echo '```' >> $GITHUB_STEP_SUMMARY && exit 1)
+          echo "### Auth Integration Test Passed" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat test.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Stop Supabase Stack
         if: always()
