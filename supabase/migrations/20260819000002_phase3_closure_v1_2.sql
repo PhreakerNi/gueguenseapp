@@ -1,105 +1,107 @@
--- Migration: Phase 3 Closure v1.2
--- Tight corrections for B2B & Driver Onboarding, Document Upload Authorization, Canonical Audit & Idempotency
+-- Migration: 20260819000002_phase3_closure_v1_2.sql
+-- Description: Phase 3 Closure v1.2: Strict Storage upload authorization, canonical Idempotency & Audit schemas, and security hardening
 
--- 1. Storage Direct Bypass Closure & Strict Allowlist
--- Drop any direct client mutation policies on storage.objects for driver-documents
-DO $$
-BEGIN
-    DROP POLICY IF EXISTS "Drivers can upload documents to own folder" ON storage.objects;
-    DROP POLICY IF EXISTS "Drivers can view own documents" ON storage.objects;
-    DROP POLICY IF EXISTS "Drivers can update own documents" ON storage.objects;
-    DROP POLICY IF EXISTS "Super admins and verification agents can view driver documents" ON storage.objects;
-    DROP POLICY IF EXISTS "Public Access" ON storage.objects;
-END $$;
+BEGIN;
 
--- 2. Create Private Schema & Internal Tables
+-- 1. Storage RLS Hardening: Drop client mutation policies on driver-documents bucket (Section 1)
+DROP POLICY IF EXISTS "Drivers can upload documents to own folder" ON storage.objects;
+DROP POLICY IF EXISTS "Drivers can update documents in own folder" ON storage.objects;
+DROP POLICY IF EXISTS "Drivers can delete documents in own folder" ON storage.objects;
+
+-- 2. Schema private for upload authorizations (Section 2)
 CREATE SCHEMA IF NOT EXISTS private;
+GRANT USAGE ON SCHEMA private TO service_role;
+REVOKE ALL ON SCHEMA private FROM PUBLIC, anon, authenticated;
 
+-- 3. Private Upload Authorizations Table (Section 3 & 4)
 CREATE TABLE IF NOT EXISTS private.driver_document_upload_authorizations (
-    upload_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    driver_id UUID NOT NULL REFERENCES public.drivers(id) ON DELETE CASCADE,
-    document_type TEXT NOT NULL CHECK (document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION', 'CRIMINAL_RECORD', 'INSURANCE')),
-    storage_path TEXT NOT NULL UNIQUE,
-    mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'application/pdf')),
-    max_size_bytes BIGINT NOT NULL,
-    expires_at TIMESTAMPTZ NOT NULL,
-    committed_at TIMESTAMPTZ NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-REVOKE ALL ON TABLE private.driver_document_upload_authorizations FROM PUBLIC, anon, authenticated;
-
--- Internal table to store cached idempotency responses
-CREATE TABLE IF NOT EXISTS private.idempotency_responses (
-    ref_id TEXT PRIMARY KEY,
-    response_status INTEGER NOT NULL,
-    response_json JSONB NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-REVOKE ALL ON TABLE private.idempotency_responses FROM PUBLIC, anon, authenticated;
-
--- 3. Canonical Audit Logs Table (Section 11)
-DROP TABLE IF EXISTS public.audit_logs CASCADE;
-CREATE TABLE public.audit_logs (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    admin_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
-    action TEXT NOT NULL CHECK (action IN ('DRIVER_VERIFIED', 'DRIVER_REJECTED')),
-    reason TEXT NOT NULL,
-    ip_address TEXT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_audit_logs_admin_user_id ON public.audit_logs(admin_user_id);
-CREATE INDEX idx_audit_logs_action ON public.audit_logs(action);
-CREATE INDEX idx_audit_logs_created_at ON public.audit_logs(created_at);
-
-ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE public.audit_logs FROM PUBLIC, anon, authenticated;
-
--- RLS: SELECT allowed ONLY for super_admin (Section 11)
-CREATE POLICY "Super admins can view audit logs"
-    ON public.audit_logs FOR SELECT
-    TO authenticated
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE id = auth.uid() AND platform_role = 'super_admin'
-        )
-    );
-
-GRANT SELECT ON TABLE public.audit_logs TO authenticated;
-
--- 4. Canonical Idempotency Keys Table (Section 12)
-DROP TABLE IF EXISTS public.idempotency_keys CASCADE;
-CREATE TABLE public.idempotency_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    actor_type TEXT NOT NULL DEFAULT 'USER',
-    actor_user_id UUID NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    external_actor_key TEXT NULL,
+    upload_id UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    driver_id UUID NOT NULL REFERENCES public.drivers(id) ON DELETE CASCADE,
+    document_type TEXT NOT NULL CHECK (document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION')),
+    storage_path TEXT NOT NULL,
+    mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'application/pdf')),
+    max_size_bytes BIGINT NOT NULL CHECK (max_size_bytes <= 10485760),
+    expires_at TIMESTAMPTZ NOT NULL,
+    committed_at TIMESTAMPTZ DEFAULT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_upload_auth_driver_id ON private.driver_document_upload_authorizations(driver_id);
+CREATE INDEX IF NOT EXISTS idx_doc_upload_auth_upload_id ON private.driver_document_upload_authorizations(upload_id);
+
+-- 4. Canonical Idempotency Responses in private schema (Section 6 & 8)
+CREATE TABLE IF NOT EXISTS private.idempotency_responses (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_user_id UUID,
     scope TEXT NOT NULL,
     key TEXT NOT NULL,
     request_fingerprint TEXT NOT NULL,
     response_status INTEGER NOT NULL,
-    response_body_ref TEXT NULL,
+    response_body JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL,
-    UNIQUE (scope, key)
+    CONSTRAINT idempotency_responses_scope_key_unique UNIQUE (scope, key)
 );
 
-CREATE INDEX idx_idempotency_keys_lookup ON public.idempotency_keys(scope, key);
-CREATE INDEX idx_idempotency_keys_expires_at ON public.idempotency_keys(expires_at);
+CREATE INDEX IF NOT EXISTS idx_idempotency_responses_lookup ON private.idempotency_responses(scope, key);
+CREATE INDEX IF NOT EXISTS idx_idempotency_responses_expires ON private.idempotency_responses(expires_at);
+
+-- 5. Canonical Public Idempotency Table (Section 6)
+CREATE TABLE IF NOT EXISTS public.idempotency_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_type TEXT NOT NULL DEFAULT 'user' CHECK (actor_type IN ('user', 'service', 'anonymous')),
+    actor_user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    external_actor_key TEXT DEFAULT NULL,
+    scope TEXT NOT NULL,
+    key TEXT NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    response_status INTEGER NOT NULL,
+    response_body_ref TEXT DEFAULT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    CONSTRAINT idempotency_keys_scope_key_unique UNIQUE (scope, key)
+);
 
 ALTER TABLE public.idempotency_keys ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE public.idempotency_keys FROM PUBLIC, anon, authenticated;
-GRANT SELECT ON TABLE public.idempotency_keys TO authenticated;
+REVOKE ALL ON public.idempotency_keys FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.idempotency_keys TO service_role;
 
--- 5. Partial Unique Index for Active Documents (Section 9)
-DROP INDEX IF EXISTS public.idx_driver_documents_active_type;
-CREATE UNIQUE INDEX idx_driver_documents_active_type ON public.driver_documents (driver_id, document_type)
-WHERE (verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED'));
+CREATE INDEX IF NOT EXISTS idx_idempotency_keys_scope_key ON public.idempotency_keys(scope, key);
 
--- 6. Business Creation RPC (brand_name optional, Section 16)
+-- 6. Canonical Audit Logs Table (Section 11)
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    admin_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+    action TEXT NOT NULL CHECK (action IN ('DRIVER_VERIFIED', 'DRIVER_REJECTED')),
+    reason TEXT NOT NULL,
+    ip_address TEXT DEFAULT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.audit_logs FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.audit_logs TO service_role;
+
+-- SELECT policy strictly for super_admin (Section 11)
+CREATE POLICY "Super Admins can read audit logs"
+ON public.audit_logs
+FOR SELECT
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles
+        WHERE id = (SELECT auth.uid())
+          AND platform_role = 'super_admin'
+    )
+);
+
+-- Partial Unique Index on driver_documents (Section 9)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_driver_documents_active_type
+ON public.driver_documents (driver_id, document_type)
+WHERE verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED');
+
+-- 7. Create Business RPC (brand_name optional, Section 16)
 CREATE OR REPLACE FUNCTION public.create_business(
     p_actor_id UUID,
     p_legal_name TEXT,
@@ -122,27 +124,27 @@ BEGIN
         RAISE EXCEPTION 'AUTH_REQUIRED: Valid actor user ID is required';
     END IF;
 
+    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_actor_id) THEN
+        RAISE EXCEPTION 'USER_NOT_FOUND: User does not exist';
+    END IF;
+
     IF EXISTS (
         SELECT 1 FROM public.business_members
-        WHERE user_id = p_actor_id AND role = 'business_owner'
+        WHERE user_id = p_actor_id AND status = 'ACTIVE'
     ) THEN
-        RAISE EXCEPTION 'BUSINESS_ALREADY_EXISTS: User already owns a business entity';
+        RAISE EXCEPTION 'ALREADY_REGISTERED: User is already an active member of a business';
     END IF;
 
     v_clean_legal := NULLIF(pg_catalog.btrim(p_legal_name), '');
     v_clean_brand := NULLIF(pg_catalog.btrim(p_brand_name), '');
-    v_clean_tax := NULLIF(pg_catalog.upper(pg_catalog.btrim(p_tax_id)), '');
+    v_clean_tax := NULLIF(pg_catalog.btrim(p_tax_id), '');
 
     IF v_clean_legal IS NULL THEN
-        RAISE EXCEPTION 'INVALID_ARGUMENT: legal_name is required';
+        RAISE EXCEPTION 'INVALID_ARGUMENT: legal_name is required and cannot be empty';
     END IF;
 
     IF v_clean_tax IS NULL THEN
-        RAISE EXCEPTION 'INVALID_ARGUMENT: tax_id is required';
-    END IF;
-
-    IF EXISTS (SELECT 1 FROM public.businesses WHERE tax_id = v_clean_tax) THEN
-        RAISE EXCEPTION 'TAX_ID_EXISTS: Business with tax_id % already exists', v_clean_tax;
+        RAISE EXCEPTION 'INVALID_ARGUMENT: tax_id is required and cannot be empty';
     END IF;
 
     INSERT INTO public.businesses (
@@ -187,7 +189,7 @@ BEGIN
 END;
 $$;
 
--- 7. Business Location Creation RPC (ACTIVE business check, Section 17 & 18)
+-- 8. Create Business Location RPC (ACTIVE business check & correct columns, Section 17 & 18)
 CREATE OR REPLACE FUNCTION public.create_business_location(
     p_actor_id UUID,
     p_business_id UUID,
@@ -195,7 +197,7 @@ CREATE OR REPLACE FUNCTION public.create_business_location(
     p_address_text TEXT,
     p_latitude DOUBLE PRECISION,
     p_longitude DOUBLE PRECISION,
-    p_phone TEXT DEFAULT NULL
+    p_pickup_instructions TEXT DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -205,7 +207,7 @@ AS $$
 DECLARE
     v_clean_name TEXT;
     v_clean_addr TEXT;
-    v_clean_phone TEXT;
+    v_clean_instructions TEXT;
     v_location_id UUID;
     v_member_role TEXT;
     v_member_id UUID;
@@ -235,13 +237,13 @@ BEGIN
     FROM public.business_members
     WHERE business_id = p_business_id AND user_id = p_actor_id AND status = 'ACTIVE';
 
-    IF v_member_role IS NULL OR v_member_role NOT IN ('business_owner', 'manager') THEN
+    IF v_member_role IS NULL OR v_member_role NOT IN ('business_owner', 'business_manager', 'manager') THEN
         RAISE EXCEPTION 'AUTH_FORBIDDEN: Only active business owners or managers can create locations';
     END IF;
 
     v_clean_name := NULLIF(pg_catalog.btrim(p_location_name), '');
     v_clean_addr := NULLIF(pg_catalog.btrim(p_address_text), '');
-    v_clean_phone := NULLIF(pg_catalog.btrim(p_phone), '');
+    v_clean_instructions := NULLIF(pg_catalog.btrim(p_pickup_instructions), '');
 
     IF v_clean_name IS NULL THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: location_name is required';
@@ -258,24 +260,24 @@ BEGIN
 
     INSERT INTO public.business_locations (
         business_id,
-        location_name,
+        name,
         address_text,
-        location_point,
-        phone,
-        status
+        location,
+        pickup_instructions,
+        is_active
     )
     VALUES (
         p_business_id,
         v_clean_name,
         v_clean_addr,
         extensions.st_setsrid(extensions.st_makepoint(p_longitude, p_latitude), 4326)::extensions.geography,
-        v_clean_phone,
-        'ACTIVE'
+        v_clean_instructions,
+        true
     )
     RETURNING id INTO v_location_id;
 
     -- If created by manager, assign location to manager (Section 18)
-    IF v_member_role = 'manager' THEN
+    IF v_member_role IN ('business_manager', 'manager') THEN
         INSERT INTO public.business_member_locations (business_member_id, business_location_id)
         VALUES (v_member_id, v_location_id)
         ON CONFLICT DO NOTHING;
@@ -288,12 +290,13 @@ BEGIN
         'address_text', v_clean_addr,
         'latitude', p_latitude,
         'longitude', p_longitude,
+        'is_active', true,
         'status', 'ACTIVE'
     );
 END;
 $$;
 
--- 8. Add Business Member RPC (Fail-Closed, Section 19)
+-- 9. Add Business Member RPC (Fail-Closed, Section 19)
 CREATE OR REPLACE FUNCTION public.add_business_member(
     p_actor_id UUID,
     p_business_id UUID,
@@ -307,7 +310,8 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-    v_clean_role TEXT;
+    v_input_role TEXT;
+    v_canonical_role TEXT;
     v_member_id UUID;
     v_loc_id UUID;
     v_biz_status TEXT;
@@ -344,8 +348,12 @@ BEGIN
         RAISE EXCEPTION 'USER_NOT_FOUND: Target user does not exist';
     END IF;
 
-    v_clean_role := pg_catalog.btrim(p_role);
-    IF v_clean_role NOT IN ('manager', 'employee') THEN
+    v_input_role := pg_catalog.btrim(p_role);
+    IF v_input_role IN ('manager', 'business_manager') THEN
+        v_canonical_role := 'business_manager';
+    ELSIF v_input_role IN ('employee', 'business_employee') THEN
+        v_canonical_role := 'business_employee';
+    ELSE
         RAISE EXCEPTION 'INVALID_ARGUMENT: Role must be manager or employee';
     END IF;
 
@@ -365,7 +373,7 @@ BEGIN
     SELECT count(*) INTO v_valid_loc_count
     FROM public.business_locations
     WHERE business_id = p_business_id
-      AND status = 'ACTIVE'
+      AND is_active = true
       AND id = ANY(p_location_ids);
 
     IF v_valid_loc_count <> pg_catalog.cardinality(p_location_ids) THEN
@@ -381,7 +389,7 @@ BEGIN
     VALUES (
         p_business_id,
         p_target_user_id,
-        v_clean_role,
+        v_canonical_role,
         'ACTIVE'
     )
     RETURNING id INTO v_member_id;
@@ -401,14 +409,14 @@ BEGIN
         'business_member_id', v_member_id,
         'business_id', p_business_id,
         'user_id', p_target_user_id,
-        'role', v_clean_role,
+        'role', v_canonical_role,
         'status', 'ACTIVE',
         'location_count', pg_catalog.cardinality(p_location_ids)
     );
 END;
 $$;
 
--- 9. Register Vehicle RPC (Account status gate, Section 24)
+-- 10. Register Vehicle RPC (Account status gate, Section 24)
 CREATE OR REPLACE FUNCTION public.register_vehicle(
     p_actor_id UUID,
     p_make TEXT,
@@ -450,26 +458,29 @@ BEGIN
     v_clean_make := NULLIF(pg_catalog.btrim(p_make), '');
     v_clean_model := NULLIF(pg_catalog.btrim(p_model), '');
     v_clean_color := NULLIF(pg_catalog.btrim(p_color), '');
-    v_clean_plate := NULLIF(pg_catalog.upper(pg_catalog.btrim(p_license_plate)), '');
+    v_clean_plate := NULLIF(pg_catalog.btrim(p_license_plate), '');
 
     IF v_clean_make IS NULL THEN
-        RAISE EXCEPTION 'INVALID_ARGUMENT: vehicle make is required';
+        RAISE EXCEPTION 'INVALID_ARGUMENT: make is required';
     END IF;
     IF v_clean_model IS NULL THEN
-        RAISE EXCEPTION 'INVALID_ARGUMENT: vehicle model is required';
+        RAISE EXCEPTION 'INVALID_ARGUMENT: model is required';
     END IF;
-    IF p_year IS NULL OR p_year < 1980 OR p_year > (EXTRACT(YEAR FROM pg_catalog.now()) + 1) THEN
-        RAISE EXCEPTION 'INVALID_ARGUMENT: vehicle year is invalid';
+    IF p_year IS NULL OR p_year < 1990 OR p_year > 2030 THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: year must be between 1990 and 2030';
     END IF;
     IF v_clean_color IS NULL THEN
-        RAISE EXCEPTION 'INVALID_ARGUMENT: vehicle color is required';
+        RAISE EXCEPTION 'INVALID_ARGUMENT: color is required';
     END IF;
     IF v_clean_plate IS NULL THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: license_plate is required';
     END IF;
 
-    IF EXISTS (SELECT 1 FROM public.vehicles WHERE license_plate = v_clean_plate) THEN
-        RAISE EXCEPTION 'LICENSE_PLATE_EXISTS: Vehicle with license_plate % is already registered', v_clean_plate;
+    IF EXISTS (
+        SELECT 1 FROM public.vehicles
+        WHERE license_plate = v_clean_plate AND driver_id <> p_actor_id
+    ) THEN
+        RAISE EXCEPTION 'DUPLICATE_PLATE: Vehicle license plate is already registered to another driver';
     END IF;
 
     INSERT INTO public.vehicles (
@@ -488,6 +499,12 @@ BEGIN
         v_clean_color,
         v_clean_plate
     )
+    ON CONFLICT (driver_id) DO UPDATE SET
+        make = EXCLUDED.make,
+        model = EXCLUDED.model,
+        year = EXCLUDED.year,
+        color = EXCLUDED.color,
+        license_plate = EXCLUDED.license_plate
     RETURNING id INTO v_vehicle_id;
 
     RETURN jsonb_build_object(
@@ -502,12 +519,12 @@ BEGIN
 END;
 $$;
 
--- 10. Document Upload Authorization RPC (Section 5 & 6)
+-- 11. Authorize Driver Document Upload RPC (Section 3 & 4)
 CREATE OR REPLACE FUNCTION public.authorize_driver_document_upload(
     p_actor_id UUID,
     p_document_type TEXT,
     p_mime_type TEXT,
-    p_size_bytes BIGINT
+    p_file_size BIGINT
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -520,44 +537,42 @@ DECLARE
     v_upload_id UUID;
     v_storage_path TEXT;
     v_expires_at TIMESTAMPTZ;
-    v_driver_acc TEXT;
+    v_file_ext TEXT;
 BEGIN
     IF p_actor_id IS NULL THEN
         RAISE EXCEPTION 'AUTH_REQUIRED: Valid actor user ID is required';
     END IF;
 
-    SELECT account_status INTO v_driver_acc
-    FROM public.drivers
-    WHERE id = p_actor_id;
-
-    IF v_driver_acc IS NULL THEN
-        RAISE EXCEPTION 'DRIVER_NOT_FOUND: Driver profile must exist before authorizing document upload';
+    IF NOT EXISTS (SELECT 1 FROM public.drivers WHERE id = p_actor_id) THEN
+        RAISE EXCEPTION 'DRIVER_NOT_FOUND: Driver profile does not exist';
     END IF;
 
-    IF v_driver_acc IN ('SUSPENDED', 'BLOCKED', 'CLOSED') THEN
-        RAISE EXCEPTION 'ACCOUNT_RESTRICTED: Restricted drivers cannot upload documents';
+    v_clean_type := pg_catalog.btrim(p_document_type);
+    IF v_clean_type NOT IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION') THEN
+        RAISE EXCEPTION 'INVALID_DOCUMENT_TYPE: Allowed types are NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION';
     END IF;
 
-    v_clean_type := pg_catalog.upper(pg_catalog.btrim(p_document_type));
-    v_clean_mime := pg_catalog.lower(pg_catalog.btrim(p_mime_type));
-
-    IF v_clean_type NOT IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION', 'CRIMINAL_RECORD', 'INSURANCE') THEN
-        RAISE EXCEPTION 'INVALID_ARGUMENT: Invalid document_type';
-    END IF;
-
-    -- Strict allowed MIME types (Section 4: ONLY jpeg, png, pdf)
+    v_clean_mime := pg_catalog.btrim(p_mime_type);
+    -- Strict MIME allowlist: image/jpeg, image/png, application/pdf ONLY (webp is DENIED, Section 4)
     IF v_clean_mime NOT IN ('image/jpeg', 'image/png', 'application/pdf') THEN
         RAISE EXCEPTION 'INVALID_MIME_TYPE: Allowed document MIME types are image/jpeg, image/png, application/pdf';
     END IF;
 
-    IF p_size_bytes IS NULL OR p_size_bytes < 1 OR p_size_bytes > 10485760 THEN
+    IF p_file_size IS NULL OR p_file_size <= 0 OR p_file_size > 10485760 THEN
         RAISE EXCEPTION 'INVALID_FILE_SIZE: File size must be between 1 byte and 10MB';
     END IF;
 
+    IF v_clean_mime = 'image/jpeg' THEN
+        v_file_ext := 'jpg';
+    ELSIF v_clean_mime = 'image/png' THEN
+        v_file_ext := 'png';
+    ELSE
+        v_file_ext := 'pdf';
+    END IF;
+
     v_upload_id := gen_random_uuid();
-    v_storage_path := p_actor_id::text || '/' || v_clean_type || '/' || v_upload_id::text;
-    -- TTL <= 15 minutes (Section 6)
-    v_expires_at := pg_catalog.now() + interval '15 minutes';
+    v_storage_path := p_actor_id::text || '/' || pg_catalog.lower(v_clean_type) || '_' || v_upload_id::text || '.' || v_file_ext;
+    v_expires_at := NOW() + interval '15 minutes';
 
     INSERT INTO private.driver_document_upload_authorizations (
         upload_id,
@@ -574,22 +589,22 @@ BEGIN
         v_clean_type,
         v_storage_path,
         v_clean_mime,
-        p_size_bytes,
+        p_file_size,
         v_expires_at
     );
 
     RETURN jsonb_build_object(
         'upload_id', v_upload_id,
-        'driver_id', p_actor_id,
-        'document_type', v_clean_type,
         'storage_path', v_storage_path,
+        'expires_at', v_expires_at,
+        'document_type', v_clean_type,
         'mime_type', v_clean_mime,
-        'expires_at', v_expires_at
+        'max_size_bytes', p_file_size
     );
 END;
 $$;
 
--- 11. Document Commit RPC (by upload_id, Fail-Closed, Section 7 & 10)
+-- 12. Commit Driver Document RPC (Validates against authorization, preserves rejected history, Section 5 & 10)
 CREATE OR REPLACE FUNCTION public.commit_driver_document(
     p_actor_id UUID,
     p_upload_id UUID,
@@ -604,112 +619,88 @@ SET search_path = ''
 AS $$
 DECLARE
     v_auth_record RECORD;
-    v_clean_type TEXT;
-    v_clean_mime TEXT;
     v_doc_id UUID;
-    v_driver_status TEXT;
 BEGIN
     IF p_actor_id IS NULL THEN
         RAISE EXCEPTION 'AUTH_REQUIRED: Valid actor user ID is required';
     END IF;
 
-    SELECT verification_status INTO v_driver_status
-    FROM public.drivers
-    WHERE id = p_actor_id;
-
-    IF v_driver_status IS NULL THEN
-        RAISE EXCEPTION 'DRIVER_NOT_FOUND: Driver profile must exist before committing documents';
-    END IF;
-
-    v_clean_type := pg_catalog.upper(pg_catalog.btrim(p_document_type));
-    v_clean_mime := pg_catalog.lower(pg_catalog.btrim(p_mime_type));
-
-    -- Look up authorization in private schema
     SELECT * INTO v_auth_record
     FROM private.driver_document_upload_authorizations
-    WHERE upload_id = p_upload_id AND driver_id = p_actor_id;
+    WHERE upload_id = p_upload_id;
 
-    IF v_auth_record.upload_id IS NULL THEN
-        RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Valid upload authorization not found';
+    IF v_auth_record.id IS NULL THEN
+        RAISE EXCEPTION 'UPLOAD_UNAUTHORIZED: Upload authorization not found';
     END IF;
 
-    IF v_auth_record.document_type <> v_clean_type THEN
-        RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Document type does not match authorized upload';
+    IF v_auth_record.driver_id <> p_actor_id THEN
+        RAISE EXCEPTION 'AUTH_FORBIDDEN: Upload authorization belongs to another driver';
     END IF;
 
-    IF v_auth_record.expires_at < pg_catalog.now() THEN
-        RAISE EXCEPTION 'EXPIRED_UPLOAD_REF: Upload authorization has expired';
+    IF v_auth_record.expires_at < NOW() THEN
+        RAISE EXCEPTION 'UPLOAD_EXPIRED: Upload authorization has expired';
     END IF;
 
     IF v_auth_record.committed_at IS NOT NULL THEN
         RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Upload authorization has already been committed';
     END IF;
 
-    -- Fail-closed size and MIME checks (Section 7)
-    IF p_file_size IS NULL OR p_file_size <= 0 OR p_file_size > v_auth_record.max_size_bytes OR p_file_size > 10485760 THEN
-        RAISE EXCEPTION 'INVALID_FILE_SIZE: Uploaded file size is invalid or exceeds authorized size';
+    IF v_auth_record.document_type <> p_document_type THEN
+        RAISE EXCEPTION 'DOCUMENT_TYPE_MISMATCH: Declared document type does not match authorization';
     END IF;
 
-    IF v_clean_mime <> v_auth_record.mime_type OR v_clean_mime NOT IN ('image/jpeg', 'image/png', 'application/pdf') THEN
-        RAISE EXCEPTION 'INVALID_MIME_TYPE: Uploaded file MIME type does not match authorized MIME type';
-    END IF;
+    -- Delete any existing non-rejected active record for this document type (Section 9)
+    DELETE FROM public.driver_documents
+    WHERE driver_id = p_actor_id
+      AND document_type = p_document_type
+      AND verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED');
 
-    -- Active duplicate check (Section 10)
-    IF EXISTS (
-        SELECT 1 FROM public.driver_documents
-        WHERE driver_id = p_actor_id
-          AND document_type = v_clean_type
-          AND verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED')
-    ) THEN
-        RAISE EXCEPTION 'DOCUMENT_ALREADY_SUBMITTED: Active document already exists for this document type';
-    END IF;
-
-    -- Insert new document record (preserving historical rejected records)
     INSERT INTO public.driver_documents (
         driver_id,
         document_type,
         storage_path,
-        verification_status,
-        rejection_reason
+        file_size,
+        mime_type,
+        verification_status
     )
     VALUES (
         p_actor_id,
-        v_clean_type,
+        p_document_type,
         v_auth_record.storage_path,
-        'PENDING',
-        NULL
+        p_file_size,
+        p_mime_type,
+        'PENDING'
     )
     RETURNING id INTO v_doc_id;
 
-    -- Mark authorization as committed
+    -- Mark authorization committed
     UPDATE private.driver_document_upload_authorizations
-    SET committed_at = pg_catalog.now()
-    WHERE upload_id = p_upload_id;
+    SET committed_at = NOW()
+    WHERE id = v_auth_record.id;
 
-    -- If driver was REJECTED, reset driver to PENDING
-    IF v_driver_status = 'REJECTED' THEN
-        UPDATE public.drivers
-        SET verification_status = 'PENDING'
-        WHERE id = p_actor_id;
-    END IF;
+    -- Reset driver verification status to PENDING if previously REJECTED
+    UPDATE public.drivers
+    SET verification_status = 'PENDING',
+        updated_at = NOW()
+    WHERE id = p_actor_id AND verification_status = 'REJECTED';
 
     RETURN jsonb_build_object(
         'document_id', v_doc_id,
         'driver_id', p_actor_id,
-        'document_type', v_clean_type,
+        'document_type', p_document_type,
         'storage_path', v_auth_record.storage_path,
         'verification_status', 'PENDING'
     );
 END;
 $$;
 
--- 12. Admin Driver Verification RPC (No role override, Canonical Audit, Section 11 & 27)
+-- 13. Admin Verify Driver RPC (Canonical Audit, Direct Role Lookup, Section 11 & 12)
 CREATE OR REPLACE FUNCTION public.admin_verify_driver(
     p_actor_id UUID,
     p_driver_id UUID,
     p_decision TEXT,
     p_rejection_reason TEXT DEFAULT NULL,
-    p_actor_aal TEXT DEFAULT NULL
+    p_actor_aal TEXT DEFAULT 'aal1'
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -719,71 +710,80 @@ AS $$
 DECLARE
     v_clean_decision TEXT;
     v_clean_reason TEXT;
-    v_doc_count BIGINT;
-    v_has_vehicle BOOLEAN;
-    v_actual_role TEXT;
+    v_actor_role TEXT;
+    v_current_ver_status TEXT;
+    v_current_acc_status TEXT;
+    v_mandatory_doc_count BIGINT;
+    v_vehicle_count BIGINT;
 BEGIN
     IF p_actor_id IS NULL THEN
-        RAISE EXCEPTION 'AUTH_REQUIRED: Authentication required';
+        RAISE EXCEPTION 'AUTH_REQUIRED: Valid admin user ID is required';
     END IF;
 
-    -- Direct DB lookup for role: No client override allowed (Section 27)
-    SELECT platform_role INTO v_actual_role
+    -- Direct role lookup from profiles (Section 12)
+    SELECT platform_role INTO v_actor_role
     FROM public.profiles
     WHERE id = p_actor_id;
 
-    IF v_actual_role IS NULL OR v_actual_role NOT IN ('super_admin', 'admin', 'verification_agent') THEN
+    IF v_actor_role IS NULL OR v_actor_role NOT IN ('super_admin', 'admin', 'verification_agent') THEN
         RAISE EXCEPTION 'AUTH_ADMIN_ROLE_REQUIRED: Only verification_agent, admin or super_admin can verify drivers';
     END IF;
 
-    -- Check MFA AAL2
     IF p_actor_aal IS NULL OR p_actor_aal <> 'aal2' THEN
         RAISE EXCEPTION 'AUTH_MFA_REQUIRED: AAL2 MFA is required for administrative verification';
     END IF;
 
-    -- Check target driver existence
-    IF NOT EXISTS (SELECT 1 FROM public.drivers WHERE id = p_driver_id) THEN
-        RAISE EXCEPTION 'DRIVER_NOT_FOUND: Target driver does not exist';
+    SELECT verification_status, account_status
+    INTO v_current_ver_status, v_current_acc_status
+    FROM public.drivers
+    WHERE id = p_driver_id;
+
+    IF v_current_ver_status IS NULL THEN
+        RAISE EXCEPTION 'DRIVER_NOT_FOUND: Driver does not exist';
     END IF;
 
     v_clean_decision := pg_catalog.upper(pg_catalog.btrim(p_decision));
-    v_clean_reason := NULLIF(pg_catalog.btrim(p_rejection_reason), '');
+    IF v_clean_decision NOT IN ('APPROVE', 'REJECT') THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: Decision must be APPROVE or REJECT';
+    END IF;
 
     IF v_clean_decision = 'APPROVE' THEN
-        -- Verify registered vehicle
-        SELECT EXISTS (SELECT 1 FROM public.vehicles WHERE driver_id = p_driver_id) INTO v_has_vehicle;
-        IF NOT v_has_vehicle THEN
-            RAISE EXCEPTION 'DOCUMENTATION_INCOMPLETE: Driver must have a registered vehicle before approval';
+        -- Check vehicle exists (Section 14)
+        SELECT count(*) INTO v_vehicle_count
+        FROM public.vehicles
+        WHERE driver_id = p_driver_id;
+
+        IF v_vehicle_count = 0 THEN
+            RAISE EXCEPTION 'VEHICLE_MISSING: Driver must have at least one registered vehicle to be approved';
         END IF;
 
-        -- Verify all 3 required active documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)
-        SELECT count(DISTINCT document_type) INTO v_doc_count
+        -- Check all 3 mandatory documents exist with status PENDING/UNDER_REVIEW/VERIFIED (Section 14)
+        SELECT count(DISTINCT document_type) INTO v_mandatory_doc_count
         FROM public.driver_documents
         WHERE driver_id = p_driver_id
           AND document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION')
           AND verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED');
 
-        IF v_doc_count < 3 THEN
+        IF v_mandatory_doc_count < 3 THEN
             RAISE EXCEPTION 'DOCUMENTATION_INCOMPLETE: Driver must have all 3 mandatory documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)';
         END IF;
 
-        -- Update driver status
-        UPDATE public.drivers
-        SET verification_status = 'VERIFIED',
-            account_status = 'ACTIVE'
-        WHERE id = p_driver_id;
-
-        UPDATE public.driver_presence
-        SET operational_state = 'OFFLINE'
-        WHERE driver_id = p_driver_id;
-
-        -- Only approve current pending/under_review documents; historical REJECTED rows remain REJECTED (Section 10)
+        -- Update driver documents to VERIFIED (only active ones)
         UPDATE public.driver_documents
         SET verification_status = 'VERIFIED',
-            rejection_reason = NULL
-        WHERE driver_id = p_driver_id AND verification_status IN ('PENDING', 'UNDER_REVIEW');
+            reviewed_at = NOW(),
+            reviewed_by = p_actor_id
+        WHERE driver_id = p_driver_id
+          AND verification_status IN ('PENDING', 'UNDER_REVIEW');
 
-        -- Canonical audit log: DRIVER_VERIFIED (Section 11)
+        -- Update driver record
+        UPDATE public.drivers
+        SET verification_status = 'VERIFIED',
+            account_status = 'ACTIVE',
+            updated_at = NOW()
+        WHERE id = p_driver_id;
+
+        -- Insert Canonical Audit Log (Section 11)
         INSERT INTO public.audit_logs (
             admin_user_id,
             action,
@@ -797,29 +797,30 @@ BEGIN
 
         RETURN jsonb_build_object(
             'driver_id', p_driver_id,
+            'decision', 'APPROVE',
             'verification_status', 'VERIFIED',
-            'account_status', 'ACTIVE',
-            'operational_state', 'OFFLINE'
+            'account_status', 'ACTIVE'
         );
-
-    ELSIF v_clean_decision = 'REJECT' THEN
-        IF v_clean_reason IS NULL OR pg_catalog.length(v_clean_reason) < 3 THEN
-            RAISE EXCEPTION 'INVALID_ARGUMENT: rejection_reason is required and must be at least 3 characters when rejecting driver';
+    ELSE
+        v_clean_reason := NULLIF(pg_catalog.btrim(p_rejection_reason), '');
+        IF v_clean_reason IS NULL THEN
+            RAISE EXCEPTION 'INVALID_ARGUMENT: rejection_reason is mandatory when rejecting a driver';
         END IF;
 
-        -- Transition driver to REJECTED + REGISTERED
-        UPDATE public.drivers
-        SET verification_status = 'REJECTED',
-            account_status = 'REGISTERED'
-        WHERE id = p_driver_id;
-
-        -- Reject current pending/under_review documents
+        -- Update current active documents to REJECTED (historical preservation, Section 10)
         UPDATE public.driver_documents
         SET verification_status = 'REJECTED',
-            rejection_reason = v_clean_reason
-        WHERE driver_id = p_driver_id AND verification_status IN ('PENDING', 'UNDER_REVIEW');
+            reviewed_at = NOW(),
+            reviewed_by = p_actor_id
+        WHERE driver_id = p_driver_id
+          AND verification_status IN ('PENDING', 'UNDER_REVIEW');
 
-        -- Canonical audit log: DRIVER_REJECTED (Section 11)
+        UPDATE public.drivers
+        SET verification_status = 'REJECTED',
+            updated_at = NOW()
+        WHERE id = p_driver_id;
+
+        -- Insert Canonical Audit Log (Section 11)
         INSERT INTO public.audit_logs (
             admin_user_id,
             action,
@@ -833,24 +834,22 @@ BEGIN
 
         RETURN jsonb_build_object(
             'driver_id', p_driver_id,
+            'decision', 'REJECT',
             'verification_status', 'REJECTED',
-            'account_status', 'REGISTERED',
             'rejection_reason', v_clean_reason
         );
-    ELSE
-        RAISE EXCEPTION 'INVALID_ARGUMENT: decision must be APPROVE or REJECT';
     END IF;
 END;
 $$;
 
--- 13. Transactional Advisory-Locked Idempotency RPC (Section 14 & 15)
+-- 14. Execute Idempotent Operation Wrapper (Single Transaction & Advisory Lock, Section 8)
 CREATE OR REPLACE FUNCTION public.execute_idempotent_operation(
-    p_actor_id UUID,
+    p_actor_user_id UUID,
     p_scope TEXT,
     p_key TEXT,
-    p_fingerprint TEXT,
-    p_operation TEXT,
-    p_args JSONB
+    p_request_fingerprint TEXT,
+    p_operation_fn TEXT,
+    p_operation_params JSONB
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -858,130 +857,129 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-    v_existing_id UUID;
-    v_existing_fp TEXT;
-    v_existing_status INTEGER;
-    v_existing_ref TEXT;
-    v_cached_body JSONB;
-    v_res_json JSONB;
-    v_status INTEGER;
-    v_ref_id TEXT;
+    v_lock_key BIGINT;
+    v_cached RECORD;
+    v_result JSONB;
+    v_status INTEGER := 200;
+    v_expires_at TIMESTAMPTZ;
 BEGIN
-    IF p_key IS NULL OR pg_catalog.btrim(p_key) = '' THEN
-        RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: Idempotency-Key is required';
+    IF p_key IS NULL OR p_scope IS NULL THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: key and scope are required';
     END IF;
 
-    -- Enforce advisory transaction lock on hash of scope:key (Section 15)
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(p_scope || ':' || p_key));
+    -- Compute stable 64-bit advisory lock key from scope + key
+    v_lock_key := ('x' || pg_catalog.substr(pg_catalog.md5(p_scope || ':' || p_key), 1, 16))::bit(64)::bigint;
+    PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
 
-    -- Check if key exists
-    SELECT id, request_fingerprint, response_status, response_body_ref
-    INTO v_existing_id, v_existing_fp, v_existing_status, v_existing_ref
-    FROM public.idempotency_keys
-    WHERE scope = p_scope AND key = p_key AND expires_at > pg_catalog.now();
-
-    IF v_existing_id IS NOT NULL THEN
-        -- Check fingerprint match
-        IF v_existing_fp <> p_fingerprint THEN
-            RAISE EXCEPTION 'IDEMPOTENCY_FINGERPRINT_MISMATCH: Request payload fingerprint does not match original request';
-        END IF;
-
-        -- Replay cached response
-        SELECT response_json INTO v_cached_body
-        FROM private.idempotency_responses
-        WHERE ref_id = v_existing_ref;
-
-        RETURN jsonb_build_object(
-            'is_cached', true,
-            'response_status', v_existing_status,
-            'response_body', COALESCE(v_cached_body, '{}'::jsonb)
-        );
-    END IF;
-
-    -- Delete any expired key with same scope and key
-    DELETE FROM public.idempotency_keys
+    -- Check if already executed
+    SELECT * INTO v_cached
+    FROM private.idempotency_responses
     WHERE scope = p_scope AND key = p_key;
 
-    -- Execute requested operation
-    IF p_operation = 'create_business' THEN
-        v_res_json := public.create_business(
-            p_actor_id,
-            p_args->>'legal_name',
-            p_args->>'brand_name',
-            p_args->>'tax_id'
-        );
-        v_status := 201;
+    IF v_cached.id IS NOT NULL THEN
+        -- Fingerprint validation (Section 7)
+        IF v_cached.request_fingerprint <> p_request_fingerprint THEN
+            RAISE EXCEPTION 'IDEMPOTENCY_FINGERPRINT_MISMATCH: Idempotency key reused with different request payload';
+        END IF;
 
-    ELSIF p_operation = 'create_business_location' THEN
-        v_res_json := public.create_business_location(
-            p_actor_id,
-            (p_args->>'business_id')::uuid,
-            p_args->>'location_name',
-            p_args->>'address_text',
-            (p_args->>'latitude')::double precision,
-            (p_args->>'longitude')::double precision,
-            p_args->>'phone'
+        RETURN jsonb_build_object(
+            'cached', true,
+            'status', v_cached.response_status,
+            'body', v_cached.response_body
         );
-        v_status := 201;
-
-    ELSIF p_operation = 'add_business_member' THEN
-        v_res_json := public.add_business_member(
-            p_actor_id,
-            (p_args->>'business_id')::uuid,
-            (p_args->>'target_user_id')::uuid,
-            p_args->>'role',
-            ARRAY(SELECT jsonb_array_elements_text(p_args->'location_ids')::uuid)
-        );
-        v_status := 201;
-
-    ELSIF p_operation = 'register_driver' THEN
-        v_res_json := public.register_driver(
-            p_actor_id,
-            p_args->>'national_id_number',
-            p_args->>'license_number'
-        );
-        v_status := 201;
-
-    ELSIF p_operation = 'register_vehicle' THEN
-        v_res_json := public.register_vehicle(
-            p_actor_id,
-            p_args->>'make',
-            p_args->>'model',
-            (p_args->>'year')::integer,
-            p_args->>'color',
-            p_args->>'license_plate'
-        );
-        v_status := 201;
-
-    ELSIF p_operation = 'commit_driver_document' THEN
-        v_res_json := public.commit_driver_document(
-            p_actor_id,
-            (p_args->>'upload_id')::uuid,
-            p_args->>'document_type',
-            (p_args->>'file_size')::bigint,
-            p_args->>'mime_type'
-        );
-        v_status := 200;
-
-    ELSIF p_operation = 'admin_verify_driver' THEN
-        v_res_json := public.admin_verify_driver(
-            p_actor_id,
-            (p_args->>'driver_id')::uuid,
-            p_args->>'decision',
-            p_args->>'rejection_reason',
-            p_args->>'actor_aal'
-        );
-        v_status := 200;
-
-    ELSE
-        RAISE EXCEPTION 'INVALID_OPERATION: Operation % is not supported', p_operation;
     END IF;
 
-    -- Store response ref in same transaction
-    v_ref_id := gen_random_uuid()::text;
-    INSERT INTO private.idempotency_responses (ref_id, response_status, response_json)
-    VALUES (v_ref_id, v_status, v_res_json);
+    -- Execute specific operation
+    IF p_operation_fn = 'create_business' THEN
+        v_result := public.create_business(
+            p_actor_user_id,
+            p_operation_params->>'legal_name',
+            p_operation_params->>'brand_name',
+            p_operation_params->>'tax_id'
+        );
+        v_status := 201;
+    ELSIF p_operation_fn = 'create_business_location' THEN
+        v_result := public.create_business_location(
+            p_actor_user_id,
+            (p_operation_params->>'business_id')::uuid,
+            p_operation_params->>'location_name',
+            p_operation_params->>'address_text',
+            (p_operation_params->>'latitude')::double precision,
+            (p_operation_params->>'longitude')::double precision,
+            p_operation_params->>'pickup_instructions'
+        );
+        v_status := 201;
+    ELSIF p_operation_fn = 'add_business_member' THEN
+        v_result := public.add_business_member(
+            p_actor_user_id,
+            (p_operation_params->>'business_id')::uuid,
+            (p_operation_params->>'target_user_id')::uuid,
+            p_operation_params->>'role',
+            ARRAY(SELECT jsonb_array_elements_text(p_operation_params->'location_ids')::uuid)
+        );
+        v_status := 201;
+    ELSIF p_operation_fn = 'register_driver' THEN
+        v_result := public.register_driver(
+            p_actor_user_id,
+            p_operation_params->>'national_id_number',
+            p_operation_params->>'license_number'
+        );
+        v_status := 201;
+    ELSIF p_operation_fn = 'register_vehicle' THEN
+        v_result := public.register_vehicle(
+            p_actor_user_id,
+            p_operation_params->>'make',
+            p_operation_params->>'model',
+            (p_operation_params->>'year')::integer,
+            p_operation_params->>'color',
+            p_operation_params->>'license_plate'
+        );
+        v_status := 201;
+    ELSIF p_operation_fn = 'commit_driver_document' THEN
+        v_result := public.commit_driver_document(
+            p_actor_user_id,
+            (p_operation_params->>'upload_id')::uuid,
+            p_operation_params->>'document_type',
+            (p_operation_params->>'file_size')::bigint,
+            p_operation_params->>'mime_type'
+        );
+        v_status := 200;
+    ELSIF p_operation_fn = 'admin_verify_driver' THEN
+        v_result := public.admin_verify_driver(
+            p_actor_user_id,
+            (p_operation_params->>'driver_id')::uuid,
+            p_operation_params->>'decision',
+            p_operation_params->>'rejection_reason',
+            p_operation_params->>'actor_aal'
+        );
+        v_status := 200;
+    ELSE
+        RAISE EXCEPTION 'UNKNOWN_OPERATION: Operation % is not supported', p_operation_fn;
+    END IF;
 
+    v_expires_at := NOW() + interval '24 hours';
+
+    -- Atomic persistence into private response cache (Section 8)
+    INSERT INTO private.idempotency_responses (
+        actor_user_id,
+        scope,
+        key,
+        request_fingerprint,
+        response_status,
+        response_body,
+        expires_at
+    )
+    VALUES (
+        p_actor_user_id,
+        p_scope,
+        p_key,
+        p_request_fingerprint,
+        v_status,
+        v_result,
+        v_expires_at
+    );
+
+    -- Also mirror to canonical public table
     INSERT INTO public.idempotency_keys (
         actor_type,
         actor_user_id,
@@ -989,29 +987,30 @@ BEGIN
         key,
         request_fingerprint,
         response_status,
-        response_body_ref,
         expires_at
     )
     VALUES (
-        'USER',
-        p_actor_id,
+        'user',
+        p_actor_user_id,
         p_scope,
         p_key,
-        p_fingerprint,
+        p_request_fingerprint,
         v_status,
-        v_ref_id,
-        pg_catalog.now() + interval '24 hours'
-    );
+        v_expires_at
+    )
+    ON CONFLICT (scope, key) DO UPDATE SET
+        response_status = EXCLUDED.response_status,
+        request_fingerprint = EXCLUDED.request_fingerprint;
 
     RETURN jsonb_build_object(
-        'is_cached', false,
-        'response_status', v_status,
-        'response_body', v_res_json
+        'cached', false,
+        'status', v_status,
+        'body', v_result
     );
 END;
 $$;
 
--- 14. Revoke/Grant Security Matrix
+-- 15. Revoke direct execution on all sensitive RPCs from PUBLIC, anon, and authenticated (Section 13)
 REVOKE EXECUTE ON FUNCTION public.create_business(UUID, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.create_business_location(UUID, UUID, TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.add_business_member(UUID, UUID, UUID, TEXT, UUID[]) FROM PUBLIC, anon, authenticated;
@@ -1022,6 +1021,7 @@ REVOKE EXECUTE ON FUNCTION public.commit_driver_document(UUID, UUID, TEXT, BIGIN
 REVOKE EXECUTE ON FUNCTION public.admin_verify_driver(UUID, UUID, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
 
+-- Grant EXECUTE to service_role only
 GRANT EXECUTE ON FUNCTION public.create_business(UUID, TEXT, TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.create_business_location(UUID, UUID, TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.add_business_member(UUID, UUID, UUID, TEXT, UUID[]) TO service_role;
@@ -1031,3 +1031,5 @@ GRANT EXECUTE ON FUNCTION public.authorize_driver_document_upload(UUID, TEXT, TE
 GRANT EXECUTE ON FUNCTION public.commit_driver_document(UUID, UUID, TEXT, BIGINT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.admin_verify_driver(UUID, UUID, TEXT, TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) TO service_role;
+
+COMMIT;

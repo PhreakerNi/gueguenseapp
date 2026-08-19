@@ -195,12 +195,12 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await serviceClient.rpc(
         "execute_idempotent_operation",
         {
-          p_actor_id: userId,
+          p_actor_user_id: userId,
           p_scope: scope,
           p_key: idempotencyKey,
-          p_fingerprint: fingerprint,
-          p_operation: operation,
-          p_args: operationArgs,
+          p_request_fingerprint: fingerprint,
+          p_operation_fn: operation,
+          p_operation_params: operationArgs,
         },
       );
 
@@ -280,9 +280,9 @@ Deno.serve(async (req: Request) => {
         return errorResponse(errCode, errMsg, 400);
       }
 
-      const isCached = data?.is_cached === true;
-      const status = data?.response_status || 200;
-      const resBody = data?.response_body || {};
+      const isCached = data?.cached === true;
+      const status = data?.status || 200;
+      const resBody = data?.body || {};
 
       return jsonResponse(
         resBody,

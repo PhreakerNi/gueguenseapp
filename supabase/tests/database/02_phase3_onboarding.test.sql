@@ -127,7 +127,7 @@ SELECT public.create_business_location(
 );
 
 SELECT is(
-    (SELECT location_name FROM public.business_locations WHERE address_text = 'Calle Principal #123, Managua'),
+    (SELECT name FROM public.business_locations WHERE address_text = 'Calle Principal #123, Managua'),
     'Sucursal Central',
     'First branch created separately with correct name'
 );
