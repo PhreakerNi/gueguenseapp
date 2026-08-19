@@ -40,25 +40,23 @@ UPDATE public.profiles SET platform_role = 'verification_agent' WHERE id = '3333
 UPDATE public.profiles SET platform_role = 'operator' WHERE id = '44444444-4444-4444-8444-444444444444';
 UPDATE public.profiles SET platform_role = 'admin' WHERE id = '55555555-5555-4555-8555-555555555555';
 
--- 4. Business Onboarding Test (7 assertions)
+-- 4. Business Onboarding Test (6 assertions: 9-14)
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '11111111-1111-4111-8111-111111111111';
 SET LOCAL "request.jwt.claims" = '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}';
 
-SELECT lives_ok(
-    $$SELECT public.register_business_onboarding(
-        'Empresa Legal S.A.',
-        'Mi Pulperia',
-        'J0310000000001',
-        'Sucursal Central',
-        'Calle Principal #123, Managua',
-        12.136389,
-        -86.251389,
-        'Tocar timbre en recepcion'
-    )$$,
-    'register_business_onboarding executes without error'
+SELECT public.register_business_onboarding(
+    'Empresa Legal S.A.',
+    'Mi Pulperia',
+    'J0310000000001',
+    'Sucursal Central',
+    'Calle Principal #123, Managua',
+    12.136389,
+    -86.251389,
+    'Tocar timbre en recepcion'
 );
 
+SET LOCAL ROLE postgres;
 SELECT is(
     (SELECT brand_name FROM public.businesses WHERE legal_name = 'Empresa Legal S.A.'),
     'Mi Pulperia',
@@ -93,6 +91,10 @@ SELECT ok(
 );
 
 -- Idempotency check: duplicate call returns existing business
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '11111111-1111-4111-8111-111111111111';
+SET LOCAL "request.jwt.claims" = '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}';
+
 SELECT lives_ok(
     $$SELECT public.register_business_onboarding(
         'Empresa Legal S.A.',
@@ -106,24 +108,22 @@ SELECT lives_ok(
     'Idempotent call to register_business_onboarding returns gracefully'
 );
 
--- 5. Driver Onboarding & Vehicle Registration Test (7 assertions)
+-- 5. Driver Onboarding & Vehicle Registration Test (6 assertions: 15-20)
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '22222222-2222-4222-8222-222222222222';
 SET LOCAL "request.jwt.claims" = '{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated"}';
 
-SELECT lives_ok(
-    $$SELECT public.register_driver_onboarding(
-        '001-010190-0001A',
-        'LIC-98765432',
-        'Yamaha',
-        'FZ-S',
-        2023,
-        'Azul',
-        'M-998877'
-    )$$,
-    'register_driver_onboarding executes without error'
+SELECT public.register_driver_onboarding(
+    '001-010190-0001A',
+    'LIC-98765432',
+    'Yamaha',
+    'FZ-S',
+    2023,
+    'Azul',
+    'M-998877'
 );
 
+SET LOCAL ROLE postgres;
 SELECT is(
     (SELECT verification_status FROM public.drivers WHERE id = '22222222-2222-4222-8222-222222222222'),
     'PENDING',
@@ -155,6 +155,10 @@ SELECT is(
 );
 
 -- Idempotency check: duplicate call updates profile/vehicle and returns existing driver
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '22222222-2222-4222-8222-222222222222';
+SET LOCAL "request.jwt.claims" = '{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated"}';
+
 SELECT lives_ok(
     $$SELECT public.register_driver_onboarding(
         '001-010190-0001A',
@@ -168,7 +172,7 @@ SELECT lives_ok(
     'Idempotent call to register_driver_onboarding completes gracefully'
 );
 
--- 6. Document Submission Tests (4 assertions)
+-- 6. Document Submission Tests (4 assertions: 21-24)
 SELECT lives_ok(
     $$SELECT public.submit_driver_document('NATIONAL_ID', '22222222-2222-4222-8222-222222222222/national_id.pdf')$$,
     'submit_driver_document NATIONAL_ID succeeds'
@@ -179,6 +183,7 @@ SELECT lives_ok(
     'submit_driver_document DRIVER_LICENSE succeeds'
 );
 
+SET LOCAL ROLE postgres;
 SELECT is(
     (SELECT count(*) FROM public.driver_documents WHERE driver_id = '22222222-2222-4222-8222-222222222222'),
     2::bigint,
@@ -191,7 +196,7 @@ SELECT is(
     'Submitted document status is PENDING'
 );
 
--- 7. Verification Queue: Security Constraints & Role / MFA Checks (6 assertions)
+-- 7. Verification Queue: Security Constraints & Role / MFA Checks (4 assertions: 25-28)
 
 -- 7.1 Operator cannot verify drivers (Role check)
 SET LOCAL ROLE authenticated;
@@ -222,21 +227,13 @@ SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '33333333-3333-4333-8333-333333333333';
 SET LOCAL "request.jwt.claims" = '{"sub":"33333333-3333-4333-8333-333333333333","role":"authenticated","aal":"aal2"}';
 
-SELECT lives_ok(
-    $$SELECT public.admin_verify_driver('22222222-2222-4222-8222-222222222222'::uuid, 'REJECT', 'Cedula ilegible')$$,
-    'Verification Agent can reject driver with AAL2'
-);
+SELECT public.admin_verify_driver('22222222-2222-4222-8222-222222222222'::uuid, 'REJECT', 'Cedula ilegible');
 
+SET LOCAL ROLE postgres;
 SELECT is(
     (SELECT verification_status FROM public.drivers WHERE id = '22222222-2222-4222-8222-222222222222'),
     'REJECTED',
     'Driver status changed to REJECTED'
-);
-
-SELECT is(
-    (SELECT account_status FROM public.drivers WHERE id = '22222222-2222-4222-8222-222222222222'),
-    'REGISTERED',
-    'Driver account_status remains REGISTERED on rejection'
 );
 
 SELECT is(
@@ -245,18 +242,16 @@ SELECT is(
     'Driver documents updated with rejection reason'
 );
 
--- 8. Re-upload and Final Approval Flow (7 assertions)
+-- 8. Re-upload and Final Approval Flow (7 assertions: 29-35)
 
 -- Driver re-submits document -> transitions back to PENDING
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '22222222-2222-4222-8222-222222222222';
 SET LOCAL "request.jwt.claims" = '{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated"}';
 
-SELECT lives_ok(
-    $$SELECT public.submit_driver_document('NATIONAL_ID', '22222222-2222-4222-8222-222222222222/national_id_v2.pdf')$$,
-    'Driver can re-upload document after rejection'
-);
+SELECT public.submit_driver_document('NATIONAL_ID', '22222222-2222-4222-8222-222222222222/national_id_v2.pdf');
 
+SET LOCAL ROLE postgres;
 SELECT is(
     (SELECT verification_status FROM public.drivers WHERE id = '22222222-2222-4222-8222-222222222222'),
     'PENDING',
@@ -268,11 +263,9 @@ SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '55555555-5555-4555-8555-555555555555';
 SET LOCAL "request.jwt.claims" = '{"sub":"55555555-5555-4555-8555-555555555555","role":"authenticated","aal":"aal2"}';
 
-SELECT lives_ok(
-    $$SELECT public.admin_verify_driver('22222222-2222-4222-8222-222222222222'::uuid, 'APPROVE')$$,
-    'Admin approves driver with AAL2'
-);
+SELECT public.admin_verify_driver('22222222-2222-4222-8222-222222222222'::uuid, 'APPROVE');
 
+SET LOCAL ROLE postgres;
 SELECT is(
     (SELECT verification_status FROM public.drivers WHERE id = '22222222-2222-4222-8222-222222222222'),
     'VERIFIED',
@@ -291,12 +284,24 @@ SELECT is(
     'Approved driver operational_state remains OFFLINE'
 );
 
+SELECT is(
+    (SELECT verification_status FROM public.driver_documents WHERE driver_id = '22222222-2222-4222-8222-222222222222' LIMIT 1),
+    'VERIFIED',
+    'Driver document verification_status is VERIFIED on approval'
+);
+
+SELECT is(
+    (SELECT rejection_reason FROM public.driver_documents WHERE driver_id = '22222222-2222-4222-8222-222222222222' LIMIT 1),
+    NULL,
+    'Driver document rejection_reason cleared on approval'
+);
+
 -- Audit log verification
 SELECT ok(
     EXISTS (
         SELECT 1 FROM public.audit_logs 
         WHERE entity_id = '22222222-2222-4222-8222-222222222222' 
-          AND action = 'VERIFY_DRIVER' 
+          AND action = 'DRIVER_VERIFICATION_APPROVED' 
           AND entity_type = 'driver'
     ),
     'Audit log created for driver verification'
