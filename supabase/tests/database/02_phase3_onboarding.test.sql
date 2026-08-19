@@ -63,7 +63,7 @@ SELECT throws_ok(
 );
 
 -- 5. Business Onboarding & Branch Creation via Service Role (6 assertions: 13-18)
-SET LOCAL ROLE service_role;
+SET LOCAL ROLE postgres;
 
 SELECT public.create_business(
     '11111111-1111-4111-8111-111111111111'::uuid,

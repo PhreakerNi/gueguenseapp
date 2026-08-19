@@ -630,43 +630,47 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite (HTT
   });
 
   it("Step 13: Driver re-upload after rejection automatically transitions driver back to PENDING", async () => {
-    // 1. Authorize re-upload
-    const authRes = await fetch(
-      `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${driverToken}`,
-        },
-        body: JSON.stringify({ document_type: "NATIONAL_ID" }),
-      },
-    );
-    const authData = await authRes.json();
+    const docTypes = ["NATIONAL_ID", "DRIVER_LICENSE", "VEHICLE_REGISTRATION"];
 
-    // 2. Upload file
-    await fetch(authData.upload_url, {
-      method: "PUT",
-      headers: { "Content-Type": "application/pdf" },
-      body: Buffer.from("%PDF-1.4 Clean high-resolution national ID"),
-    });
-
-    // 3. Commit
-    const commitRes = await fetch(
-      `${edgeFunctionBaseUrl}/driver/documents/commit`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${driverToken}`,
+    for (const docType of docTypes) {
+      // 1. Authorize re-upload
+      const authRes = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({ document_type: docType }),
         },
-        body: JSON.stringify({
-          document_type: "NATIONAL_ID",
-          storage_path: authData.storage_path,
-        }),
-      },
-    );
-    assert.strictEqual(commitRes.status, 200);
+      );
+      const authData = await authRes.json();
+
+      // 2. Upload file
+      await fetch(authData.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: Buffer.from(`%PDF-1.4 Clean high-resolution ${docType}`),
+      });
+
+      // 3. Commit
+      const commitRes = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/commit`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({
+            document_type: docType,
+            storage_path: authData.storage_path,
+          }),
+        },
+      );
+      assert.strictEqual(commitRes.status, 200);
+    }
 
     // Verify driver status is PENDING again in DB
     const drvRes = await dbPool.query(
