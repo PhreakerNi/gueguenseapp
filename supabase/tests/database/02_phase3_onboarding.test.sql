@@ -310,12 +310,20 @@ SELECT ok(
     'Canonical DRIVER_REJECTED audit log created'
 );
 
--- 8.4 Driver re-submits document and remaining 3rd document (VEHICLE_REGISTRATION)
+-- 8.4 Driver re-submits document and remaining documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)
 SELECT public.commit_driver_document(
     '22222222-2222-4222-8222-222222222222'::uuid,
     'NATIONAL_ID',
     '22222222-2222-4222-8222-222222222222/national_id_v2.pdf',
     3072,
+    'application/pdf'
+);
+
+SELECT public.commit_driver_document(
+    '22222222-2222-4222-8222-222222222222'::uuid,
+    'DRIVER_LICENSE',
+    '22222222-2222-4222-8222-222222222222/driver_license_v2.pdf',
+    4096,
     'application/pdf'
 );
 

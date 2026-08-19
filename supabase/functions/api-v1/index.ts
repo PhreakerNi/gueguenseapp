@@ -108,7 +108,11 @@ Deno.serve(async (req: Request) => {
   try {
     const parts = token.split(".");
     if (parts.length === 3) {
-      const payloadJson = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
+      let base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      while (base64.length % 4 !== 0) {
+        base64 += "=";
+      }
+      const payloadJson = atob(base64);
       const claims = JSON.parse(payloadJson);
       jwtAal =
         claims.aal ||
@@ -513,9 +517,17 @@ Deno.serve(async (req: Request) => {
       }
 
       const uploadId = crypto.randomUUID();
+      let uploadUrl = signedData.signedUrl;
+      uploadUrl = uploadUrl
+        .replace(/http:\/\/kong:8000/g, "http://127.0.0.1:54321")
+        .replace(/http:\/\/localhost:8000/g, "http://127.0.0.1:54321");
+      if (uploadUrl.startsWith("/")) {
+        uploadUrl = `http://127.0.0.1:54321${uploadUrl}`;
+      }
+
       return await completeResponse(200, {
         upload_id: uploadId,
-        upload_url: signedData.signedUrl,
+        upload_url: uploadUrl,
         storage_path: storagePath,
         expires_at: new Date(Date.now() + 3600000).toISOString(),
       });

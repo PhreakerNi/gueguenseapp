@@ -508,7 +508,11 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite (HTT
       const fileContent = Buffer.from(
         `%PDF-1.4 Mock binary content for ${docType}`,
       );
-      const uploadRes = await fetch(authData.upload_url, {
+      const uploadUrl = authData.upload_url
+        .replace(/http:\/\/kong:8000/g, "http://127.0.0.1:54321")
+        .replace(/http:\/\/localhost:8000/g, "http://127.0.0.1:54321");
+
+      const uploadRes = await fetch(uploadUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/pdf" },
         body: fileContent,
@@ -648,7 +652,11 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite (HTT
       const authData = await authRes.json();
 
       // 2. Upload file
-      await fetch(authData.upload_url, {
+      const uploadUrl = authData.upload_url
+        .replace(/http:\/\/kong:8000/g, "http://127.0.0.1:54321")
+        .replace(/http:\/\/localhost:8000/g, "http://127.0.0.1:54321");
+
+      await fetch(uploadUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/pdf" },
         body: Buffer.from(`%PDF-1.4 Clean high-resolution ${docType}`),
