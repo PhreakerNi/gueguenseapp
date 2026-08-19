@@ -135,10 +135,13 @@ Deno.serve(async (req: Request) => {
       jwtAal =
         claims.aal ||
         (claims.amr &&
-        claims.amr.some((m: any) =>
-          m === "totp" ||
-          m === "mfa" ||
-          (typeof m === "object" && m !== null && (m.method === "totp" || m.method === "mfa"))
+        claims.amr.some(
+          (m: any) =>
+            m === "totp" ||
+            m === "mfa" ||
+            (typeof m === "object" &&
+              m !== null &&
+              (m.method === "totp" || m.method === "mfa")),
         )
           ? "aal2"
           : "aal1");
