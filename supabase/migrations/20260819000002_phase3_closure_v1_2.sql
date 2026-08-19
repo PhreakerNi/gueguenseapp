@@ -437,7 +437,100 @@ BEGIN
 END;
 $$;
 
--- 10. Register Vehicle RPC (Account status gate, Section 24)
+-- 10. Register Driver RPC (Separated Step, Section 20)
+CREATE OR REPLACE FUNCTION public.register_driver(
+    p_actor_id UUID,
+    p_national_id_number TEXT,
+    p_license_number TEXT
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_clean_nid TEXT;
+    v_clean_lic TEXT;
+BEGIN
+    IF p_actor_id IS NULL THEN
+        RAISE EXCEPTION 'AUTH_REQUIRED: Valid actor user ID is required';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_actor_id) THEN
+        RAISE EXCEPTION 'USER_NOT_FOUND: User does not exist';
+    END IF;
+
+    v_clean_nid := NULLIF(pg_catalog.btrim(p_national_id_number), '');
+    v_clean_lic := NULLIF(pg_catalog.btrim(p_license_number), '');
+
+    IF v_clean_nid IS NULL THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: national_id_number is required';
+    END IF;
+    IF v_clean_lic IS NULL THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: license_number is required';
+    END IF;
+
+    -- Check if user is already registered as driver
+    IF EXISTS (
+        SELECT 1 FROM public.drivers d
+        WHERE d.id = p_actor_id
+    ) THEN
+        RAISE EXCEPTION 'ALREADY_REGISTERED: User is already registered as a driver';
+    END IF;
+
+    -- Check uniqueness
+    IF EXISTS (SELECT 1 FROM public.drivers WHERE national_id_number = v_clean_nid) THEN
+        RAISE EXCEPTION 'NATIONAL_ID_EXISTS: National ID number is already registered';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.drivers WHERE license_number = v_clean_lic) THEN
+        RAISE EXCEPTION 'LICENSE_EXISTS: Driver license number is already registered';
+    END IF;
+
+    -- 1. Create Driver Record
+    INSERT INTO public.drivers (
+        id,
+        national_id_number,
+        license_number,
+        verification_status,
+        account_status,
+        rating_avg,
+        total_deliveries
+    )
+    VALUES (
+        p_actor_id,
+        v_clean_nid,
+        v_clean_lic,
+        'PENDING',
+        'REGISTERED',
+        5.00,
+        0
+    );
+
+    -- 2. Create Driver Presence (OFFLINE)
+    INSERT INTO public.driver_presence (
+        driver_id,
+        operational_state,
+        current_location,
+        location_updated_at
+    )
+    VALUES (
+        p_actor_id,
+        'OFFLINE',
+        NULL,
+        NULL
+    )
+    ON CONFLICT (driver_id) DO NOTHING;
+
+    RETURN jsonb_build_object(
+        'driver_id', p_actor_id,
+        'verification_status', 'PENDING',
+        'account_status', 'REGISTERED',
+        'operational_state', 'OFFLINE'
+    );
+END;
+$$;
+
+-- 11. Register Vehicle RPC (Account status gate, Section 24)
 CREATE OR REPLACE FUNCTION public.register_vehicle(
     p_actor_id UUID,
     p_make TEXT,
@@ -540,7 +633,7 @@ BEGIN
 END;
 $$;
 
--- 11. Authorize Driver Document Upload RPC (Section 3 & 4)
+-- 12. Authorize Driver Document Upload RPC (Section 3 & 4)
 CREATE OR REPLACE FUNCTION public.authorize_driver_document_upload(
     p_actor_id UUID,
     p_document_type TEXT,
@@ -625,7 +718,7 @@ BEGIN
 END;
 $$;
 
--- 12. Commit Driver Document RPC (Validates against authorization, preserves rejected history, Section 5 & 10)
+-- 13. Commit Driver Document RPC (Validates against authorization, preserves rejected history, Section 5 & 10)
 CREATE OR REPLACE FUNCTION public.commit_driver_document(
     p_actor_id UUID,
     p_upload_id UUID,
@@ -715,7 +808,7 @@ BEGIN
 END;
 $$;
 
--- 13. Admin Verify Driver RPC (Canonical Audit, Direct Role Lookup, Section 11 & 12)
+-- 14. Admin Verify Driver RPC (Canonical Audit, Direct Role Lookup, Section 11 & 12)
 CREATE OR REPLACE FUNCTION public.admin_verify_driver(
     p_actor_id UUID,
     p_driver_id UUID,
@@ -863,7 +956,7 @@ BEGIN
 END;
 $$;
 
--- 14. Execute Idempotent Operation Wrapper (Single Transaction & Advisory Lock, Section 8 & 15)
+-- 15. Execute Idempotent Operation Wrapper (Single Transaction & Advisory Lock, Section 8 & 15)
 CREATE OR REPLACE FUNCTION public.execute_idempotent_operation(
     p_actor_user_id UUID,
     p_scope TEXT,
@@ -1031,7 +1124,7 @@ BEGIN
 END;
 $$;
 
--- 15. Revoke direct execution on all sensitive RPCs from PUBLIC, anon, and authenticated (Section 13)
+-- 16. Revoke direct execution on all sensitive RPCs from PUBLIC, anon, and authenticated (Section 13)
 REVOKE EXECUTE ON FUNCTION public.create_business(UUID, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.create_business_location(UUID, UUID, TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.add_business_member(UUID, UUID, UUID, TEXT, UUID[]) FROM PUBLIC, anon, authenticated;
