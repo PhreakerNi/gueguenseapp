@@ -754,13 +754,24 @@ DECLARE
     v_clean_reason TEXT;
     v_doc_count BIGINT;
     v_has_vehicle BOOLEAN;
+    v_actual_role TEXT;
 BEGIN
     IF p_actor_id IS NULL THEN
         RAISE EXCEPTION 'AUTH_REQUIRED: Authentication required';
     END IF;
 
+    -- Query actor platform role from public.profiles
+    SELECT platform_role INTO v_actual_role
+    FROM public.profiles
+    WHERE id = p_actor_id;
+
+    -- If caller explicitly passed a non-none role use it, else use DB role
+    IF p_actor_role IS NOT NULL AND p_actor_role <> 'none' THEN
+        v_actual_role := p_actor_role;
+    END IF;
+
     -- Check platform role
-    IF p_actor_role IS NULL OR p_actor_role NOT IN ('super_admin', 'admin', 'verification_agent') THEN
+    IF v_actual_role IS NULL OR v_actual_role NOT IN ('super_admin', 'admin', 'verification_agent') THEN
         RAISE EXCEPTION 'AUTH_ADMIN_ROLE_REQUIRED: Only verification_agent, admin or super_admin can verify drivers';
     END IF;
 

@@ -157,29 +157,32 @@ export type Database = {
       businesses: {
         Row: {
           account_status: string
-          brand_name: string
+          brand_name: string | null
           created_at: string
           id: string
-          legal_name: string
-          tax_id: string
+          legal_name: string | null
+          tax_id: string | null
+          updated_at: string
           verification_status: string
         }
         Insert: {
           account_status?: string
-          brand_name: string
+          brand_name?: string | null
           created_at?: string
           id?: string
-          legal_name: string
-          tax_id: string
+          legal_name?: string | null
+          tax_id?: string | null
+          updated_at?: string
           verification_status?: string
         }
         Update: {
           account_status?: string
-          brand_name?: string
+          brand_name?: string | null
           created_at?: string
           id?: string
-          legal_name?: string
-          tax_id?: string
+          legal_name?: string | null
+          tax_id?: string | null
+          updated_at?: string
           verification_status?: string
         }
         Relationships: []

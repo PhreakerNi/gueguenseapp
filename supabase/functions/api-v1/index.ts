@@ -651,14 +651,14 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Check admin profile role
+      // Check admin profile role (optional, RPC queries profiles table directly)
       const { data: profileData } = await serviceClient
         .from("profiles")
         .select("platform_role")
         .eq("id", userId)
-        .single();
+        .maybeSingle();
 
-      const platformRole = profileData?.platform_role || "none";
+      const platformRole = profileData?.platform_role || null;
 
       const { data, error } = await serviceClient.rpc("admin_verify_driver", {
         p_actor_id: userId,
