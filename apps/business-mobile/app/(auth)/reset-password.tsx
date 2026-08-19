@@ -20,16 +20,18 @@ export default function BusinessResetPasswordScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  const canResetPassword = session != null && isPasswordRecovery === true;
+
   useEffect(() => {
-    if (!isLoading && (!session || !isPasswordRecovery)) {
+    if (!isLoading && !canResetPassword) {
       setErrorMessage(
         "No se detectó un contexto de recuperación válido. Por favor solicita un nuevo enlace de recuperación.",
       );
     }
-  }, [isLoading, session, isPasswordRecovery]);
+  }, [isLoading, canResetPassword]);
 
   const handleUpdate = async () => {
-    if (!session || !isPasswordRecovery) {
+    if (!canResetPassword) {
       setErrorMessage(
         "No se detectó una sesión de recuperación válida. Por favor solicita un nuevo enlace.",
       );
@@ -82,7 +84,7 @@ export default function BusinessResetPasswordScreen() {
         Establece una nueva contraseña para tu cuenta de negocio
       </Text>
 
-      {!isPasswordRecovery && !errorMessage && (
+      {!canResetPassword && !errorMessage && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>
             No se detectó un contexto de recuperación activo. Por favor utiliza
@@ -104,30 +106,30 @@ export default function BusinessResetPasswordScreen() {
       )}
 
       <TextInput
-        style={[styles.input, !isPasswordRecovery && styles.inputDisabled]}
+        style={[styles.input, !canResetPassword && styles.inputDisabled]}
         placeholder="Nueva contraseña (mínimo 8 caracteres)"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
-        editable={isPasswordRecovery && !loading}
+        editable={canResetPassword && !loading}
       />
 
       <TextInput
-        style={[styles.input, !isPasswordRecovery && styles.inputDisabled]}
+        style={[styles.input, !canResetPassword && styles.inputDisabled]}
         placeholder="Confirmar nueva contraseña"
         value={confirmPassword}
         onChangeText={setConfirmPassword}
         secureTextEntry
-        editable={isPasswordRecovery && !loading}
+        editable={canResetPassword && !loading}
       />
 
       <TouchableOpacity
         style={[
           styles.button,
-          (!isPasswordRecovery || loading) && styles.buttonDisabled,
+          (!canResetPassword || loading) && styles.buttonDisabled,
         ]}
         onPress={handleUpdate}
-        disabled={!isPasswordRecovery || loading}
+        disabled={!canResetPassword || loading}
       >
         {loading ? (
           <ActivityIndicator color="#FFFFFF" />

@@ -33,44 +33,90 @@ const ExpoSecureStoreAdapter = {
   },
 };
 
-const locks = new Map<string, Promise<unknown>>();
+type QueueEntry = {
+  grant: () => void;
+  isCancelled: boolean;
+};
 
-const processLock = async <R>(
-  name: string,
-  acquireTimeout: number,
-  fn: () => Promise<R>,
-): Promise<R> => {
-  const prev = locks.get(name) || Promise.resolve();
-  let resolveNext: () => void;
-  const current = new Promise<void>((res) => {
-    resolveNext = res;
-  });
-  locks.set(name, current);
+class Mutex {
+  isLocked = false;
+  queue: QueueEntry[] = [];
 
-  try {
-    if (acquireTimeout > 0) {
+  async acquire(acquireTimeout: number, name: string): Promise<void> {
+    if (!this.isLocked) {
+      this.isLocked = true;
+      return;
+    }
+
+    if (acquireTimeout === 0) {
+      throw new Error(
+        `Acquiring lock "${name}" failed immediately as it is already held`,
+      );
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const entry: QueueEntry = {
+        grant: () => {},
+        isCancelled: false,
+      };
+
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<never>((_, reject) => {
+
+      if (acquireTimeout > 0) {
         timer = setTimeout(() => {
+          entry.isCancelled = true;
+          const idx = this.queue.indexOf(entry);
+          if (idx !== -1) {
+            this.queue.splice(idx, 1);
+          }
           reject(
             new Error(
               `Timeout acquiring client lock "${name}" after ${acquireTimeout}ms`,
             ),
           );
         }, acquireTimeout);
-      });
-      try {
-        await Promise.race([prev, timeoutPromise]);
-      } finally {
-        if (timer) clearTimeout(timer);
       }
-    } else {
-      await prev;
+
+      entry.grant = () => {
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+
+      this.queue.push(entry);
+    });
+  }
+
+  release(): void {
+    while (this.queue.length > 0) {
+      const next = this.queue.shift()!;
+      if (!next.isCancelled) {
+        next.grant();
+        return;
+      }
     }
+    this.isLocked = false;
+  }
+}
+
+const locks = new Map<string, Mutex>();
+
+export const processLock = async <R>(
+  name: string,
+  acquireTimeout: number,
+  fn: () => Promise<R>,
+): Promise<R> => {
+  let mutex = locks.get(name);
+  if (!mutex) {
+    mutex = new Mutex();
+    locks.set(name, mutex);
+  }
+
+  await mutex.acquire(acquireTimeout, name);
+  try {
     return await fn();
   } finally {
-    resolveNext!();
-    if (locks.get(name) === current) {
+    mutex.release();
+    if (!mutex.isLocked && mutex.queue.length === 0) {
       locks.delete(name);
     }
   }
@@ -85,17 +131,16 @@ export function getSupabaseClient(): AppSupabaseClient {
   }
 
   const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-  const supabaseKey =
-    process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  const supabasePublishableKey =
+    process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-  if (!supabaseUrl || !supabaseKey) {
+  if (!supabaseUrl || !supabasePublishableKey) {
     throw new Error(
       "Missing required Supabase environment variables: EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY must be set.",
     );
   }
 
-  clientInstance = createClient<Database>(supabaseUrl, supabaseKey, {
+  clientInstance = createClient<Database>(supabaseUrl, supabasePublishableKey, {
     auth: {
       storage: ExpoSecureStoreAdapter,
       autoRefreshToken: true,

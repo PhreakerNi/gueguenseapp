@@ -252,3 +252,21 @@ export function getAuthErrorMessage(code: AuthErrorCode): string {
       return "Ocurrió un error inesperado en la autenticación.";
   }
 }
+
+export function canResetPassword(
+  hasSession: boolean,
+  isPasswordRecovery: boolean,
+): boolean {
+  return hasSession && isPasswordRecovery === true;
+}
+
+export function validateRecoveryTokens(
+  type: string | undefined,
+  accessToken: string | undefined,
+  refreshToken: string | undefined,
+): boolean {
+  if (type === "recovery") {
+    return Boolean(accessToken && refreshToken);
+  }
+  return false;
+}

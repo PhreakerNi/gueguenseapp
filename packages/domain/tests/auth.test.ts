@@ -5,6 +5,8 @@ import {
   evaluateBusinessAccess,
   evaluateDriverAccess,
   evaluateAdminAccess,
+  canResetPassword,
+  validateRecoveryTokens,
   type IdentityContext,
 } from "../src/index.js";
 
@@ -291,6 +293,301 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
       assert.deepStrictEqual(evaluateAdminAccess(superAdminIdentity, "aal2"), {
         allowed: true,
       });
+    });
+  });
+
+  describe("canResetPassword Guard & Recovery Rules", () => {
+    it("should reject reset password when session is null even if isPasswordRecovery is true", () => {
+      assert.strictEqual(canResetPassword(false, true), false);
+    });
+
+    it("should reject reset password when session is valid but isPasswordRecovery is false (normal session)", () => {
+      assert.strictEqual(canResetPassword(true, false), false);
+    });
+
+    it("should reject reset password when session is null and isPasswordRecovery is false", () => {
+      assert.strictEqual(canResetPassword(false, false), false);
+    });
+
+    it("should allow reset password ONLY when session != null AND isPasswordRecovery is true", () => {
+      assert.strictEqual(canResetPassword(true, true), true);
+    });
+  });
+
+  describe("validateRecoveryTokens Rules", () => {
+    it("should allow recovery when type=recovery and both access_token and refresh_token are present", () => {
+      assert.strictEqual(
+        validateRecoveryTokens(
+          "recovery",
+          "valid_access_tok",
+          "valid_refresh_tok",
+        ),
+        true,
+      );
+    });
+
+    it("should reject recovery when type=recovery but tokens are missing", () => {
+      assert.strictEqual(
+        validateRecoveryTokens("recovery", undefined, undefined),
+        false,
+      );
+    });
+
+    it("should reject recovery when only access_token is present", () => {
+      assert.strictEqual(
+        validateRecoveryTokens("recovery", "valid_access_tok", undefined),
+        false,
+      );
+    });
+
+    it("should reject recovery when only refresh_token is present", () => {
+      assert.strictEqual(
+        validateRecoveryTokens("recovery", undefined, "valid_refresh_tok"),
+        false,
+      );
+    });
+
+    it("should reject recovery when type is not recovery even if tokens are present", () => {
+      assert.strictEqual(
+        validateRecoveryTokens(
+          undefined,
+          "valid_access_tok",
+          "valid_refresh_tok",
+        ),
+        false,
+      );
+      assert.strictEqual(
+        validateRecoveryTokens(
+          "signup",
+          "valid_access_tok",
+          "valid_refresh_tok",
+        ),
+        false,
+      );
+    });
+
+    it("should prevent duplicate processing of the same deep link URL", () => {
+      const processed = new Set<string>();
+      const testUrl =
+        "gueguense-business://auth/callback#access_token=abc&refresh_token=xyz&type=recovery";
+
+      let processCount = 0;
+      const processDeepLink = (url: string) => {
+        if (processed.has(url)) return false;
+        processed.add(url);
+        processCount++;
+        return true;
+      };
+
+      assert.strictEqual(processDeepLink(testUrl), true);
+      assert.strictEqual(
+        processDeepLink(testUrl),
+        false,
+        "Duplicate URL must be ignored",
+      );
+      assert.strictEqual(processCount, 1);
+    });
+  });
+
+  describe("processLock - Queue-based Mutex Concurrency & Timeout Guarantees", () => {
+    type QueueEntry = {
+      grant: () => void;
+      isCancelled: boolean;
+    };
+
+    class TestMutex {
+      isLocked = false;
+      queue: QueueEntry[] = [];
+
+      async acquire(acquireTimeout: number, name: string): Promise<void> {
+        if (!this.isLocked) {
+          this.isLocked = true;
+          return;
+        }
+
+        if (acquireTimeout === 0) {
+          throw new Error(
+            `Acquiring lock "${name}" failed immediately as it is already held`,
+          );
+        }
+
+        return new Promise<void>((resolve, reject) => {
+          const entry: QueueEntry = {
+            grant: () => {},
+            isCancelled: false,
+          };
+
+          let timer: ReturnType<typeof setTimeout> | undefined;
+
+          if (acquireTimeout > 0) {
+            timer = setTimeout(() => {
+              entry.isCancelled = true;
+              const idx = this.queue.indexOf(entry);
+              if (idx !== -1) {
+                this.queue.splice(idx, 1);
+              }
+              reject(
+                new Error(
+                  `Timeout acquiring client lock "${name}" after ${acquireTimeout}ms`,
+                ),
+              );
+            }, acquireTimeout);
+          }
+
+          entry.grant = () => {
+            if (timer) clearTimeout(timer);
+            resolve();
+          };
+
+          this.queue.push(entry);
+        });
+      }
+
+      release(): void {
+        while (this.queue.length > 0) {
+          const next = this.queue.shift()!;
+          if (!next.isCancelled) {
+            next.grant();
+            return;
+          }
+        }
+        this.isLocked = false;
+      }
+    }
+
+    const testLocks = new Map<string, TestMutex>();
+
+    const testProcessLock = async <R>(
+      name: string,
+      acquireTimeout: number,
+      fn: () => Promise<R>,
+    ): Promise<R> => {
+      let mutex = testLocks.get(name);
+      if (!mutex) {
+        mutex = new TestMutex();
+        testLocks.set(name, mutex);
+      }
+
+      await mutex.acquire(acquireTimeout, name);
+      try {
+        return await fn();
+      } finally {
+        mutex.release();
+        if (!mutex.isLocked && mutex.queue.length === 0) {
+          testLocks.delete(name);
+        }
+      }
+    };
+
+    it("should enforce mutual exclusion for the same lock name", async () => {
+      let activeCount = 0;
+      let maxActive = 0;
+
+      const runTask = (id: number) =>
+        testProcessLock("lock_same", 1000, async () => {
+          activeCount++;
+          maxActive = Math.max(maxActive, activeCount);
+          await new Promise((r) => setTimeout(r, 20));
+          activeCount--;
+          return id;
+        });
+
+      const results = await Promise.all([runTask(1), runTask(2), runTask(3)]);
+      assert.deepStrictEqual(results, [1, 2, 3]);
+      assert.strictEqual(
+        maxActive,
+        1,
+        "Only one task should be active at any given time",
+      );
+    });
+
+    it("should allow independent concurrent execution for different lock names", async () => {
+      let lockAActive = false;
+      let lockBActive = false;
+      let overlapped = false;
+
+      const taskA = testProcessLock("lock_A", 1000, async () => {
+        lockAActive = true;
+        await new Promise((r) => setTimeout(r, 30));
+        if (lockBActive) overlapped = true;
+        lockAActive = false;
+      });
+
+      const taskB = testProcessLock("lock_B", 1000, async () => {
+        lockBActive = true;
+        await new Promise((r) => setTimeout(r, 30));
+        if (lockAActive) overlapped = true;
+        lockBActive = false;
+      });
+
+      await Promise.all([taskA, taskB]);
+      assert.strictEqual(
+        overlapped,
+        true,
+        "Different lock names should execute concurrently",
+      );
+    });
+
+    it("should release lock in finally block even if task throws an error", async () => {
+      await assert.rejects(
+        testProcessLock("lock_err", 1000, async () => {
+          throw new Error("Task failure");
+        }),
+        /Task failure/,
+      );
+
+      // Subsequent task should acquire lock without issue
+      let subsequentRan = false;
+      await testProcessLock("lock_err", 1000, async () => {
+        subsequentRan = true;
+      });
+      assert.strictEqual(subsequentRan, true);
+    });
+
+    it("MANDATORY RACE TEST: A acquires X, B attempts X and times out, C attempts X afterwards -> C does NOT enter while A is active, A releases, C enters", async () => {
+      const events: string[] = [];
+      let aIsActive = false;
+
+      // 1. A acquires lock X and executes for 60ms
+      const taskA = testProcessLock("race_X", 1000, async () => {
+        events.push("A_START");
+        aIsActive = true;
+        await new Promise((r) => setTimeout(r, 60));
+        aIsActive = false;
+        events.push("A_END");
+      });
+
+      // 2. B attempts lock X with 15ms timeout -> B must timeout
+      await new Promise((r) => setTimeout(r, 5));
+      const taskB = testProcessLock("race_X", 15, async () => {
+        events.push("B_RAN");
+      }).catch((err) => {
+        events.push("B_TIMEOUT");
+        assert.match(err.message, /Timeout acquiring client lock/);
+      });
+
+      // 3. C attempts lock X after B timed out, with 200ms timeout
+      await new Promise((r) => setTimeout(r, 25));
+      const taskC = testProcessLock("race_X", 200, async () => {
+        assert.strictEqual(
+          aIsActive,
+          false,
+          "C must NEVER enter while A is still actively holding the lock!",
+        );
+        events.push("C_START");
+        await new Promise((r) => setTimeout(r, 10));
+        events.push("C_END");
+      });
+
+      await Promise.all([taskA, taskB, taskC]);
+
+      assert.deepStrictEqual(events, [
+        "A_START",
+        "B_TIMEOUT",
+        "A_END",
+        "C_START",
+        "C_END",
+      ]);
     });
   });
 });

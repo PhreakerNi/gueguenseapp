@@ -153,6 +153,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     try {
+      setIsPasswordRecovery(false);
       const { error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
@@ -160,6 +161,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         return { error: getAuthErrorMessage(normalizeAuthError(error)) };
       }
+      setIsPasswordRecovery(false);
       return { error: null };
     } catch (err) {
       return { error: getAuthErrorMessage(normalizeAuthError(err)) };
@@ -173,6 +175,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     phone?: string,
   ) => {
     try {
+      setIsPasswordRecovery(false);
       const { error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
