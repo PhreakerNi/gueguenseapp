@@ -299,3 +299,41 @@ export function shouldProcessDeepLink(
   processedSet.add(url);
   return true;
 }
+
+// Phase 3: Driver Verification & Onboarding Helpers
+export function canVerifyDrivers(
+  role: PlatformRole | undefined,
+  aal: string | undefined,
+): {
+  allowed: boolean;
+  reason?: "AUTH_ADMIN_ROLE_REQUIRED" | "AUTH_MFA_REQUIRED";
+} {
+  if (!role || !["super_admin", "admin", "verification_agent"].includes(role)) {
+    return { allowed: false, reason: "AUTH_ADMIN_ROLE_REQUIRED" };
+  }
+  if (aal !== "aal2") {
+    return { allowed: false, reason: "AUTH_MFA_REQUIRED" };
+  }
+  return { allowed: true };
+}
+
+export function isDriverApproved(
+  verificationStatus: DriverVerificationStatus | undefined,
+  accountStatus: DriverAccountStatus | undefined,
+): boolean {
+  return verificationStatus === "VERIFIED" && accountStatus === "ACTIVE";
+}
+
+export function isDriverPendingVerification(
+  verificationStatus: DriverVerificationStatus | undefined,
+): boolean {
+  return (
+    verificationStatus === "PENDING" || verificationStatus === "UNDER_REVIEW"
+  );
+}
+
+export function isDriverRejected(
+  verificationStatus: DriverVerificationStatus | undefined,
+): boolean {
+  return verificationStatus === "REJECTED";
+}
