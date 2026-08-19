@@ -109,6 +109,9 @@ CREATE UNIQUE INDEX idx_driver_documents_active_type
 ON public.driver_documents (driver_id, document_type)
 WHERE verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED');
 
+-- Unique Index on vehicles(driver_id) for 1:1 vehicle registration
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_driver_id_unique ON public.vehicles(driver_id);
+
 -- Drop old RPC signatures before recreation to avoid parameter renaming conflicts
 DROP FUNCTION IF EXISTS public.create_business(UUID, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS public.create_business_location(UUID, UUID, TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT);
@@ -595,7 +598,7 @@ BEGIN
         SELECT 1 FROM public.vehicles
         WHERE license_plate = v_clean_plate AND driver_id <> p_actor_id
     ) THEN
-        RAISE EXCEPTION 'DUPLICATE_PLATE: Vehicle license plate is already registered to another driver';
+        RAISE EXCEPTION 'LICENSE_PLATE_EXISTS: Vehicle license plate is already registered to another driver';
     END IF;
 
     INSERT INTO public.vehicles (
