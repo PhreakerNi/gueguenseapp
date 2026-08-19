@@ -3,6 +3,16 @@
 
 BEGIN;
 
+-- 0. Table Alterations / Schema Upgrades for existing foundation tables
+ALTER TABLE public.drivers
+ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+ALTER TABLE public.driver_documents
+ADD COLUMN IF NOT EXISTS file_size BIGINT,
+ADD COLUMN IF NOT EXISTS mime_type TEXT,
+ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES auth.users(id);
+
 -- 1. Storage Bucket and RLS Hardening (Section 1 & 4)
 UPDATE storage.buckets
 SET allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'application/pdf']
