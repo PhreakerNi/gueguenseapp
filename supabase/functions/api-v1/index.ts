@@ -146,36 +146,41 @@ Deno.serve(async (req: Request) => {
       const requestHash = await sha256Hex(
         `${req.method}:${path}:${reqBodyText}`,
       );
-      const { data: lockResult, error: lockError } = await serviceClient.rpc(
-        "acquire_idempotency_lock",
-        {
-          p_user_id: userId,
-          p_key: idempotencyKey,
-          p_endpoint: path,
-          p_request_hash: requestHash,
-        },
-      );
 
-      if (lockError) {
-        if (lockError.message.includes("IDEMPOTENCY_CONFLICT")) {
-          return errorResponse(
-            "IDEMPOTENCY_CONFLICT: Key was already used with a different request payload",
-            409,
-            "IDEMPOTENCY_CONFLICT",
-          );
-        }
-        if (lockError.message.includes("REQUEST_IN_PROGRESS")) {
-          return errorResponse(
-            "REQUEST_IN_PROGRESS: Concurrent request with this idempotency key is currently processing",
-            409,
-            "REQUEST_IN_PROGRESS",
-          );
-        }
-        return errorResponse(
-          `IDEMPOTENCY_ERROR: ${lockError.message}`,
-          500,
-          "IDEMPOTENCY_ERROR",
+      let lockResult: any = null;
+      for (let attempt = 0; attempt < 15; attempt++) {
+        const { data, error: lockError } = await serviceClient.rpc(
+          "acquire_idempotency_lock",
+          {
+            p_user_id: userId,
+            p_key: idempotencyKey,
+            p_endpoint: path,
+            p_request_hash: requestHash,
+          },
         );
+
+        if (lockError) {
+          if (lockError.message.includes("IDEMPOTENCY_CONFLICT")) {
+            return errorResponse(
+              "IDEMPOTENCY_CONFLICT: Key was already used with a different request payload",
+              409,
+              "IDEMPOTENCY_CONFLICT",
+            );
+          }
+          if (lockError.message.includes("REQUEST_IN_PROGRESS")) {
+            // Concurrent request in flight: wait 150ms and re-check cache
+            await new Promise((r) => setTimeout(r, 150));
+            continue;
+          }
+          return errorResponse(
+            `IDEMPOTENCY_ERROR: ${lockError.message}`,
+            500,
+            "IDEMPOTENCY_ERROR",
+          );
+        }
+
+        lockResult = data;
+        break;
       }
 
       if (lockResult && lockResult.status === "CACHED") {

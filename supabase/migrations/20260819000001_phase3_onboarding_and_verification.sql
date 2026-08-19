@@ -212,9 +212,9 @@ BEGIN
         RAISE EXCEPTION 'AUTH_REQUIRED: Valid actor user ID is required';
     END IF;
 
-    v_clean_legal_name := pg_catalog.nullif(pg_catalog.trim(p_legal_name), '');
-    v_clean_brand_name := pg_catalog.nullif(pg_catalog.trim(p_brand_name), '');
-    v_clean_tax_id := pg_catalog.nullif(pg_catalog.trim(p_tax_id), '');
+    v_clean_legal_name := NULLIF(pg_catalog.btrim(p_legal_name), '');
+    v_clean_brand_name := NULLIF(pg_catalog.btrim(p_brand_name), '');
+    v_clean_tax_id := NULLIF(pg_catalog.btrim(p_tax_id), '');
 
     IF v_clean_legal_name IS NULL THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: legal_name is required';
@@ -321,8 +321,8 @@ BEGIN
         RAISE EXCEPTION 'UNAUTHORIZED_MEMBER: Only active business owners or managers can create branch locations';
     END IF;
 
-    v_clean_name := pg_catalog.nullif(pg_catalog.trim(p_name), '');
-    v_clean_address := pg_catalog.nullif(pg_catalog.trim(p_address_text), '');
+    v_clean_name := NULLIF(pg_catalog.btrim(p_name), '');
+    v_clean_address := NULLIF(pg_catalog.btrim(p_address_text), '');
 
     IF v_clean_name IS NULL THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: branch name is required';
@@ -352,7 +352,7 @@ BEGIN
         v_clean_name,
         v_clean_address,
         extensions.ST_SetSRID(extensions.ST_MakePoint(p_longitude, p_latitude), 4326)::extensions.geography,
-        pg_catalog.nullif(pg_catalog.trim(p_pickup_instructions), ''),
+        NULLIF(pg_catalog.btrim(p_pickup_instructions), ''),
         true
     )
     RETURNING id INTO v_location_id;
@@ -409,7 +409,7 @@ BEGIN
         RAISE EXCEPTION 'UNAUTHORIZED_MEMBER: Only the business owner can add members';
     END IF;
 
-    v_clean_role := pg_catalog.nullif(pg_catalog.trim(p_role), '');
+    v_clean_role := NULLIF(pg_catalog.btrim(p_role), '');
     IF v_clean_role NOT IN ('business_manager', 'business_employee') THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: role must be business_manager or business_employee';
     END IF;
@@ -478,8 +478,8 @@ BEGIN
         RAISE EXCEPTION 'AUTH_REQUIRED: Valid actor user ID is required';
     END IF;
 
-    v_clean_nid := pg_catalog.nullif(pg_catalog.trim(p_national_id_number), '');
-    v_clean_lic := pg_catalog.nullif(pg_catalog.trim(p_license_number), '');
+    v_clean_nid := NULLIF(pg_catalog.btrim(p_national_id_number), '');
+    v_clean_lic := NULLIF(pg_catalog.btrim(p_license_number), '');
 
     IF v_clean_nid IS NULL THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: national_id_number is required';
@@ -576,10 +576,10 @@ BEGIN
         RAISE EXCEPTION 'DRIVER_NOT_FOUND: Driver must register personal profile before registering vehicle';
     END IF;
 
-    v_clean_make := pg_catalog.nullif(pg_catalog.trim(p_make), '');
-    v_clean_model := pg_catalog.nullif(pg_catalog.trim(p_model), '');
-    v_clean_color := pg_catalog.nullif(pg_catalog.trim(p_color), '');
-    v_clean_plate := pg_catalog.nullif(pg_catalog.upper(pg_catalog.trim(p_license_plate)), '');
+    v_clean_make := NULLIF(pg_catalog.btrim(p_make), '');
+    v_clean_model := NULLIF(pg_catalog.btrim(p_model), '');
+    v_clean_color := NULLIF(pg_catalog.btrim(p_color), '');
+    v_clean_plate := NULLIF(pg_catalog.upper(pg_catalog.btrim(p_license_plate)), '');
 
     IF v_clean_make IS NULL THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: vehicle make is required';
@@ -663,8 +663,8 @@ BEGIN
         RAISE EXCEPTION 'DRIVER_NOT_FOUND: Driver profile must exist before committing documents';
     END IF;
 
-    v_clean_type := pg_catalog.upper(pg_catalog.trim(p_document_type));
-    v_clean_path := pg_catalog.trim(p_storage_path);
+    v_clean_type := pg_catalog.upper(pg_catalog.btrim(p_document_type));
+    v_clean_path := pg_catalog.btrim(p_storage_path);
 
     IF v_clean_type NOT IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION', 'CRIMINAL_RECORD', 'INSURANCE') THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: Invalid document_type';
@@ -774,8 +774,8 @@ BEGIN
         RAISE EXCEPTION 'DRIVER_NOT_FOUND: Target driver does not exist';
     END IF;
 
-    v_clean_decision := pg_catalog.upper(pg_catalog.trim(p_decision));
-    v_clean_reason := pg_catalog.nullif(pg_catalog.trim(p_rejection_reason), '');
+    v_clean_decision := pg_catalog.upper(pg_catalog.btrim(p_decision));
+    v_clean_reason := NULLIF(pg_catalog.btrim(p_rejection_reason), '');
 
     IF v_clean_decision = 'APPROVE' THEN
         -- Verify registered vehicle

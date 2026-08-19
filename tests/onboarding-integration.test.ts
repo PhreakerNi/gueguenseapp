@@ -727,7 +727,7 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite (HTT
 
   it("Step 15: Admin Approval attempt without all 3 required documents is rejected (DOCUMENTATION_INCOMPLETE)", async () => {
     // Register incomplete driver (personal profile only, no vehicle/docs)
-    await fetch(`${edgeFunctionBaseUrl}/driver/onboarding`, {
+    const onbRes = await fetch(`${edgeFunctionBaseUrl}/driver/onboarding`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -738,6 +738,7 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite (HTT
         license_number: `LIC-${testRunId}-9999`,
       }),
     });
+    assert.strictEqual(onbRes.status, 201);
 
     const res = await fetch(`${edgeFunctionBaseUrl}/admin/verify-driver`, {
       method: "POST",
