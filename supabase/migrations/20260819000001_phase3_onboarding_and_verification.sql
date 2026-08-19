@@ -524,7 +524,7 @@ BEGIN
         SET
             verification_status = 'VERIFIED',
             rejection_reason = NULL
-        WHERE driver_id = p_driver_id AND verification_status = 'PENDING';
+        WHERE driver_id = p_driver_id;
 
         INSERT INTO public.audit_logs (
             actor_id,
