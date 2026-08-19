@@ -10,7 +10,10 @@ import {
 } from "react-native";
 import { useAuth } from "../../src/context/auth-context";
 import { getSupabaseClient } from "../../src/supabase";
-import { businessOnboardingSchema } from "@gueguense/schemas";
+import {
+  businessCreationSchema,
+  businessLocationSchema,
+} from "@gueguense/schemas";
 
 export default function BusinessOnboardingRequiredScreen() {
   const { identity, signOut, refreshIdentity } = useAuth();
@@ -27,60 +30,101 @@ export default function BusinessOnboardingRequiredScreen() {
   const handleRegister = async () => {
     setErrorMsg(null);
 
-    const validation = businessOnboardingSchema.safeParse({
+    const bizValidation = businessCreationSchema.safeParse({
       legalName,
       brandName,
       taxId,
-      branchName,
-      branchAddress,
-      branchLatitude: 12.136389, // Default Managua center coordinates for onboarding
-      branchLongitude: -86.251389,
+    });
+
+    if (!bizValidation.success) {
+      setErrorMsg(
+        bizValidation.error.issues[0]?.message ?? "Datos de empresa inválidos",
+      );
+      return;
+    }
+
+    const locValidation = businessLocationSchema.safeParse({
+      businessId: "00000000-0000-0000-0000-000000000000",
+      name: branchName,
+      addressText: branchAddress,
+      latitude: 12.136389,
+      longitude: -86.251389,
       pickupInstructions: pickupInstructions || undefined,
     });
 
-    if (!validation.success) {
-      setErrorMsg(validation.error.issues[0]?.message ?? "Datos inválidos");
+    if (!locValidation.success) {
+      setErrorMsg(
+        locValidation.error.issues[0]?.message ?? "Datos de sucursal inválidos",
+      );
       return;
     }
 
     setLoading(true);
     try {
       const client = getSupabaseClient();
-      const rpcArgs: {
-        p_legal_name: string;
-        p_brand_name: string;
-        p_tax_id: string;
-        p_branch_name: string;
-        p_branch_address: string;
-        p_branch_latitude: number;
-        p_branch_longitude: number;
-        p_pickup_instructions?: string;
-      } = {
-        p_legal_name: legalName.trim(),
-        p_brand_name: brandName.trim(),
-        p_tax_id: taxId.trim(),
-        p_branch_name: branchName.trim(),
-        p_branch_address: branchAddress.trim(),
-        p_branch_latitude: 12.136389,
-        p_branch_longitude: -86.251389,
-      };
-      if (pickupInstructions.trim()) {
-        rpcArgs.p_pickup_instructions = pickupInstructions.trim();
-      }
+      const { data: sessionData } = await client.auth.getSession();
+      const token = sessionData.session?.access_token;
 
-      const { data, error } = await client.rpc(
-        "register_business_onboarding",
-        rpcArgs,
-      );
-
-      if (error) {
-        setErrorMsg(error.message);
+      if (!token) {
+        setErrorMsg("Sesión no válida. Por favor, inicia sesión nuevamente.");
         return;
       }
 
-      if (data) {
-        await refreshIdentity();
+      const edgeUrl =
+        process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+
+      // 1. Step 1: Create Business via api-v1
+      const bizRes = await fetch(
+        `${edgeUrl}/functions/v1/api-v1/business/onboarding`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            "Idempotency-Key": `biz_${identity?.userId}_${taxId.trim()}`,
+          },
+          body: JSON.stringify({
+            legal_name: legalName.trim(),
+            brand_name: brandName.trim(),
+            tax_id: taxId.trim(),
+          }),
+        },
+      );
+
+      const bizData = await bizRes.json();
+      if (!bizRes.ok) {
+        setErrorMsg(bizData.error || "Error al crear la empresa");
+        return;
       }
+
+      // 2. Step 2: Create Initial Branch Location via api-v1
+      const locRes = await fetch(
+        `${edgeUrl}/functions/v1/api-v1/business/locations`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            "Idempotency-Key": `loc_${identity?.userId}_${bizData.business_id}_initial`,
+          },
+          body: JSON.stringify({
+            business_id: bizData.business_id,
+            name: branchName.trim(),
+            address_text: branchAddress.trim(),
+            latitude: 12.136389,
+            longitude: -86.251389,
+            pickup_instructions: pickupInstructions.trim() || undefined,
+          }),
+        },
+      );
+
+      const locData = await locRes.json();
+      if (!locRes.ok) {
+        setErrorMsg(locData.error || "Error al registrar la sucursal");
+        return;
+      }
+
+      await refreshIdentity();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error inesperado";
       setErrorMsg(msg);
@@ -122,7 +166,7 @@ export default function BusinessOnboardingRequiredScreen() {
           <Text style={styles.label}>Nombre Comercial / Marca</Text>
           <TextInput
             style={styles.input}
-            placeholder="Ej. Mi Tienda Express"
+            placeholder="Ej. Pulpería La Central"
             value={brandName}
             onChangeText={setBrandName}
             autoCapitalize="words"
@@ -130,7 +174,7 @@ export default function BusinessOnboardingRequiredScreen() {
         </View>
 
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Número RUC / Cédula Tributaria</Text>
+          <Text style={styles.label}>RUC / Cédula Tributaria</Text>
           <TextInput
             style={styles.input}
             placeholder="Ej. J0310000000001"
@@ -140,8 +184,11 @@ export default function BusinessOnboardingRequiredScreen() {
           />
         </View>
 
+        <View style={styles.separator} />
+        <Text style={styles.subTitle}>Primera Sucursal</Text>
+
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Nombre de Sucursal Principal</Text>
+          <Text style={styles.label}>Nombre de la Sucursal</Text>
           <TextInput
             style={styles.input}
             placeholder="Ej. Sucursal Central"
@@ -151,10 +198,10 @@ export default function BusinessOnboardingRequiredScreen() {
         </View>
 
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Dirección Exacta</Text>
+          <Text style={styles.label}>Dirección Física</Text>
           <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Ej. De la rotonda El Güegüense 2c al lago"
+            style={styles.input}
+            placeholder="Ej. Calle Principal #123, Managua"
             value={branchAddress}
             onChangeText={setBranchAddress}
             multiline
@@ -165,26 +212,26 @@ export default function BusinessOnboardingRequiredScreen() {
           <Text style={styles.label}>Instrucciones de Retiro (Opcional)</Text>
           <TextInput
             style={styles.input}
-            placeholder="Ej. Solicitar paquete en caja #2"
+            placeholder="Ej. Tocar timbre en recepción"
             value={pickupInstructions}
             onChangeText={setPickupInstructions}
           />
         </View>
 
         <TouchableOpacity
-          style={[styles.submitButton, loading && styles.buttonDisabled]}
+          style={[styles.button, loading && styles.buttonDisabled]}
           onPress={handleRegister}
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.submitButtonText}>Registrar y Comenzar</Text>
+            <Text style={styles.buttonText}>Completar Registro</Text>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.logoutButton} onPress={signOut}>
-          <Text style={styles.logoutButtonText}>Cerrar Sesión</Text>
+          <Text style={styles.logoutText}>Cerrar Sesión</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -194,94 +241,95 @@ export default function BusinessOnboardingRequiredScreen() {
 const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
-    backgroundColor: "#F9FAFB",
     padding: 24,
+    backgroundColor: "#F8FAFC",
   },
   container: {
-    width: "100%",
-    maxWidth: 500,
-    alignSelf: "center",
+    flex: 1,
+    justifyContent: "center",
   },
   title: {
     fontSize: 24,
     fontWeight: "bold",
-    color: "#111827",
+    color: "#0F172A",
     marginBottom: 8,
-    textAlign: "center",
+  },
+  subTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#1E293B",
+    marginTop: 12,
+    marginBottom: 12,
   },
   message: {
     fontSize: 15,
-    color: "#4B5563",
-    textAlign: "center",
+    color: "#475569",
     marginBottom: 8,
     lineHeight: 22,
   },
   detail: {
     fontSize: 13,
-    color: "#6B7280",
+    color: "#64748B",
     marginBottom: 20,
-    textAlign: "center",
   },
-  errorBox: {
-    backgroundColor: "#FEE2E2",
-    borderWidth: 1,
-    borderColor: "#EF4444",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  errorText: {
-    color: "#B91C1C",
-    fontSize: 14,
-    textAlign: "center",
+  separator: {
+    height: 1,
+    backgroundColor: "#E2E8F0",
+    marginVertical: 16,
   },
   formGroup: {
-    marginBottom: 14,
+    marginBottom: 16,
   },
   label: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#374151",
+    fontWeight: "500",
+    color: "#334155",
     marginBottom: 6,
   },
   input: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#D1D5DB",
+    borderColor: "#CBD5E1",
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    padding: 12,
     fontSize: 15,
-    color: "#111827",
+    color: "#0F172A",
   },
-  textArea: {
-    minHeight: 60,
-    textAlignVertical: "top",
-  },
-  submitButton: {
-    backgroundColor: "#2563EB",
-    paddingVertical: 14,
+  errorBox: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
     borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorText: {
+    color: "#B91C1C",
+    fontSize: 14,
+  },
+  button: {
+    backgroundColor: "#0284C7",
+    borderRadius: 8,
+    padding: 16,
     alignItems: "center",
-    marginTop: 12,
-    marginBottom: 12,
+    marginTop: 16,
   },
   buttonDisabled: {
     opacity: 0.6,
   },
-  submitButtonText: {
+  buttonText: {
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "600",
   },
   logoutButton: {
-    backgroundColor: "transparent",
-    paddingVertical: 12,
+    marginTop: 16,
+    padding: 12,
     alignItems: "center",
   },
-  logoutButtonText: {
-    color: "#DC2626",
+  logoutText: {
+    color: "#64748B",
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "500",
   },
 });

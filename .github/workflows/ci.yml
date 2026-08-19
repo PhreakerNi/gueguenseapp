@@ -230,6 +230,20 @@ jobs:
       - name: Reset Database & Apply Migrations
         run: pnpm supabase:reset
 
+      - name: Serve and Healthcheck api-v1 Edge Function
+        run: |
+          set -eo pipefail
+          pnpm supabase functions serve api-v1 --no-verify-jwt &
+          echo "Waiting for api-v1 Edge Function to be ready..."
+          for i in $(seq 1 30); do
+            if curl -s http://127.0.0.1:54321/functions/v1/api-v1/health | grep -q '"status":"ok"'; then
+              echo "api-v1 Edge Function is UP and healthy!"
+              break
+            fi
+            echo "Waiting for api-v1 (attempt $i/30)..."
+            sleep 1
+          done
+
       - name: Run Phase 3 Onboarding & Verification Integration Test Suite
         run: |
           set -eo pipefail

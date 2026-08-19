@@ -1,12 +1,12 @@
 # Güegüense — Roadmap de Desarrollo Incremental (20 Fases: 0–19)
 
-**Versión:** 1.0.0-phase2  
-**Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase2_Cierre_v1_3.md`
+**Versión:** 1.0.0-phase3  
+**Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — ✅ APROBADA | FASE 3 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
+**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase3_Correccion_v1_1.md`
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 2 v1.3)
+## 🛠️ Stack Tecnológico Congelado (Fase 3 v1.1)
 
 - **Node.js:** `24.18.0 LTS`
 - **Gestor de Paquetes:** `pnpm@11.17.0` (Workspaces monorepo con un único `pnpm-lock.yaml`)
@@ -16,7 +16,7 @@
   - TypeScript (Expo mobile apps): `6.0.3` (Expo SDK 57 compatible)
 - **Framework Mobile:** `Expo SDK 57` (`57.0.14`, `react-native` 0.86.2, `react` 19.2.3, `expo-router` 57.0.14, `expo-secure-store` 57.0.1, `expo-doctor` 1.20.1)
 - **Framework Web:** `Next.js 16.2.12 Active LTS` (App Router, Turbopack, `eslint-config-next` 16.2.12, `@supabase/ssr`, `proxy.ts`)
-- **Backend / DB:** `Supabase CLI 2.110.0` (PostgreSQL 15+, PostGIS, RLS Deny por defecto, SELECT grants para `authenticated`, types generados por CLI 2.110.0 para `--schema public`)
+- **Backend / DB:** `Supabase CLI 2.110.0` (PostgreSQL 15+, PostGIS, RLS Deny por defecto, backend service-only RPCs con `search_path = ''`, Storage privado con RLS)
 
 ---
 
@@ -34,12 +34,13 @@
 
 ### Fase 2 — Autenticación, Gestión de Identidad y Sesiones
 
-- **Estado:** 🟡 **EN REVISIÓN / CANDIDATA A APROBACIÓN** (`phase/2-auth-identity-sessions`)
-- **Objetivo:** Autenticación Supabase Auth Email/Password, persistencia segura con `expo-secure-store`, modelo compartido `IdentityContext`, route guards por membresía/driver/status con DB fixtures reales, Admin SSR Auth con `@supabase/ssr` y `proxy.ts`, MFA TOTP AAL2 real, integration test gate y pgTAP foundation tests.
+- **Estado:** ✅ **APROBADA** (Commit `6ec0835` / Run `32274479103`)
+- **Entregables:** Autenticación Supabase Auth Email/Password, persistencia segura con `expo-secure-store`, modelo compartido `IdentityContext`, route guards por membresía/driver/status con DB fixtures reales, Admin SSR Auth con `@supabase/ssr` y `proxy.ts`, MFA TOTP AAL2 real, integration test gate y pgTAP foundation tests.
 
 ### Fase 3 — Onboarding B2B y Registro de Conductores
 
-- **Estado:** ⏳ Pendiente (No iniciada)
+- **Estado:** 🟡 **EN REVISIÓN / CANDIDATA A APROBACIÓN** (`phase/3-onboarding-b2b-drivers`)
+- **Objetivo:** Edge Function canónica `api-v1` con Idempotency-Key transaccional race-safe, creación atómica de Business (`PENDING`) y separación de Branch (`business_locations`) con N:M (`business_member_locations`), registro de Driver personal separado de vehículo, flujo seguro de subida de documentos con signed upload URL y verificación de almacenamiento, bloqueo de bypass de storage, cola de verificación administrativa con MFA TOTP AAL2, auditoría canónica (`DRIVER_VERIFIED`, `DRIVER_REJECTED`), pgTAP tests 35/35 (total 95/95) y suite de integración HTTP 100% sobre `api-v1`.
 
 ### Fase 4 — Gestión de Cotización de Envíos (Quote Engine)
 
@@ -101,6 +102,6 @@
 
 - **Estado:** ⏳ Pendiente (No iniciada)
 
-### Fase 19 — Despliegue de Infraestructura y Producción (Deployment)
+### Fase 19 — Hardening, Auditoría Integral de Seguridad y Preparación para Producción
 
 - **Estado:** ⏳ Pendiente (No iniciada)

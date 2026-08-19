@@ -10,7 +10,10 @@ import {
 } from "react-native";
 import { useAuth } from "../../src/context/auth-context";
 import { getSupabaseClient } from "../../src/supabase";
-import { driverOnboardingSchema } from "@gueguense/schemas";
+import {
+  driverOnboardingSchema,
+  vehicleRegistrationSchema,
+} from "@gueguense/schemas";
 
 export default function DriverOnboardingRequiredScreen() {
   const { identity, signOut, refreshIdentity } = useAuth();
@@ -19,7 +22,7 @@ export default function DriverOnboardingRequiredScreen() {
   const [licenseNumber, setLicenseNumber] = useState("");
   const [vehicleMake, setVehicleMake] = useState("");
   const [vehicleModel, setVehicleModel] = useState("");
-  const [vehicleYear, setVehicleYear] = useState("2022");
+  const [vehicleYear, setVehicleYear] = useState("2023");
   const [vehicleColor, setVehicleColor] = useState("");
   const [vehicleLicensePlate, setVehicleLicensePlate] = useState("");
 
@@ -35,52 +38,144 @@ export default function DriverOnboardingRequiredScreen() {
   const handleRegister = async () => {
     setErrorMsg(null);
 
-    const validation = driverOnboardingSchema.safeParse({
+    const driverVal = driverOnboardingSchema.safeParse({
       nationalIdNumber,
       licenseNumber,
-      vehicleMake,
-      vehicleModel,
-      vehicleYear: parseInt(vehicleYear, 10),
-      vehicleColor,
-      vehicleLicensePlate,
     });
+    if (!driverVal.success) {
+      setErrorMsg(
+        driverVal.error.issues[0]?.message ?? "Datos personales inválidos",
+      );
+      return;
+    }
 
-    if (!validation.success) {
-      setErrorMsg(validation.error.issues[0]?.message ?? "Datos inválidos");
+    const vehicleVal = vehicleRegistrationSchema.safeParse({
+      make: vehicleMake,
+      model: vehicleModel,
+      year: parseInt(vehicleYear, 10),
+      color: vehicleColor,
+      licensePlate: vehicleLicensePlate,
+    });
+    if (!vehicleVal.success) {
+      setErrorMsg(
+        vehicleVal.error.issues[0]?.message ?? "Datos de vehículo inválidos",
+      );
       return;
     }
 
     setLoading(true);
     try {
       const client = getSupabaseClient();
-      const { data, error } = await client.rpc("register_driver_onboarding", {
-        p_national_id_number: nationalIdNumber.trim(),
-        p_license_number: licenseNumber.trim(),
-        p_vehicle_make: vehicleMake.trim(),
-        p_vehicle_model: vehicleModel.trim(),
-        p_vehicle_year: parseInt(vehicleYear, 10),
-        p_vehicle_color: vehicleColor.trim(),
-        p_vehicle_license_plate: vehicleLicensePlate.trim().toUpperCase(),
-      });
-
-      if (error) {
-        setErrorMsg(error.message);
+      const { data: sessionData } = await client.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setErrorMsg("Sesión no válida. Inicia sesión nuevamente.");
         return;
       }
 
-      if (data) {
-        // Automatically submit initial documents
-        await client.rpc("submit_driver_document", {
-          p_document_type: "NATIONAL_ID",
-          p_storage_path: `${identity?.userId}/national_id.jpg`,
-        });
-        await client.rpc("submit_driver_document", {
-          p_document_type: "DRIVER_LICENSE",
-          p_storage_path: `${identity?.userId}/driver_license.jpg`,
-        });
+      const edgeUrl =
+        process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
 
-        await refreshIdentity();
+      // 1. Step 1: Register Driver Profile via api-v1
+      const driverRes = await fetch(
+        `${edgeUrl}/functions/v1/api-v1/driver/onboarding`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            "Idempotency-Key": `drv_${identity?.userId}_${nationalIdNumber.trim()}`,
+          },
+          body: JSON.stringify({
+            national_id_number: nationalIdNumber.trim(),
+            license_number: licenseNumber.trim(),
+          }),
+        },
+      );
+
+      const driverData = await driverRes.json();
+      if (!driverRes.ok) {
+        setErrorMsg(driverData.error || "Error al registrar conductor");
+        return;
       }
+
+      // 2. Step 2: Register Vehicle via api-v1
+      const vehicleRes = await fetch(
+        `${edgeUrl}/functions/v1/api-v1/driver/vehicles`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            "Idempotency-Key": `veh_${identity?.userId}_${vehicleLicensePlate.trim()}`,
+          },
+          body: JSON.stringify({
+            make: vehicleMake.trim(),
+            model: vehicleModel.trim(),
+            year: parseInt(vehicleYear, 10),
+            color: vehicleColor.trim(),
+            license_plate: vehicleLicensePlate.trim().toUpperCase(),
+          }),
+        },
+      );
+
+      const vehicleData = await vehicleRes.json();
+      if (!vehicleRes.ok) {
+        setErrorMsg(vehicleData.error || "Error al registrar vehículo");
+        return;
+      }
+
+      // 3. Step 3: Request Signed Upload for Initial Mandatory Documents
+      for (const docType of [
+        "NATIONAL_ID",
+        "DRIVER_LICENSE",
+        "VEHICLE_REGISTRATION",
+      ]) {
+        const authRes = await fetch(
+          `${edgeUrl}/functions/v1/api-v1/driver/documents/upload-authorization`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ document_type: docType }),
+          },
+        );
+
+        if (authRes.ok) {
+          const authData = await authRes.json();
+          // Upload sample blob to signed URL
+          const dummyBlob = new Blob(["%PDF-1.4 mock document content"], {
+            type: "application/pdf",
+          });
+
+          await fetch(authData.upload_url, {
+            method: "PUT",
+            headers: { "Content-Type": "application/pdf" },
+            body: dummyBlob,
+          });
+
+          // Commit document in api-v1
+          await fetch(
+            `${edgeUrl}/functions/v1/api-v1/driver/documents/commit`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+                "Idempotency-Key": `doc_${identity?.userId}_${docType}_initial`,
+              },
+              body: JSON.stringify({
+                document_type: docType,
+                storage_path: authData.storage_path,
+              }),
+            },
+          );
+        }
+      }
+
+      await refreshIdentity();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error inesperado";
       setErrorMsg(msg);
@@ -94,14 +189,67 @@ export default function DriverOnboardingRequiredScreen() {
     setLoading(true);
     try {
       const client = getSupabaseClient();
-      const { error } = await client.rpc("submit_driver_document", {
-        p_document_type: "NATIONAL_ID",
-        p_storage_path: `${identity?.userId}/national_id_updated.jpg`,
-      });
-      if (error) {
-        setErrorMsg(error.message);
+      const { data: sessionData } = await client.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setErrorMsg("Sesión no válida. Inicia sesión nuevamente.");
         return;
       }
+
+      const edgeUrl =
+        process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+
+      const authRes = await fetch(
+        `${edgeUrl}/functions/v1/api-v1/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ document_type: "NATIONAL_ID" }),
+        },
+      );
+
+      if (!authRes.ok) {
+        const err = await authRes.json();
+        setErrorMsg(err.error || "No se pudo obtener URL de subida");
+        return;
+      }
+
+      const authData = await authRes.json();
+      const dummyBlob = new Blob(["%PDF-1.4 updated document content"], {
+        type: "application/pdf",
+      });
+
+      await fetch(authData.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: dummyBlob,
+      });
+
+      const commitRes = await fetch(
+        `${edgeUrl}/functions/v1/api-v1/driver/documents/commit`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            "Idempotency-Key": `reupload_${identity?.userId}_${Date.now()}`,
+          },
+          body: JSON.stringify({
+            document_type: "NATIONAL_ID",
+            storage_path: authData.storage_path,
+          }),
+        },
+      );
+
+      if (!commitRes.ok) {
+        const err = await commitRes.json();
+        setErrorMsg(err.error || "Error al confirmar documento");
+        return;
+      }
+
       await refreshIdentity();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error inesperado";
@@ -119,18 +267,20 @@ export default function DriverOnboardingRequiredScreen() {
           Tu solicitud y documentos están siendo verificados por el equipo de
           operaciones. Te notificaremos cuando tu cuenta sea activada.
         </Text>
-        <Text style={styles.detail}>Estado: PENDIENTE DE APROBACIÓN</Text>
-
+        <Text style={styles.detail}>
+          Conductor: {identity?.profile.fullName ?? identity?.email}
+        </Text>
+        <Text style={styles.statusBadge}>
+          ESTADO: PENDIENTE DE VERIFICACIÓN
+        </Text>
         <TouchableOpacity
           style={styles.refreshButton}
           onPress={refreshIdentity}
-          disabled={loading}
         >
-          <Text style={styles.refreshButtonText}>Actualizar Estado</Text>
+          <Text style={styles.refreshText}>Actualizar Estado</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.logoutButton} onPress={signOut}>
-          <Text style={styles.logoutButtonText}>Cerrar Sesión</Text>
+          <Text style={styles.logoutText}>Cerrar Sesión</Text>
         </TouchableOpacity>
       </View>
     );
@@ -143,32 +293,28 @@ export default function DriverOnboardingRequiredScreen() {
           Documentación Rechazada
         </Text>
         <Text style={styles.message}>
-          Tu solicitud fue rechazada por el equipo de verificación. Por favor
-          vuelve a cargar tus documentos con fotos claras y legibles.
+          Uno o más documentos fueron rechazados por el equipo de verificación.
+          Por favor sube nuevamente los documentos solicitados con mejor
+          claridad y vigencia.
         </Text>
-
         {errorMsg && (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{errorMsg}</Text>
           </View>
         )}
-
         <TouchableOpacity
-          style={[styles.submitButton, loading && styles.buttonDisabled]}
+          style={[styles.button, loading && styles.buttonDisabled]}
           onPress={handleReupload}
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.submitButtonText}>
-              Reenviar Documentos para Revisión
-            </Text>
+            <Text style={styles.buttonText}>Re-subir Documento</Text>
           )}
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.logoutButton} onPress={signOut}>
-          <Text style={styles.logoutButtonText}>Cerrar Sesión</Text>
+          <Text style={styles.logoutText}>Cerrar Sesión</Text>
         </TouchableOpacity>
       </View>
     );
@@ -179,8 +325,8 @@ export default function DriverOnboardingRequiredScreen() {
       <View style={styles.container}>
         <Text style={styles.title}>Registro de Conductor</Text>
         <Text style={styles.message}>
-          Ingresa tus datos personales y de tu motocicleta para solicitar tu
-          ingreso a la flota.
+          Completa tus datos personales, de licencia y de vehículo para
+          solicitar verificación.
         </Text>
         <Text style={styles.detail}>
           Usuario: {identity?.profile.fullName ?? identity?.email}
@@ -214,8 +360,11 @@ export default function DriverOnboardingRequiredScreen() {
           />
         </View>
 
+        <View style={styles.separator} />
+        <Text style={styles.subTitle}>Datos del Vehículo</Text>
+
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Marca de Motocicleta</Text>
+          <Text style={styles.label}>Marca</Text>
           <TextInput
             style={styles.input}
             placeholder="Ej. Yamaha, Honda, Suzuki"
@@ -229,7 +378,7 @@ export default function DriverOnboardingRequiredScreen() {
           <Text style={styles.label}>Modelo</Text>
           <TextInput
             style={styles.input}
-            placeholder="Ej. FZ-S, CB125, Boxer"
+            placeholder="Ej. FZ-S, Pulsar, YBR"
             value={vehicleModel}
             onChangeText={setVehicleModel}
             autoCapitalize="words"
@@ -237,10 +386,10 @@ export default function DriverOnboardingRequiredScreen() {
         </View>
 
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Año de Fabricación</Text>
+          <Text style={styles.label}>Año</Text>
           <TextInput
             style={styles.input}
-            placeholder="Ej. 2022"
+            placeholder="Ej. 2023"
             value={vehicleYear}
             onChangeText={setVehicleYear}
             keyboardType="numeric"
@@ -248,10 +397,10 @@ export default function DriverOnboardingRequiredScreen() {
         </View>
 
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Color de la Motocicleta</Text>
+          <Text style={styles.label}>Color</Text>
           <TextInput
             style={styles.input}
-            placeholder="Ej. Negro, Rojo, Azul"
+            placeholder="Ej. Azul, Negro, Rojo"
             value={vehicleColor}
             onChangeText={setVehicleColor}
             autoCapitalize="words"
@@ -270,21 +419,19 @@ export default function DriverOnboardingRequiredScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.submitButton, loading && styles.buttonDisabled]}
+          style={[styles.button, loading && styles.buttonDisabled]}
           onPress={handleRegister}
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.submitButtonText}>
-              Registrar y Enviar Documentos
-            </Text>
+            <Text style={styles.buttonText}>Registrar y Enviar Documentos</Text>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.logoutButton} onPress={signOut}>
-          <Text style={styles.logoutButtonText}>Cerrar Sesión</Text>
+          <Text style={styles.logoutText}>Cerrar Sesión</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -294,110 +441,129 @@ export default function DriverOnboardingRequiredScreen() {
 const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
-    backgroundColor: "#F9FAFB",
     padding: 24,
+    backgroundColor: "#F8FAFC",
+  },
+  container: {
+    flex: 1,
+    justifyContent: "center",
   },
   centerContainer: {
     flex: 1,
     padding: 24,
-    backgroundColor: "#F9FAFB",
     justifyContent: "center",
     alignItems: "center",
-  },
-  container: {
-    width: "100%",
-    maxWidth: 500,
-    alignSelf: "center",
+    backgroundColor: "#F8FAFC",
   },
   title: {
     fontSize: 24,
     fontWeight: "bold",
-    color: "#111827",
+    color: "#0F172A",
     marginBottom: 8,
-    textAlign: "center",
+  },
+  subTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#1E293B",
+    marginTop: 12,
+    marginBottom: 12,
   },
   message: {
     fontSize: 15,
-    color: "#4B5563",
-    textAlign: "center",
+    color: "#475569",
     marginBottom: 8,
     lineHeight: 22,
+    textAlign: "center",
   },
   detail: {
     fontSize: 13,
-    color: "#6B7280",
+    color: "#64748B",
     marginBottom: 20,
     textAlign: "center",
   },
-  errorBox: {
-    backgroundColor: "#FEE2E2",
-    borderWidth: 1,
-    borderColor: "#EF4444",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
+  statusBadge: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: "#D97706",
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginBottom: 24,
   },
-  errorText: {
-    color: "#B91C1C",
-    fontSize: 14,
-    textAlign: "center",
+  separator: {
+    height: 1,
+    backgroundColor: "#E2E8F0",
+    marginVertical: 16,
   },
   formGroup: {
-    marginBottom: 14,
+    marginBottom: 16,
   },
   label: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#374151",
+    fontWeight: "500",
+    color: "#334155",
     marginBottom: 6,
   },
   input: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#D1D5DB",
+    borderColor: "#CBD5E1",
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    padding: 12,
     fontSize: 15,
-    color: "#111827",
+    color: "#0F172A",
   },
-  submitButton: {
-    backgroundColor: "#10B981",
-    paddingVertical: 14,
+  errorBox: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
     borderRadius: 8,
-    alignItems: "center",
-    marginTop: 12,
-    marginBottom: 12,
+    padding: 12,
+    marginBottom: 16,
+    width: "100%",
   },
-  refreshButton: {
-    backgroundColor: "#2563EB",
-    paddingVertical: 14,
-    paddingHorizontal: 24,
+  errorText: {
+    color: "#B91C1C",
+    fontSize: 14,
+  },
+  button: {
+    backgroundColor: "#16A34A",
     borderRadius: 8,
+    padding: 16,
     alignItems: "center",
-    marginBottom: 12,
-  },
-  refreshButtonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "600",
+    marginTop: 16,
+    width: "100%",
   },
   buttonDisabled: {
     opacity: 0.6,
   },
-  submitButtonText: {
+  buttonText: {
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "600",
   },
+  refreshButton: {
+    backgroundColor: "#0284C7",
+    borderRadius: 8,
+    padding: 14,
+    alignItems: "center",
+    width: "100%",
+    marginBottom: 8,
+  },
+  refreshText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "600",
+  },
   logoutButton: {
-    backgroundColor: "transparent",
-    paddingVertical: 12,
+    marginTop: 12,
+    padding: 12,
     alignItems: "center",
   },
-  logoutButtonText: {
-    color: "#DC2626",
+  logoutText: {
+    color: "#64748B",
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "500",
   },
 });

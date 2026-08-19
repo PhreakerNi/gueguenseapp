@@ -64,6 +64,7 @@ export type IdentityContext = {
     role: BusinessMemberRole;
     status: BusinessMemberStatus;
     businessAccountStatus?: BusinessAccountStatus | undefined;
+    authorizedLocationIds?: string[] | undefined;
   }>;
   driver: null | {
     verificationStatus: DriverVerificationStatus;
@@ -80,10 +81,12 @@ export type AccessEvaluationReason =
 export type AccessEvaluation = {
   allowed: boolean;
   reason?: AccessEvaluationReason | undefined;
+  authorizedLocationIds?: string[] | undefined;
 };
 
 export function evaluateBusinessAccess(
   identity: IdentityContext | null,
+  targetLocationId?: string,
 ): AccessEvaluation {
   if (!identity) {
     return { allowed: false, reason: "ONBOARDING_REQUIRED" };
@@ -102,7 +105,30 @@ export function evaluateBusinessAccess(
   if (!activeMembership) {
     return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
   }
-  return { allowed: true };
+
+  // Owner has universal branch access
+  if (activeMembership.role === "business_owner") {
+    const res: AccessEvaluation = { allowed: true };
+    if (activeMembership.authorizedLocationIds) {
+      res.authorizedLocationIds = activeMembership.authorizedLocationIds;
+    }
+    return res;
+  }
+
+  // Manager and Employee require scoped branch authorization
+  const authorizedLocations = activeMembership.authorizedLocationIds || [];
+  if (authorizedLocations.length === 0) {
+    return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
+  }
+
+  if (targetLocationId && !authorizedLocations.includes(targetLocationId)) {
+    return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
+  }
+
+  return {
+    allowed: true,
+    authorizedLocationIds: authorizedLocations,
+  };
 }
 
 export function evaluateDriverAccess(
@@ -111,11 +137,20 @@ export function evaluateDriverAccess(
   if (!identity || !identity.driver) {
     return { allowed: false, reason: "ONBOARDING_REQUIRED" };
   }
-  if (identity.driver.accountStatus === "REGISTERED") {
-    return { allowed: false, reason: "ONBOARDING_REQUIRED" };
-  }
-  if (identity.driver.accountStatus === "ACTIVE") {
+  // Strict requirement: driver must be VERIFIED and ACTIVE
+  if (
+    identity.driver.verificationStatus === "VERIFIED" &&
+    identity.driver.accountStatus === "ACTIVE"
+  ) {
     return { allowed: true };
+  }
+  if (
+    identity.driver.verificationStatus === "PENDING" ||
+    identity.driver.verificationStatus === "UNDER_REVIEW" ||
+    identity.driver.verificationStatus === "REJECTED" ||
+    identity.driver.accountStatus === "REGISTERED"
+  ) {
+    return { allowed: false, reason: "ONBOARDING_REQUIRED" };
   }
   return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
 }

@@ -157,32 +157,29 @@ export type Database = {
       businesses: {
         Row: {
           account_status: string
-          brand_name: string | null
+          brand_name: string
           created_at: string
           id: string
-          legal_name: string | null
-          tax_id: string | null
-          updated_at: string
+          legal_name: string
+          tax_id: string
           verification_status: string
         }
         Insert: {
           account_status?: string
-          brand_name?: string | null
+          brand_name: string
           created_at?: string
           id?: string
-          legal_name?: string | null
-          tax_id?: string | null
-          updated_at?: string
+          legal_name: string
+          tax_id: string
           verification_status?: string
         }
         Update: {
           account_status?: string
-          brand_name?: string | null
+          brand_name?: string
           created_at?: string
           id?: string
-          legal_name?: string | null
-          tax_id?: string | null
-          updated_at?: string
+          legal_name?: string
+          tax_id?: string
           verification_status?: string
         }
         Relationships: []
@@ -287,6 +284,39 @@ export type Database = {
         }
         Relationships: []
       }
+      idempotency_keys: {
+        Row: {
+          created_at: string
+          endpoint: string
+          key: string
+          locked_at: string
+          request_hash: string
+          response_body: Json | null
+          response_status: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          endpoint: string
+          key: string
+          locked_at?: string
+          request_hash: string
+          response_body?: Json | null
+          response_status?: number | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          endpoint?: string
+          key?: string
+          locked_at?: string
+          request_hash?: string
+          response_body?: Json | null
+          response_status?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -363,41 +393,93 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      acquire_idempotency_lock: {
+        Args: {
+          p_endpoint: string
+          p_key: string
+          p_request_hash: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      add_business_member: {
+        Args: {
+          p_actor_id: string
+          p_business_id: string
+          p_location_ids?: string[]
+          p_role: string
+          p_target_user_id: string
+        }
+        Returns: Json
+      }
       admin_verify_driver: {
         Args: {
+          p_actor_aal?: string
+          p_actor_id: string
+          p_actor_role?: string
           p_decision: string
           p_driver_id: string
           p_rejection_reason?: string
         }
         Returns: Json
       }
-      register_business_onboarding: {
+      commit_driver_document: {
         Args: {
-          p_branch_address: string
-          p_branch_latitude: number
-          p_branch_longitude: number
-          p_branch_name: string
+          p_actor_id: string
+          p_document_type: string
+          p_file_size: number
+          p_mime_type: string
+          p_storage_path: string
+        }
+        Returns: Json
+      }
+      commit_idempotency_response: {
+        Args: {
+          p_key: string
+          p_response_body: Json
+          p_response_status: number
+          p_user_id: string
+        }
+        Returns: undefined
+      }
+      create_business: {
+        Args: {
+          p_actor_id: string
           p_brand_name: string
           p_legal_name: string
-          p_pickup_instructions?: string
           p_tax_id: string
         }
         Returns: Json
       }
-      register_driver_onboarding: {
+      create_business_location: {
         Args: {
-          p_license_number: string
-          p_national_id_number: string
-          p_vehicle_color: string
-          p_vehicle_license_plate: string
-          p_vehicle_make: string
-          p_vehicle_model: string
-          p_vehicle_year: number
+          p_actor_id: string
+          p_address_text: string
+          p_business_id: string
+          p_latitude: number
+          p_longitude: number
+          p_name: string
+          p_pickup_instructions?: string
         }
         Returns: Json
       }
-      submit_driver_document: {
-        Args: { p_document_type: string; p_storage_path: string }
+      register_driver: {
+        Args: {
+          p_actor_id: string
+          p_license_number: string
+          p_national_id_number: string
+        }
+        Returns: Json
+      }
+      register_vehicle: {
+        Args: {
+          p_actor_id: string
+          p_color: string
+          p_license_plate: string
+          p_make: string
+          p_model: string
+          p_year: number
+        }
         Returns: Json
       }
     }
@@ -532,4 +614,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

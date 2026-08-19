@@ -135,24 +135,26 @@ export default async function AdminDashboardPage() {
     if (!driverId || !decision) return;
 
     const serverSupabase = await createClient();
-    const rpcParams: {
-      p_driver_id: string;
-      p_decision: string;
-      p_rejection_reason?: string;
-    } = {
-      p_driver_id: driverId,
-      p_decision: decision,
-    };
-    if (rejectionReason) {
-      rpcParams.p_rejection_reason = rejectionReason;
-    }
+    const { data: sessionData } = await serverSupabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    const edgeUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
 
-    await (
-      serverSupabase.rpc as unknown as (
-        fn: string,
-        args?: Record<string, unknown>,
-      ) => Promise<unknown>
-    )("admin_verify_driver", rpcParams);
+    if (token) {
+      await fetch(`${edgeUrl}/functions/v1/api-v1/admin/verify-driver`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": `admin_verify_${driverId}_${Date.now()}`,
+        },
+        body: JSON.stringify({
+          driver_id: driverId,
+          decision,
+          rejection_reason: rejectionReason || undefined,
+        }),
+      });
+    }
 
     revalidatePath("/");
   }
