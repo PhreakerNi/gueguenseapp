@@ -210,7 +210,7 @@ SET LOCAL "request.jwt.claims" = '{"sub":"44444444-4444-4444-8444-444444444444",
 SELECT throws_ok(
     $$SELECT public.admin_verify_driver('22222222-2222-4222-8222-222222222222'::uuid, 'APPROVE')$$,
     'P0001',
-    'AUTH_ADMIN_ROLE_REQUIRED: Operator role cannot verify or approve drivers',
+    'AUTH_ADMIN_ROLE_REQUIRED: Only verification_agent, admin or super_admin can verify drivers',
     'Operator cannot verify drivers'
 );
 
@@ -222,7 +222,7 @@ SET LOCAL "request.jwt.claims" = '{"sub":"33333333-3333-4333-8333-333333333333",
 SELECT throws_ok(
     $$SELECT public.admin_verify_driver('22222222-2222-4222-8222-222222222222'::uuid, 'APPROVE')$$,
     'P0001',
-    'AUTH_MFA_REQUIRED: AAL2 multi-factor authentication is required for driver verification actions',
+    'AUTH_MFA_REQUIRED: AAL2 MFA is required for administrative verification',
     'AAL1 session cannot verify drivers'
 );
 
