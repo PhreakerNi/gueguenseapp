@@ -296,9 +296,9 @@ SELECT throws_ok(
     $$SELECT public.admin_verify_driver(
         '33333333-3333-4333-8333-333333333333'::uuid,
         '22222222-2222-4222-8222-222222222222'::uuid,
-        'APPROVE',
-        NULL,
-        'aal2'
+        'APPROVE'::text,
+        NULL::text,
+        'aal2'::text
     )$$,
     'P0001',
     'DOCUMENTATION_INCOMPLETE: Driver must have all 3 mandatory documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)',
@@ -312,9 +312,9 @@ SELECT throws_ok(
     $$SELECT public.admin_verify_driver(
         '44444444-4444-4444-8444-444444444444'::uuid,
         '22222222-2222-4222-8222-222222222222'::uuid,
-        'APPROVE',
-        NULL,
-        'aal2'
+        'APPROVE'::text,
+        NULL::text,
+        'aal2'::text
     )$$,
     'P0001',
     'AUTH_ADMIN_ROLE_REQUIRED: Only verification_agent, admin or super_admin can verify drivers',
@@ -326,9 +326,9 @@ SELECT throws_ok(
     $$SELECT public.admin_verify_driver(
         '33333333-3333-4333-8333-333333333333'::uuid,
         '22222222-2222-4222-8222-222222222222'::uuid,
-        'APPROVE',
-        NULL,
-        'aal1'
+        'APPROVE'::text,
+        NULL::text,
+        'aal1'::text
     )$$,
     'P0001',
     'AUTH_MFA_REQUIRED: AAL2 MFA is required for administrative verification',
@@ -339,9 +339,9 @@ SELECT throws_ok(
 SELECT public.admin_verify_driver(
     '33333333-3333-4333-8333-333333333333'::uuid,
     '22222222-2222-4222-8222-222222222222'::uuid,
-    'REJECT',
-    'Cedula ilegible',
-    'aal2'
+    'REJECT'::text,
+    'Cedula ilegible'::text,
+    'aal2'::text
 );
 
 SELECT is(
@@ -441,9 +441,9 @@ SELECT is(
 SELECT public.admin_verify_driver(
     '55555555-5555-4555-8555-555555555555'::uuid,
     '22222222-2222-4222-8222-222222222222'::uuid,
-    'APPROVE',
-    NULL,
-    'aal2'
+    'APPROVE'::text,
+    NULL::text,
+    'aal2'::text
 );
 
 SELECT is(
