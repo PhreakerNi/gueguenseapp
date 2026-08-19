@@ -46,9 +46,9 @@ SET LOCAL "request.jwt.claim.sub" = '11111111-1111-4111-8111-111111111111';
 SET LOCAL "request.jwt.claims" = '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}';
 
 SELECT public.register_business_onboarding(
-    'Empresa Legal S.A.',
-    'Mi Pulperia',
-    'J0310000000001',
+    'Empresa Nueva S.A.',
+    'Mi Pulperia Nueva',
+    'J0319999999999',
     'Sucursal Central',
     'Calle Principal #123, Managua',
     12.136389,
@@ -58,8 +58,8 @@ SELECT public.register_business_onboarding(
 
 SET LOCAL ROLE postgres;
 SELECT is(
-    (SELECT brand_name FROM public.businesses WHERE legal_name = 'Empresa Legal S.A.'),
-    'Mi Pulperia',
+    (SELECT brand_name FROM public.businesses WHERE legal_name = 'Empresa Nueva S.A.'),
+    'Mi Pulperia Nueva',
     'Business created with correct brand_name'
 );
 
@@ -97,9 +97,9 @@ SET LOCAL "request.jwt.claims" = '{"sub":"11111111-1111-4111-8111-111111111111",
 
 SELECT throws_ok(
     $$SELECT public.register_business_onboarding(
-        'Empresa Legal S.A.',
-        'Mi Pulperia',
-        'J0310000000001',
+        'Empresa Nueva S.A.',
+        'Mi Pulperia Nueva',
+        'J0319999999999',
         'Sucursal Central',
         'Calle Principal #123, Managua',
         12.136389,
@@ -116,13 +116,13 @@ SET LOCAL "request.jwt.claim.sub" = '22222222-2222-4222-8222-222222222222';
 SET LOCAL "request.jwt.claims" = '{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated"}';
 
 SELECT public.register_driver_onboarding(
-    '001-010190-0001A',
-    'LIC-98765432',
+    '001-010190-9999Z',
+    'LIC-99999999',
     'Yamaha',
     'FZ-S',
     2023,
     'Azul',
-    'M-998877'
+    'M-999999'
 );
 
 SET LOCAL ROLE postgres;
@@ -152,7 +152,7 @@ SELECT is(
 
 SELECT is(
     (SELECT license_plate FROM public.vehicles WHERE driver_id = '22222222-2222-4222-8222-222222222222'),
-    'M-998877',
+    'M-999999',
     'Vehicle created with correct license_plate'
 );
 
@@ -163,13 +163,13 @@ SET LOCAL "request.jwt.claims" = '{"sub":"22222222-2222-4222-8222-222222222222",
 
 SELECT throws_ok(
     $$SELECT public.register_driver_onboarding(
-        '001-010190-0001A',
-        'LIC-98765432',
+        '001-010190-9999Z',
+        'LIC-99999999',
         'Yamaha',
         'FZ-S',
         2023,
         'Negro',
-        'M-998877'
+        'M-999999'
     )$$,
     'P0001',
     'ALREADY_REGISTERED: User is already registered as a driver',
