@@ -3,12 +3,18 @@
 
 BEGIN;
 
--- 1. Storage RLS Hardening: Drop client mutation policies on driver-documents bucket (Section 1)
+-- 1. Storage Bucket and RLS Hardening (Section 1 & 4)
+UPDATE storage.buckets
+SET allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'application/pdf']
+WHERE id = 'driver-documents';
+
+DROP POLICY IF EXISTS "Drivers can upload own documents" ON storage.objects;
 DROP POLICY IF EXISTS "Drivers can upload documents to own folder" ON storage.objects;
 DROP POLICY IF EXISTS "Drivers can update documents in own folder" ON storage.objects;
 DROP POLICY IF EXISTS "Drivers can delete documents in own folder" ON storage.objects;
+DROP POLICY IF EXISTS "Drivers can update own documents" ON storage.objects;
 
--- 2. Schema private for upload authorizations (Section 2)
+-- 2. Schema private for upload authorizations and idempotency (Section 2)
 CREATE SCHEMA IF NOT EXISTS private;
 GRANT USAGE ON SCHEMA private TO service_role;
 REVOKE ALL ON SCHEMA private FROM PUBLIC, anon, authenticated;
@@ -31,7 +37,8 @@ CREATE INDEX IF NOT EXISTS idx_doc_upload_auth_driver_id ON private.driver_docum
 CREATE INDEX IF NOT EXISTS idx_doc_upload_auth_upload_id ON private.driver_document_upload_authorizations(upload_id);
 
 -- 4. Canonical Idempotency Responses in private schema (Section 6 & 8)
-CREATE TABLE IF NOT EXISTS private.idempotency_responses (
+DROP TABLE IF EXISTS private.idempotency_responses CASCADE;
+CREATE TABLE private.idempotency_responses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_user_id UUID,
     scope TEXT NOT NULL,
@@ -44,11 +51,11 @@ CREATE TABLE IF NOT EXISTS private.idempotency_responses (
     CONSTRAINT idempotency_responses_scope_key_unique UNIQUE (scope, key)
 );
 
-CREATE INDEX IF NOT EXISTS idx_idempotency_responses_lookup ON private.idempotency_responses(scope, key);
 CREATE INDEX IF NOT EXISTS idx_idempotency_responses_expires ON private.idempotency_responses(expires_at);
 
--- 5. Canonical Public Idempotency Table (Section 6)
-CREATE TABLE IF NOT EXISTS public.idempotency_keys (
+-- 5. Canonical Public Idempotency Table (Section 6 & 12)
+DROP TABLE IF EXISTS public.idempotency_keys CASCADE;
+CREATE TABLE public.idempotency_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_type TEXT NOT NULL DEFAULT 'user' CHECK (actor_type IN ('user', 'service', 'anonymous')),
     actor_user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -67,10 +74,9 @@ ALTER TABLE public.idempotency_keys ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.idempotency_keys FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.idempotency_keys TO service_role;
 
-CREATE INDEX IF NOT EXISTS idx_idempotency_keys_scope_key ON public.idempotency_keys(scope, key);
-
 -- 6. Canonical Audit Logs Table (Section 11)
-CREATE TABLE IF NOT EXISTS public.audit_logs (
+DROP TABLE IF EXISTS public.audit_logs CASCADE;
+CREATE TABLE public.audit_logs (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     admin_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
     action TEXT NOT NULL CHECK (action IN ('DRIVER_VERIFIED', 'DRIVER_REJECTED')),
@@ -97,7 +103,8 @@ USING (
 );
 
 -- Partial Unique Index on driver_documents (Section 9)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_driver_documents_active_type
+DROP INDEX IF EXISTS public.idx_driver_documents_active_type;
+CREATE UNIQUE INDEX idx_driver_documents_active_type
 ON public.driver_documents (driver_id, document_type)
 WHERE verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED');
 
@@ -842,7 +849,7 @@ BEGIN
 END;
 $$;
 
--- 14. Execute Idempotent Operation Wrapper (Single Transaction & Advisory Lock, Section 8)
+-- 14. Execute Idempotent Operation Wrapper (Single Transaction & Advisory Lock, Section 8 & 15)
 CREATE OR REPLACE FUNCTION public.execute_idempotent_operation(
     p_actor_user_id UUID,
     p_scope TEXT,
@@ -877,7 +884,7 @@ BEGIN
     WHERE scope = p_scope AND key = p_key;
 
     IF v_cached.id IS NOT NULL THEN
-        -- Fingerprint validation (Section 7)
+        -- Fingerprint validation (Section 7 & 14)
         IF v_cached.request_fingerprint <> p_request_fingerprint THEN
             RAISE EXCEPTION 'IDEMPOTENCY_FINGERPRINT_MISMATCH: Idempotency key reused with different request payload';
         END IF;
@@ -959,7 +966,7 @@ BEGIN
 
     v_expires_at := NOW() + interval '24 hours';
 
-    -- Atomic persistence into private response cache (Section 8)
+    -- Atomic persistence into private response cache (Section 8 & 12)
     INSERT INTO private.idempotency_responses (
         actor_user_id,
         scope,
