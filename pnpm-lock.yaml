@@ -306,6 +306,9 @@ importers:
 
   packages/domain:
     devDependencies:
+      '@gueguense/config':
+        specifier: workspace:*
+        version: link:../config
       '@types/node':
         specifier: ^22.13.4
         version: 22.13.4

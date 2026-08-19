@@ -2,6 +2,10 @@ import React, { useEffect, useState, useRef } from "react";
 import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import * as Linking from "expo-linking";
+import {
+  validateRecoveryTokens,
+  DeepLinkDeduplicator,
+} from "@gueguense/domain";
 import { getSupabaseClient } from "../../src/supabase";
 import { useAuth } from "../../src/context/auth-context";
 
@@ -16,15 +20,14 @@ export default function BusinessAuthCallbackScreen() {
     error_description?: string;
   }>();
   const [statusText, setStatusText] = useState("Verificando autenticación...");
-  const processedUrlsRef = useRef<Set<string>>(new Set());
+  const deduplicatorRef = useRef(new DeepLinkDeduplicator());
 
   useEffect(() => {
     let isMounted = true;
 
     async function processUrl(urlStr?: string | null) {
       if (!urlStr) return;
-      if (processedUrlsRef.current.has(urlStr)) return;
-      processedUrlsRef.current.add(urlStr);
+      if (!deduplicatorRef.current.shouldProcess(urlStr)) return;
 
       const supabase = getSupabaseClient();
       try {
@@ -54,14 +57,20 @@ export default function BusinessAuthCallbackScreen() {
           }
         }
 
-        const isRecovery =
+        const isRecoveryRoute =
           type === "recovery" ||
           next === "/reset-password" ||
           next === "/(auth)/reset-password";
 
-        // CRITICAL: A recovery flow MUST have valid access_token and refresh_token
-        if (isRecovery) {
-          if (!accessToken || !refreshToken) {
+        // CRITICAL: Validate recovery tokens using canonical domain helper
+        if (isRecoveryRoute) {
+          const hasValidRecoveryTokens = validateRecoveryTokens(
+            "recovery",
+            accessToken,
+            refreshToken,
+          );
+
+          if (!hasValidRecoveryTokens) {
             // Invalid recovery link without valid tokens. Cannot reuse normal session.
             setRecoveryContext(false);
             router.replace("/(auth)/login");
@@ -70,8 +79,8 @@ export default function BusinessAuthCallbackScreen() {
 
           if (isMounted) setStatusText("Validando enlace de recuperación...");
           const { data, error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
+            access_token: accessToken!,
+            refresh_token: refreshToken!,
           });
 
           if (error || !data.session) {

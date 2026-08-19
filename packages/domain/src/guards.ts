@@ -270,3 +270,32 @@ export function validateRecoveryTokens(
   }
   return false;
 }
+
+export class DeepLinkDeduplicator {
+  private processed = new Set<string>();
+
+  shouldProcess(url: string | null | undefined): boolean {
+    if (!url) return false;
+    if (this.processed.has(url)) return false;
+    this.processed.add(url);
+    return true;
+  }
+
+  has(url: string): boolean {
+    return this.processed.has(url);
+  }
+
+  clear(): void {
+    this.processed.clear();
+  }
+}
+
+export function shouldProcessDeepLink(
+  processedSet: Set<string>,
+  url: string | null | undefined,
+): boolean {
+  if (!url) return false;
+  if (processedSet.has(url)) return false;
+  processedSet.add(url);
+  return true;
+}

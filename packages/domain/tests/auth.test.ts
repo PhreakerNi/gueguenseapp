@@ -7,8 +7,11 @@ import {
   evaluateAdminAccess,
   canResetPassword,
   validateRecoveryTokens,
+  DeepLinkDeduplicator,
+  shouldProcessDeepLink,
   type IdentityContext,
 } from "../src/index.js";
+import { processLock } from "@gueguense/config";
 
 describe("@gueguense/domain - Auth & Identity Guards", () => {
   it("should have all 12 normalized AUTH_ERROR_CODES without duplicates", () => {
@@ -366,125 +369,46 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
       );
     });
 
-    it("should prevent duplicate processing of the same deep link URL", () => {
-      const processed = new Set<string>();
+    it("should prevent duplicate processing of the same deep link URL via DeepLinkDeduplicator", () => {
+      const deduplicator = new DeepLinkDeduplicator();
       const testUrl =
         "gueguense-business://auth/callback#access_token=abc&refresh_token=xyz&type=recovery";
 
-      let processCount = 0;
-      const processDeepLink = (url: string) => {
-        if (processed.has(url)) return false;
-        processed.add(url);
-        processCount++;
-        return true;
-      };
-
-      assert.strictEqual(processDeepLink(testUrl), true);
+      assert.strictEqual(deduplicator.shouldProcess(testUrl), true);
       assert.strictEqual(
-        processDeepLink(testUrl),
+        deduplicator.shouldProcess(testUrl),
         false,
-        "Duplicate URL must be ignored",
+        "Duplicate URL must be rejected",
       );
-      assert.strictEqual(processCount, 1);
+      assert.strictEqual(deduplicator.has(testUrl), true);
+      assert.strictEqual(deduplicator.shouldProcess(null), false);
+      assert.strictEqual(deduplicator.shouldProcess(undefined), false);
+
+      deduplicator.clear();
+      assert.strictEqual(deduplicator.has(testUrl), false);
+      assert.strictEqual(deduplicator.shouldProcess(testUrl), true);
+    });
+
+    it("should prevent duplicate processing of deep links via shouldProcessDeepLink helper", () => {
+      const processed = new Set<string>();
+      const testUrl =
+        "gueguense-driver://auth/callback#access_token=123&refresh_token=456&type=recovery";
+
+      assert.strictEqual(shouldProcessDeepLink(processed, testUrl), true);
+      assert.strictEqual(shouldProcessDeepLink(processed, testUrl), false);
+      assert.strictEqual(shouldProcessDeepLink(processed, null), false);
+      assert.strictEqual(shouldProcessDeepLink(processed, undefined), false);
+      assert.strictEqual(processed.size, 1);
     });
   });
 
-  describe("processLock - Queue-based Mutex Concurrency & Timeout Guarantees", () => {
-    type QueueEntry = {
-      grant: () => void;
-      isCancelled: boolean;
-    };
-
-    class TestMutex {
-      isLocked = false;
-      queue: QueueEntry[] = [];
-
-      async acquire(acquireTimeout: number, name: string): Promise<void> {
-        if (!this.isLocked) {
-          this.isLocked = true;
-          return;
-        }
-
-        if (acquireTimeout === 0) {
-          throw new Error(
-            `Acquiring lock "${name}" failed immediately as it is already held`,
-          );
-        }
-
-        return new Promise<void>((resolve, reject) => {
-          const entry: QueueEntry = {
-            grant: () => {},
-            isCancelled: false,
-          };
-
-          let timer: ReturnType<typeof setTimeout> | undefined;
-
-          if (acquireTimeout > 0) {
-            timer = setTimeout(() => {
-              entry.isCancelled = true;
-              const idx = this.queue.indexOf(entry);
-              if (idx !== -1) {
-                this.queue.splice(idx, 1);
-              }
-              reject(
-                new Error(
-                  `Timeout acquiring client lock "${name}" after ${acquireTimeout}ms`,
-                ),
-              );
-            }, acquireTimeout);
-          }
-
-          entry.grant = () => {
-            if (timer) clearTimeout(timer);
-            resolve();
-          };
-
-          this.queue.push(entry);
-        });
-      }
-
-      release(): void {
-        while (this.queue.length > 0) {
-          const next = this.queue.shift()!;
-          if (!next.isCancelled) {
-            next.grant();
-            return;
-          }
-        }
-        this.isLocked = false;
-      }
-    }
-
-    const testLocks = new Map<string, TestMutex>();
-
-    const testProcessLock = async <R>(
-      name: string,
-      acquireTimeout: number,
-      fn: () => Promise<R>,
-    ): Promise<R> => {
-      let mutex = testLocks.get(name);
-      if (!mutex) {
-        mutex = new TestMutex();
-        testLocks.set(name, mutex);
-      }
-
-      await mutex.acquire(acquireTimeout, name);
-      try {
-        return await fn();
-      } finally {
-        mutex.release();
-        if (!mutex.isLocked && mutex.queue.length === 0) {
-          testLocks.delete(name);
-        }
-      }
-    };
-
+  describe("processLock - Canonical Production Queue-based Mutex Concurrency", () => {
     it("should enforce mutual exclusion for the same lock name", async () => {
       let activeCount = 0;
       let maxActive = 0;
 
       const runTask = (id: number) =>
-        testProcessLock("lock_same", 1000, async () => {
+        processLock("lock_same", 1000, async () => {
           activeCount++;
           maxActive = Math.max(maxActive, activeCount);
           await new Promise((r) => setTimeout(r, 20));
@@ -506,14 +430,14 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
       let lockBActive = false;
       let overlapped = false;
 
-      const taskA = testProcessLock("lock_A", 1000, async () => {
+      const taskA = processLock("lock_A", 1000, async () => {
         lockAActive = true;
         await new Promise((r) => setTimeout(r, 30));
         if (lockBActive) overlapped = true;
         lockAActive = false;
       });
 
-      const taskB = testProcessLock("lock_B", 1000, async () => {
+      const taskB = processLock("lock_B", 1000, async () => {
         lockBActive = true;
         await new Promise((r) => setTimeout(r, 30));
         if (lockAActive) overlapped = true;
@@ -530,7 +454,7 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
 
     it("should release lock in finally block even if task throws an error", async () => {
       await assert.rejects(
-        testProcessLock("lock_err", 1000, async () => {
+        processLock("lock_err", 1000, async () => {
           throw new Error("Task failure");
         }),
         /Task failure/,
@@ -538,7 +462,7 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
 
       // Subsequent task should acquire lock without issue
       let subsequentRan = false;
-      await testProcessLock("lock_err", 1000, async () => {
+      await processLock("lock_err", 1000, async () => {
         subsequentRan = true;
       });
       assert.strictEqual(subsequentRan, true);
@@ -549,7 +473,7 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
       let aIsActive = false;
 
       // 1. A acquires lock X and executes for 60ms
-      const taskA = testProcessLock("race_X", 1000, async () => {
+      const taskA = processLock("race_X", 1000, async () => {
         events.push("A_START");
         aIsActive = true;
         await new Promise((r) => setTimeout(r, 60));
@@ -559,7 +483,7 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
 
       // 2. B attempts lock X with 15ms timeout -> B must timeout
       await new Promise((r) => setTimeout(r, 5));
-      const taskB = testProcessLock("race_X", 15, async () => {
+      const taskB = processLock("race_X", 15, async () => {
         events.push("B_RAN");
       }).catch((err) => {
         events.push("B_TIMEOUT");
@@ -568,7 +492,7 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
 
       // 3. C attempts lock X after B timed out, with 200ms timeout
       await new Promise((r) => setTimeout(r, 25));
-      const taskC = testProcessLock("race_X", 200, async () => {
+      const taskC = processLock("race_X", 200, async () => {
         assert.strictEqual(
           aIsActive,
           false,

@@ -3,3 +3,5 @@ export const APP_CONFIG = {
   version: "1.0.0-phase1",
   environment: process.env.NODE_ENV || "development",
 } as const;
+
+export { Mutex, processLock } from "./process-lock.js";
