@@ -122,19 +122,32 @@ WHERE verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED');
 -- Unique Index on vehicles(driver_id) for 1:1 vehicle registration
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_driver_id_unique ON public.vehicles(driver_id);
 
--- Drop old RPC signatures before recreation to avoid parameter renaming conflicts
-DROP FUNCTION IF EXISTS public.create_business(UUID, TEXT, TEXT, TEXT);
-DROP FUNCTION IF EXISTS public.create_business_location(UUID, UUID, TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT);
-DROP FUNCTION IF EXISTS public.add_business_member(UUID, UUID, UUID, TEXT, UUID[]);
-DROP FUNCTION IF EXISTS public.register_driver(UUID, TEXT, TEXT);
-DROP FUNCTION IF EXISTS public.register_vehicle(UUID, TEXT, TEXT, INTEGER, TEXT, TEXT);
-DROP FUNCTION IF EXISTS public.authorize_driver_document_upload(UUID, TEXT, TEXT, BIGINT);
-DROP FUNCTION IF EXISTS public.commit_driver_document(UUID, UUID, TEXT, BIGINT, TEXT);
-DROP FUNCTION IF EXISTS public.commit_driver_document(UUID, TEXT, TEXT, BIGINT, TEXT);
-DROP FUNCTION IF EXISTS public.admin_verify_driver(UUID, UUID, TEXT, TEXT, TEXT);
-DROP FUNCTION IF EXISTS public.acquire_idempotency_lock(UUID, TEXT, TEXT, TEXT);
-DROP FUNCTION IF EXISTS public.commit_idempotency_response(UUID, TEXT, INTEGER, JSONB);
-DROP FUNCTION IF EXISTS public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB);
+-- Dynamically drop ALL overloaded signatures of existing Phase 3 RPCs to prevent "function is not unique" (Rule 2)
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN 
+        SELECT oid::regprocedure AS func_sig
+        FROM pg_proc
+        WHERE proname IN (
+            'create_business',
+            'create_business_location',
+            'add_business_member',
+            'register_driver',
+            'register_vehicle',
+            'authorize_driver_document_upload',
+            'commit_driver_document',
+            'admin_verify_driver',
+            'execute_idempotent_operation',
+            'acquire_idempotency_lock',
+            'commit_idempotency_response'
+        )
+        AND pronamespace = 'public'::regnamespace
+    LOOP
+        EXECUTE 'DROP FUNCTION IF EXISTS ' || r.func_sig || ' CASCADE;';
+    END LOOP;
+END $$;
 
 -- 7. Create Business RPC (brand_name optional, Section 16)
 CREATE OR REPLACE FUNCTION public.create_business(
