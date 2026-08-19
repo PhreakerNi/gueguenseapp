@@ -132,9 +132,9 @@ Deno.serve(async (req: Request) => {
       }
       const payloadJson = atob(base64);
       const claims = JSON.parse(payloadJson);
-      jwtAal =
-        claims.aal ||
-        (claims.amr &&
+      const extractedAal = claims.aal;
+      const hasMfaInAmr =
+        Array.isArray(claims.amr) &&
         claims.amr.some(
           (m: any) =>
             m === "totp" ||
@@ -142,9 +142,13 @@ Deno.serve(async (req: Request) => {
             (typeof m === "object" &&
               m !== null &&
               (m.method === "totp" || m.method === "mfa")),
-        )
-          ? "aal2"
-          : "aal1");
+        );
+
+      if (extractedAal === "aal2" || hasMfaInAmr) {
+        jwtAal = "aal2";
+      } else {
+        jwtAal = "aal1";
+      }
     }
   } catch {}
 

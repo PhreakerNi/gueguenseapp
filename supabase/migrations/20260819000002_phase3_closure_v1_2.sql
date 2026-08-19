@@ -889,15 +889,6 @@ BEGIN
     END IF;
 
     IF v_clean_decision = 'APPROVE' THEN
-        -- Check vehicle exists (Section 14)
-        SELECT count(*) INTO v_vehicle_count
-        FROM public.vehicles
-        WHERE driver_id = p_driver_id;
-
-        IF v_vehicle_count = 0 THEN
-            RAISE EXCEPTION 'VEHICLE_MISSING: Driver must have at least one registered vehicle to be approved';
-        END IF;
-
         -- Check all 3 mandatory documents exist with status PENDING/UNDER_REVIEW/VERIFIED (Section 14)
         SELECT count(DISTINCT document_type) INTO v_mandatory_doc_count
         FROM public.driver_documents
@@ -907,6 +898,15 @@ BEGIN
 
         IF v_mandatory_doc_count < 3 THEN
             RAISE EXCEPTION 'DOCUMENTATION_INCOMPLETE: Driver must have all 3 mandatory documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)';
+        END IF;
+
+        -- Check vehicle exists (Section 14)
+        SELECT count(*) INTO v_vehicle_count
+        FROM public.vehicles
+        WHERE driver_id = p_driver_id;
+
+        IF v_vehicle_count = 0 THEN
+            RAISE EXCEPTION 'VEHICLE_MISSING: Driver must have at least one registered vehicle to be approved';
         END IF;
 
         -- Update driver documents to VERIFIED (only active ones)
