@@ -9,7 +9,6 @@ export default function BusinessAuthCallbackScreen() {
   const router = useRouter();
   const { setRecoveryContext } = useAuth();
   const params = useLocalSearchParams<{
-    code?: string;
     next?: string;
     type?: string;
     access_token?: string;
@@ -21,30 +20,25 @@ export default function BusinessAuthCallbackScreen() {
   useEffect(() => {
     let isMounted = true;
 
-    async function handleAuthCallback() {
+    async function processUrl(urlStr?: string | null) {
       const supabase = getSupabaseClient();
-
       try {
-        let code = params.code;
-        let next = params.next;
         let accessToken = params.access_token;
         let refreshToken = params.refresh_token;
         let type = params.type;
+        let next = params.next;
 
-        // If parameters are in the initial URL or hash, parse them
-        const initialUrl = await Linking.getInitialURL();
-        if (initialUrl) {
-          const parsed = Linking.parse(initialUrl);
-          code = code || (parsed.queryParams?.code as string);
-          next = next || (parsed.queryParams?.next as string);
+        if (urlStr) {
+          const parsed = Linking.parse(urlStr);
           accessToken =
             accessToken || (parsed.queryParams?.access_token as string);
           refreshToken =
             refreshToken || (parsed.queryParams?.refresh_token as string);
           type = type || (parsed.queryParams?.type as string);
+          next = next || (parsed.queryParams?.next as string);
 
-          if (initialUrl.includes("#")) {
-            const hashString = initialUrl.split("#")[1];
+          if (urlStr.includes("#")) {
+            const hashString = urlStr.split("#")[1];
             if (hashString) {
               const hashParams = new URLSearchParams(hashString);
               accessToken =
@@ -52,6 +46,7 @@ export default function BusinessAuthCallbackScreen() {
               refreshToken =
                 refreshToken || hashParams.get("refresh_token") || undefined;
               type = type || hashParams.get("type") || undefined;
+              next = next || hashParams.get("next") || undefined;
             }
           }
         }
@@ -63,35 +58,38 @@ export default function BusinessAuthCallbackScreen() {
 
         if (accessToken && refreshToken) {
           if (isMounted) setStatusText("Estableciendo sesión segura...");
-          const { error } = await supabase.auth.setSession({
+          const { data, error } = await supabase.auth.setSession({
             access_token: accessToken,
             refresh_token: refreshToken,
           });
-          if (error) {
-            router.replace("/(auth)/login");
-            return;
-          }
-        } else if (code) {
-          if (isMounted) setStatusText("Estableciendo sesión segura...");
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) {
-            router.replace("/(auth)/login");
-            return;
-          }
-        }
 
-        if (isRecovery) {
-          setRecoveryContext(true);
-          router.replace("/(auth)/reset-password");
+          if (error || !data.session) {
+            router.replace("/(auth)/login");
+            return;
+          }
+
+          if (isRecovery) {
+            setRecoveryContext(true);
+            router.replace("/(auth)/reset-password");
+            return;
+          }
+
+          router.replace("/(protected)");
           return;
         }
 
+        // Check if there is already an active session
         const {
           data: { session },
         } = await supabase.auth.getSession();
 
         if (session) {
-          router.replace("/(protected)");
+          if (isRecovery) {
+            setRecoveryContext(true);
+            router.replace("/(auth)/reset-password");
+          } else {
+            router.replace("/(protected)");
+          }
         } else {
           router.replace("/(auth)/login");
         }
@@ -100,16 +98,25 @@ export default function BusinessAuthCallbackScreen() {
       }
     }
 
-    handleAuthCallback();
+    // Cold start URL check
+    Linking.getInitialURL().then((initialUrl) => {
+      processUrl(initialUrl);
+    });
+
+    // App already open URL event listener
+    const subscription = Linking.addEventListener("url", (event) => {
+      processUrl(event.url);
+    });
 
     return () => {
       isMounted = false;
+      subscription.remove();
     };
-  }, [params, router, setRecoveryContext]);
+  }, [router, setRecoveryContext, params]);
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color="#0284C7" />
+      <ActivityIndicator size="large" color="#0284c7" />
       <Text style={styles.text}>{statusText}</Text>
     </View>
   );
@@ -118,7 +125,7 @@ export default function BusinessAuthCallbackScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
     padding: 24,

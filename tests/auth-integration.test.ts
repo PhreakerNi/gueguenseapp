@@ -1,8 +1,9 @@
-import { describe, it } from "node:test";
+import { describe, it, after } from "node:test";
 import assert from "node:assert";
 import crypto from "node:crypto";
 import { execSync } from "node:child_process";
 import { createClient } from "@supabase/supabase-js";
+import { Pool } from "pg";
 import {
   normalizeAuthError,
   evaluateBusinessAccess,
@@ -20,18 +21,19 @@ import {
 function getSupabaseEnv(): {
   url: string;
   anonKey: string;
-  serviceRoleKey: string;
+  dbUrl: string;
 } {
   let url =
     process.env.SUPABASE_URL || process.env.API_URL || "http://127.0.0.1:54321";
   let anonKey = process.env.SUPABASE_ANON_KEY || process.env.ANON_KEY || "";
-  let serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || "";
+  let dbUrl =
+    process.env.DB_URL ||
+    process.env.SUPABASE_DB_URL ||
+    "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
   if (anonKey === "null") anonKey = "";
-  if (serviceRoleKey === "null") serviceRoleKey = "";
 
-  if (!anonKey || !serviceRoleKey) {
+  if (!anonKey || !dbUrl) {
     try {
       const fs = require("node:fs");
       if (fs.existsSync("supabase_status.json")) {
@@ -42,19 +44,13 @@ function getSupabaseEnv(): {
           url =
             url || parsed.API_URL || parsed.api_url || "http://127.0.0.1:54321";
           anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key || "";
-          serviceRoleKey =
-            serviceRoleKey ||
-            parsed.SERVICE_ROLE_KEY ||
-            parsed.service_role_key ||
-            parsed.SERVICE_KEY ||
-            parsed.service_key ||
-            "";
+          dbUrl = dbUrl || parsed.DB_URL || parsed.db_url || "";
         }
       }
     } catch {}
   }
 
-  if (!anonKey || !serviceRoleKey) {
+  if (!anonKey || !dbUrl) {
     try {
       const raw = execSync("pnpm supabase status -o json", {
         encoding: "utf-8",
@@ -66,36 +62,27 @@ function getSupabaseEnv(): {
         url =
           url || parsed.API_URL || parsed.api_url || "http://127.0.0.1:54321";
         anonKey = anonKey || parsed.ANON_KEY || parsed.anon_key || "";
-        serviceRoleKey =
-          serviceRoleKey ||
-          parsed.SERVICE_ROLE_KEY ||
-          parsed.service_role_key ||
-          parsed.SERVICE_KEY ||
-          parsed.service_key ||
-          "";
+        dbUrl = dbUrl || parsed.DB_URL || parsed.db_url || "";
       }
     } catch {}
   }
 
-  console.log("Integration test using Supabase URL:", url);
-  console.log("Integration test anon key length:", anonKey.length);
-  console.log(
-    "Integration test service role key length:",
-    serviceRoleKey.length,
-  );
-
   return {
     url,
     anonKey,
-    serviceRoleKey,
+    dbUrl,
   };
 }
 
 const {
   url: SUPABASE_URL,
   anonKey: SUPABASE_ANON_KEY,
-  serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+  dbUrl: DB_URL,
 } = getSupabaseEnv();
+
+const dbPool = new Pool({
+  connectionString: DB_URL,
+});
 
 function generateTotpCode(secretBase32: string, timeStepOffset = 0): string {
   const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -164,16 +151,9 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     },
   });
 
-  const trustedAdminClient = createClient(
-    SUPABASE_URL,
-    SUPABASE_SERVICE_ROLE_KEY,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    },
-  );
+  after(async () => {
+    await dbPool.end();
+  });
 
   it("1. should signup Business user and trigger public.profiles bootstrap", async () => {
     console.log(">>> [TEST 1 START] Signup Business user");
@@ -194,43 +174,37 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(data.user.id, "User ID must be generated");
     businessUserId = data.user.id;
 
-    // Verify profile bootstrap
-    const { data: profileRow, error: profileErr } = await trustedAdminClient
-      .from("profiles")
-      .select("id, platform_role, full_name")
-      .eq("id", businessUserId)
-      .single();
+    // Verify profile bootstrap via direct DB query
+    const { rows: profileRows } = await dbPool.query(
+      "SELECT id, platform_role, full_name FROM public.profiles WHERE id = $1",
+      [businessUserId],
+    );
 
-    if (profileErr) console.error("Test 1 profile error:", profileErr);
-    assert.strictEqual(profileErr, null);
-    assert.strictEqual(profileRow?.id, businessUserId);
-    assert.strictEqual(profileRow?.platform_role, "none");
-    assert.strictEqual(profileRow?.full_name, "Negocio Integracion");
+    assert.strictEqual(profileRows.length, 1);
+    assert.strictEqual(profileRows[0].id, businessUserId);
+    assert.strictEqual(profileRows[0].platform_role, "none");
+    assert.strictEqual(profileRows[0].full_name, "Negocio Integracion");
     console.log(">>> [TEST 1 SUCCESS]");
   });
 
   it("2. should verify Business signup does NOT autocreate business_members or drivers", async () => {
     console.log(">>> [TEST 2 START] Signup Business isolation");
-    const { data: memberRows, error: memberErr } = await trustedAdminClient
-      .from("business_members")
-      .select("id")
-      .eq("user_id", businessUserId);
-
-    assert.strictEqual(memberErr, null);
+    const { rows: memberRows } = await dbPool.query(
+      "SELECT id FROM public.business_members WHERE user_id = $1",
+      [businessUserId],
+    );
     assert.strictEqual(
-      memberRows?.length,
+      memberRows.length,
       0,
       "Business signup must not autocreate business_members",
     );
 
-    const { data: driverRows, error: driverErr } = await trustedAdminClient
-      .from("drivers")
-      .select("id")
-      .eq("id", businessUserId);
-
-    assert.strictEqual(driverErr, null);
+    const { rows: driverRows } = await dbPool.query(
+      "SELECT id FROM public.drivers WHERE id = $1",
+      [businessUserId],
+    );
     assert.strictEqual(
-      driverRows?.length,
+      driverRows.length,
       0,
       "Business signup must not autocreate drivers",
     );
@@ -255,43 +229,37 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(data.user, "User object must be returned");
     driverUserId = data.user.id;
 
-    // Verify profile bootstrap
-    const { data: profileRow, error: profileErr } = await trustedAdminClient
-      .from("profiles")
-      .select("id, platform_role, full_name")
-      .eq("id", driverUserId)
-      .single();
+    // Verify profile bootstrap via direct DB query
+    const { rows: profileRows } = await dbPool.query(
+      "SELECT id, platform_role, full_name FROM public.profiles WHERE id = $1",
+      [driverUserId],
+    );
 
-    if (profileErr) console.error("Test 3 profile error:", profileErr);
-    assert.strictEqual(profileErr, null);
-    assert.strictEqual(profileRow?.id, driverUserId);
-    assert.strictEqual(profileRow?.platform_role, "none");
-    assert.strictEqual(profileRow?.full_name, "Motorizado Integracion");
+    assert.strictEqual(profileRows.length, 1);
+    assert.strictEqual(profileRows[0].id, driverUserId);
+    assert.strictEqual(profileRows[0].platform_role, "none");
+    assert.strictEqual(profileRows[0].full_name, "Motorizado Integracion");
     console.log(">>> [TEST 3 SUCCESS]");
   });
 
   it("4. should verify Driver signup does NOT autocreate drivers or business_members", async () => {
     console.log(">>> [TEST 4 START] Signup Driver isolation");
-    const { data: driverRows, error: driverErr } = await trustedAdminClient
-      .from("drivers")
-      .select("id")
-      .eq("id", driverUserId);
-
-    assert.strictEqual(driverErr, null);
+    const { rows: driverRows } = await dbPool.query(
+      "SELECT id FROM public.drivers WHERE id = $1",
+      [driverUserId],
+    );
     assert.strictEqual(
-      driverRows?.length,
+      driverRows.length,
       0,
       "Driver signup must not autocreate drivers",
     );
 
-    const { data: memberRows, error: memberErr } = await trustedAdminClient
-      .from("business_members")
-      .select("id")
-      .eq("user_id", driverUserId);
-
-    assert.strictEqual(memberErr, null);
+    const { rows: memberRows } = await dbPool.query(
+      "SELECT id FROM public.business_members WHERE user_id = $1",
+      [driverUserId],
+    );
     assert.strictEqual(
-      memberRows?.length,
+      memberRows.length,
       0,
       "Driver signup must not autocreate business_members",
     );
@@ -434,24 +402,23 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       .update({ platform_role: "super_admin" } as any)
       .eq("id", businessUserId);
 
-    // Verify role remained 'none'
-    const { data: checkProfile } = await authedClientA
-      .from("profiles")
-      .select("platform_role")
-      .eq("id", businessUserId)
-      .single();
+    // Verify role remained 'none' via direct DB query
+    const { rows: checkProfileRows } = await dbPool.query(
+      "SELECT platform_role FROM public.profiles WHERE id = $1",
+      [businessUserId],
+    );
 
     assert.strictEqual(
-      checkProfile?.platform_role,
+      checkProfileRows[0].platform_role,
       "none",
       "platform_role must remain 'none'",
     );
     console.log(">>> [TEST 10 SUCCESS]");
   });
 
-  it("11. should evaluate Business Access guard transitions with real DB fixtures (ACTIVE, SUSPENDED, BLOCKED, CLOSED)", async () => {
+  it("11. should evaluate Business Access guard transitions with real DB fixtures (no membership, ACTIVE, membership SUSPENDED, business SUSPENDED, business BLOCKED, business CLOSED)", async () => {
     console.log(">>> [TEST 11 START] Business Guard Fixtures");
-    // 11a. Unonboarded business user -> ONBOARDING_REQUIRED
+    // 11a. Unonboarded business user (no membership) -> ONBOARDING_REQUIRED
     const unonboardedIdentity: IdentityContext = {
       userId: businessUserId,
       email: businessEmail,
@@ -471,61 +438,44 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
 
     // 11b. Insert real business and real membership with ACTIVE status
-    const { data: bizRow, error: bizErr } = await trustedAdminClient
-      .from("businesses")
-      .insert({
-        legal_name: "Comercio Real SA",
-        brand_name: "Comercio Real",
-        tax_id: `TAX-BIZ-${timestamp}`,
-        account_status: "ACTIVE",
-        verification_status: "VERIFIED",
-      })
-      .select("id")
-      .single();
+    const { rows: bizRows } = await dbPool.query(
+      "INSERT INTO public.businesses (legal_name, brand_name, tax_id, account_status, verification_status) VALUES ($1, $2, $3, $4, $5) RETURNING id, account_status",
+      [
+        "Comercio Real SA",
+        "Comercio Real",
+        `TAX-BIZ-${timestamp}`,
+        "ACTIVE",
+        "VERIFIED",
+      ],
+    );
+    const testBusinessId = bizRows[0].id;
 
-    if (bizErr) console.error("Test 11b biz insert error:", bizErr);
-    assert.strictEqual(bizErr, null);
-    assert.ok(bizRow?.id);
-    const testBusinessId = bizRow.id;
-
-    const { data: memberRow, error: memberErr } = await trustedAdminClient
-      .from("business_members")
-      .insert({
-        business_id: testBusinessId,
-        user_id: businessUserId,
-        role: "business_owner",
-        status: "ACTIVE",
-      })
-      .select("id")
-      .single();
-
-    if (memberErr) console.error("Test 11b member insert error:", memberErr);
-    assert.strictEqual(memberErr, null);
-    assert.ok(memberRow?.id);
-    const testMemberId = memberRow.id;
+    const { rows: memberRows } = await dbPool.query(
+      "INSERT INTO public.business_members (business_id, user_id, role, status) VALUES ($1, $2, $3, $4) RETURNING id, business_id, role, status",
+      [testBusinessId, businessUserId, "business_owner", "ACTIVE"],
+    );
+    const testMemberId = memberRows[0].id;
 
     // Fetch from real DB and test ACTIVE -> allowed: true
-    const { data: memberCheck } = await trustedAdminClient
-      .from("business_members")
-      .select("id, business_id, role, status")
-      .eq("id", testMemberId)
-      .single();
+    const { rows: memberCheck } = await dbPool.query(
+      "SELECT id, business_id, role, status FROM public.business_members WHERE id = $1",
+      [testMemberId],
+    );
 
-    const { data: bizCheck } = await trustedAdminClient
-      .from("businesses")
-      .select("account_status")
-      .eq("id", testBusinessId)
-      .single();
+    const { rows: bizCheck } = await dbPool.query(
+      "SELECT account_status FROM public.businesses WHERE id = $1",
+      [testBusinessId],
+    );
 
     const activeIdentity: IdentityContext = {
       ...unonboardedIdentity,
       businessMemberships: [
         {
-          membershipId: memberCheck!.id,
-          businessId: memberCheck!.business_id,
-          role: memberCheck!.role as BusinessMemberRole,
-          status: memberCheck!.status as BusinessMemberStatus,
-          businessAccountStatus: bizCheck!
+          membershipId: memberCheck[0].id,
+          businessId: memberCheck[0].business_id,
+          role: memberCheck[0].role as BusinessMemberRole,
+          status: memberCheck[0].status as BusinessMemberStatus,
+          businessAccountStatus: bizCheck[0]
             .account_status as BusinessAccountStatus,
         },
       ],
@@ -536,26 +486,25 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
 
     // 11c. Update membership status to SUSPENDED in DB
-    await trustedAdminClient
-      .from("business_members")
-      .update({ status: "SUSPENDED" })
-      .eq("id", testMemberId);
+    await dbPool.query(
+      "UPDATE public.business_members SET status = 'SUSPENDED' WHERE id = $1",
+      [testMemberId],
+    );
 
-    const { data: suspendedMemberCheck } = await trustedAdminClient
-      .from("business_members")
-      .select("id, business_id, role, status")
-      .eq("id", testMemberId)
-      .single();
+    const { rows: suspendedMemberCheck } = await dbPool.query(
+      "SELECT id, business_id, role, status FROM public.business_members WHERE id = $1",
+      [testMemberId],
+    );
 
     const suspendedIdentity: IdentityContext = {
       ...unonboardedIdentity,
       businessMemberships: [
         {
-          membershipId: suspendedMemberCheck!.id,
-          businessId: suspendedMemberCheck!.business_id,
-          role: suspendedMemberCheck!.role as BusinessMemberRole,
-          status: suspendedMemberCheck!.status as BusinessMemberStatus,
-          businessAccountStatus: bizCheck!
+          membershipId: suspendedMemberCheck[0].id,
+          businessId: suspendedMemberCheck[0].business_id,
+          role: suspendedMemberCheck[0].role as BusinessMemberRole,
+          status: suspendedMemberCheck[0].status as BusinessMemberStatus,
+          businessAccountStatus: bizCheck[0]
             .account_status as BusinessAccountStatus,
         },
       ],
@@ -566,22 +515,51 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       reason: "ACCOUNT_RESTRICTED",
     });
 
-    // 11d. Restore membership status to ACTIVE but update business account_status to BLOCKED in DB
-    await trustedAdminClient
-      .from("business_members")
-      .update({ status: "ACTIVE" })
-      .eq("id", testMemberId);
+    // 11d. Restore membership status to ACTIVE but update business account_status to SUSPENDED in DB
+    await dbPool.query(
+      "UPDATE public.business_members SET status = 'ACTIVE' WHERE id = $1",
+      [testMemberId],
+    );
 
-    await trustedAdminClient
-      .from("businesses")
-      .update({ account_status: "BLOCKED" })
-      .eq("id", testBusinessId);
+    await dbPool.query(
+      "UPDATE public.businesses SET account_status = 'SUSPENDED' WHERE id = $1",
+      [testBusinessId],
+    );
 
-    const { data: blockedBizCheck } = await trustedAdminClient
-      .from("businesses")
-      .select("account_status")
-      .eq("id", testBusinessId)
-      .single();
+    const { rows: suspendedBizCheck } = await dbPool.query(
+      "SELECT account_status FROM public.businesses WHERE id = $1",
+      [testBusinessId],
+    );
+
+    const suspendedBizIdentity: IdentityContext = {
+      ...unonboardedIdentity,
+      businessMemberships: [
+        {
+          membershipId: testMemberId,
+          businessId: testBusinessId,
+          role: "business_owner",
+          status: "ACTIVE",
+          businessAccountStatus: suspendedBizCheck[0]
+            .account_status as BusinessAccountStatus,
+        },
+      ],
+    };
+
+    assert.deepStrictEqual(evaluateBusinessAccess(suspendedBizIdentity), {
+      allowed: false,
+      reason: "ACCOUNT_RESTRICTED",
+    });
+
+    // 11e. Update business account_status to BLOCKED in DB
+    await dbPool.query(
+      "UPDATE public.businesses SET account_status = 'BLOCKED' WHERE id = $1",
+      [testBusinessId],
+    );
+
+    const { rows: blockedBizCheck } = await dbPool.query(
+      "SELECT account_status FROM public.businesses WHERE id = $1",
+      [testBusinessId],
+    );
 
     const blockedBizIdentity: IdentityContext = {
       ...unonboardedIdentity,
@@ -591,7 +569,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
           businessId: testBusinessId,
           role: "business_owner",
           status: "ACTIVE",
-          businessAccountStatus: blockedBizCheck!
+          businessAccountStatus: blockedBizCheck[0]
             .account_status as BusinessAccountStatus,
         },
       ],
@@ -602,17 +580,16 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
       reason: "ACCOUNT_RESTRICTED",
     });
 
-    // 11e. Update business account_status to CLOSED in DB
-    await trustedAdminClient
-      .from("businesses")
-      .update({ account_status: "CLOSED" })
-      .eq("id", testBusinessId);
+    // 11f. Update business account_status to CLOSED in DB
+    await dbPool.query(
+      "UPDATE public.businesses SET account_status = 'CLOSED' WHERE id = $1",
+      [testBusinessId],
+    );
 
-    const { data: closedBizCheck } = await trustedAdminClient
-      .from("businesses")
-      .select("account_status")
-      .eq("id", testBusinessId)
-      .single();
+    const { rows: closedBizCheck } = await dbPool.query(
+      "SELECT account_status FROM public.businesses WHERE id = $1",
+      [testBusinessId],
+    );
 
     const closedBizIdentity: IdentityContext = {
       ...unonboardedIdentity,
@@ -622,7 +599,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
           businessId: testBusinessId,
           role: "business_owner",
           status: "ACTIVE",
-          businessAccountStatus: closedBizCheck!
+          businessAccountStatus: closedBizCheck[0]
             .account_status as BusinessAccountStatus,
         },
       ],
@@ -635,7 +612,7 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     console.log(">>> [TEST 11 SUCCESS]");
   });
 
-  it("12. should evaluate Driver Access guard transitions with real DB fixtures (REGISTERED, ACTIVE, SUSPENDED, BLOCKED, CLOSED)", async () => {
+  it("12. should evaluate Driver Access guard transitions with real DB fixtures (no row, REGISTERED, ACTIVE, SUSPENDED, BLOCKED, CLOSED)", async () => {
     console.log(">>> [TEST 12 START] Driver Guard Fixtures");
     // 12a. Unonboarded driver (no row in drivers table) -> ONBOARDING_REQUIRED
     const unonboardedDriverIdentity: IdentityContext = {
@@ -657,33 +634,29 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
 
     // 12b. Insert driver with REGISTERED account_status in DB -> ONBOARDING_REQUIRED
-    const { error: insertDriverErr } = await trustedAdminClient
-      .from("drivers")
-      .insert({
-        id: driverUserId,
-        national_id_number: `NID-${timestamp}`,
-        license_number: `LIC-${timestamp}`,
-        verification_status: "PENDING",
-        account_status: "REGISTERED",
-      });
+    await dbPool.query(
+      "INSERT INTO public.drivers (id, national_id_number, license_number, verification_status, account_status) VALUES ($1, $2, $3, $4, $5)",
+      [
+        driverUserId,
+        `NID-${timestamp}`,
+        `LIC-${timestamp}`,
+        "PENDING",
+        "REGISTERED",
+      ],
+    );
 
-    if (insertDriverErr)
-      console.error("Test 12b driver insert error:", insertDriverErr);
-    assert.strictEqual(insertDriverErr, null);
-
-    const { data: registeredDriverRow } = await trustedAdminClient
-      .from("drivers")
-      .select("verification_status, account_status")
-      .eq("id", driverUserId)
-      .single();
+    const { rows: registeredDriverRows } = await dbPool.query(
+      "SELECT verification_status, account_status FROM public.drivers WHERE id = $1",
+      [driverUserId],
+    );
 
     const registeredDriverIdentity: IdentityContext = {
       ...unonboardedDriverIdentity,
       driver: {
-        verificationStatus:
-          registeredDriverRow?.verification_status as DriverVerificationStatus,
-        accountStatus:
-          registeredDriverRow?.account_status as DriverAccountStatus,
+        verificationStatus: registeredDriverRows[0]
+          .verification_status as DriverVerificationStatus,
+        accountStatus: registeredDriverRows[0]
+          .account_status as DriverAccountStatus,
       },
     };
 
@@ -693,26 +666,23 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
 
     // 12c. Update driver in DB to VERIFIED & ACTIVE -> allowed: true
-    await trustedAdminClient
-      .from("drivers")
-      .update({
-        verification_status: "VERIFIED",
-        account_status: "ACTIVE",
-      })
-      .eq("id", driverUserId);
+    await dbPool.query(
+      "UPDATE public.drivers SET verification_status = 'VERIFIED', account_status = 'ACTIVE' WHERE id = $1",
+      [driverUserId],
+    );
 
-    const { data: activeDriverRow } = await trustedAdminClient
-      .from("drivers")
-      .select("verification_status, account_status")
-      .eq("id", driverUserId)
-      .single();
+    const { rows: activeDriverRows } = await dbPool.query(
+      "SELECT verification_status, account_status FROM public.drivers WHERE id = $1",
+      [driverUserId],
+    );
 
     const activeDriverIdentity: IdentityContext = {
       ...unonboardedDriverIdentity,
       driver: {
-        verificationStatus:
-          activeDriverRow?.verification_status as DriverVerificationStatus,
-        accountStatus: activeDriverRow?.account_status as DriverAccountStatus,
+        verificationStatus: activeDriverRows[0]
+          .verification_status as DriverVerificationStatus,
+        accountStatus: activeDriverRows[0]
+          .account_status as DriverAccountStatus,
       },
     };
 
@@ -721,26 +691,23 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
 
     // 12d. Update driver in DB to SUSPENDED -> ACCOUNT_RESTRICTED
-    await trustedAdminClient
-      .from("drivers")
-      .update({
-        account_status: "SUSPENDED",
-      })
-      .eq("id", driverUserId);
+    await dbPool.query(
+      "UPDATE public.drivers SET account_status = 'SUSPENDED' WHERE id = $1",
+      [driverUserId],
+    );
 
-    const { data: suspendedDriverRow } = await trustedAdminClient
-      .from("drivers")
-      .select("verification_status, account_status")
-      .eq("id", driverUserId)
-      .single();
+    const { rows: suspendedDriverRows } = await dbPool.query(
+      "SELECT verification_status, account_status FROM public.drivers WHERE id = $1",
+      [driverUserId],
+    );
 
     const suspendedDriverIdentity: IdentityContext = {
       ...unonboardedDriverIdentity,
       driver: {
-        verificationStatus:
-          suspendedDriverRow?.verification_status as DriverVerificationStatus,
-        accountStatus:
-          suspendedDriverRow?.account_status as DriverAccountStatus,
+        verificationStatus: suspendedDriverRows[0]
+          .verification_status as DriverVerificationStatus,
+        accountStatus: suspendedDriverRows[0]
+          .account_status as DriverAccountStatus,
       },
     };
 
@@ -750,25 +717,23 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
 
     // 12e. Update driver in DB to BLOCKED -> ACCOUNT_RESTRICTED
-    await trustedAdminClient
-      .from("drivers")
-      .update({
-        account_status: "BLOCKED",
-      })
-      .eq("id", driverUserId);
+    await dbPool.query(
+      "UPDATE public.drivers SET account_status = 'BLOCKED' WHERE id = $1",
+      [driverUserId],
+    );
 
-    const { data: blockedDriverRow } = await trustedAdminClient
-      .from("drivers")
-      .select("verification_status, account_status")
-      .eq("id", driverUserId)
-      .single();
+    const { rows: blockedDriverRows } = await dbPool.query(
+      "SELECT verification_status, account_status FROM public.drivers WHERE id = $1",
+      [driverUserId],
+    );
 
     const blockedDriverIdentity: IdentityContext = {
       ...unonboardedDriverIdentity,
       driver: {
-        verificationStatus:
-          blockedDriverRow?.verification_status as DriverVerificationStatus,
-        accountStatus: blockedDriverRow?.account_status as DriverAccountStatus,
+        verificationStatus: blockedDriverRows[0]
+          .verification_status as DriverVerificationStatus,
+        accountStatus: blockedDriverRows[0]
+          .account_status as DriverAccountStatus,
       },
     };
 
@@ -778,25 +743,23 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     });
 
     // 12f. Update driver in DB to CLOSED -> ACCOUNT_RESTRICTED
-    await trustedAdminClient
-      .from("drivers")
-      .update({
-        account_status: "CLOSED",
-      })
-      .eq("id", driverUserId);
+    await dbPool.query(
+      "UPDATE public.drivers SET account_status = 'CLOSED' WHERE id = $1",
+      [driverUserId],
+    );
 
-    const { data: closedDriverRow } = await trustedAdminClient
-      .from("drivers")
-      .select("verification_status, account_status")
-      .eq("id", driverUserId)
-      .single();
+    const { rows: closedDriverRows } = await dbPool.query(
+      "SELECT verification_status, account_status FROM public.drivers WHERE id = $1",
+      [driverUserId],
+    );
 
     const closedDriverIdentity: IdentityContext = {
       ...unonboardedDriverIdentity,
       driver: {
-        verificationStatus:
-          closedDriverRow?.verification_status as DriverVerificationStatus,
-        accountStatus: closedDriverRow?.account_status as DriverAccountStatus,
+        verificationStatus: closedDriverRows[0]
+          .verification_status as DriverVerificationStatus,
+        accountStatus: closedDriverRows[0]
+          .account_status as DriverAccountStatus,
       },
     };
 
@@ -850,14 +813,11 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(adminSignUp.user);
     adminUserId = adminSignUp.user.id;
 
-    // 14b. Promote profile to platform_role = admin in real DB via trustedAdminClient
-    const { error: promoteError } = await trustedAdminClient
-      .from("profiles")
-      .update({ platform_role: "admin" })
-      .eq("id", adminUserId);
-
-    if (promoteError) console.error("Test 14b promote error:", promoteError);
-    assert.strictEqual(promoteError, null);
+    // 14b. Promote profile to platform_role = admin in real DB via dbPool
+    await dbPool.query(
+      "UPDATE public.profiles SET platform_role = 'admin' WHERE id = $1",
+      [adminUserId],
+    );
 
     // 14c. Login as Admin user with dedicated client
     const adminStorage = new MemoryStorage();
@@ -881,26 +841,22 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
     assert.ok(adminLogin?.session);
 
     // 14d. Build Admin IdentityContext from real DB profile
-    const { data: adminProfile, error: adminProfileErr } =
-      await trustedAdminClient
-        .from("profiles")
-        .select("id, platform_role, full_name, phone, avatar_url")
-        .eq("id", adminUserId)
-        .single();
+    const { rows: adminProfileRows } = await dbPool.query(
+      "SELECT id, platform_role, full_name, phone, avatar_url FROM public.profiles WHERE id = $1",
+      [adminUserId],
+    );
 
-    if (adminProfileErr)
-      console.error("Test 14d admin profile error:", adminProfileErr);
-    assert.strictEqual(adminProfileErr, null);
-    assert.strictEqual(adminProfile?.platform_role, "admin");
+    assert.strictEqual(adminProfileRows.length, 1);
+    assert.strictEqual(adminProfileRows[0].platform_role, "admin");
 
     const adminIdentity: IdentityContext = {
       userId: adminUserId,
       email: adminEmail,
       profile: {
-        platformRole: adminProfile.platform_role as PlatformRole,
-        fullName: adminProfile.full_name,
-        phone: adminProfile.phone,
-        avatarUrl: adminProfile.avatar_url,
+        platformRole: adminProfileRows[0].platform_role as PlatformRole,
+        fullName: adminProfileRows[0].full_name,
+        phone: adminProfileRows[0].phone,
+        avatarUrl: adminProfileRows[0].avatar_url,
       },
       businessMemberships: [],
       driver: null,

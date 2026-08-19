@@ -12,7 +12,7 @@ import { useAuth } from "../../src/context/auth-context";
 import { getAuthErrorMessage } from "@gueguense/domain";
 
 export default function DriverResetPasswordScreen() {
-  const { isPasswordRecovery, updatePassword, isLoading } = useAuth();
+  const { session, isPasswordRecovery, updatePassword, isLoading } = useAuth();
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -21,15 +21,15 @@ export default function DriverResetPasswordScreen() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isLoading && !isPasswordRecovery) {
+    if (!isLoading && (!session || !isPasswordRecovery)) {
       setErrorMessage(
         "No se detectó un contexto de recuperación válido. Por favor solicita un nuevo enlace de recuperación.",
       );
     }
-  }, [isLoading, isPasswordRecovery]);
+  }, [isLoading, session, isPasswordRecovery]);
 
   const handleUpdate = async () => {
-    if (!isPasswordRecovery) {
+    if (!session || !isPasswordRecovery) {
       setErrorMessage(
         "No se detectó una sesión de recuperación válida. Por favor solicita un nuevo enlace.",
       );

@@ -33,23 +33,24 @@ const ExpoSecureStoreAdapter = {
   },
 };
 
-let lockPromise: Promise<unknown> = Promise.resolve();
+const locks = new Map<string, Promise<unknown>>();
 
 const processLock = async <R>(
   name: string,
   acquireTimeout: number,
   fn: () => Promise<R>,
 ): Promise<R> => {
-  const prev = lockPromise;
+  const prev = locks.get(name) || Promise.resolve();
   let resolveNext: () => void;
-  lockPromise = new Promise((res) => {
-    resolveNext = res as () => void;
+  const current = new Promise<void>((res) => {
+    resolveNext = res;
   });
+  locks.set(name, current);
 
   try {
     if (acquireTimeout > 0) {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise((_, reject) => {
+      const timeoutPromise = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           reject(
             new Error(
@@ -69,6 +70,9 @@ const processLock = async <R>(
     return await fn();
   } finally {
     resolveNext!();
+    if (locks.get(name) === current) {
+      locks.delete(name);
+    }
   }
 };
 
@@ -80,11 +84,18 @@ export function getSupabaseClient(): AppSupabaseClient {
     return clientInstance;
   }
 
-  const supabaseUrl =
-    process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
-  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || "";
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const supabaseKey =
+    process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-  clientInstance = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error(
+      "Missing required Supabase environment variables: EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY must be set.",
+    );
+  }
+
+  clientInstance = createClient<Database>(supabaseUrl, supabaseKey, {
     auth: {
       storage: ExpoSecureStoreAdapter,
       autoRefreshToken: true,
