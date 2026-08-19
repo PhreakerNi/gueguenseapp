@@ -87,6 +87,7 @@ CREATE TABLE public.audit_logs (
 
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.audit_logs FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.audit_logs TO authenticated;
 GRANT ALL ON public.audit_logs TO service_role;
 
 -- SELECT policy strictly for super_admin (Section 11)

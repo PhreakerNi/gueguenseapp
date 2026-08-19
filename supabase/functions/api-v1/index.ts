@@ -536,7 +536,7 @@ Deno.serve(async (req: Request) => {
           p_actor_id: userId,
           p_document_type: documentType,
           p_mime_type: mimeType,
-          p_size_bytes: sizeBytes,
+          p_file_size: sizeBytes,
         },
       );
 
