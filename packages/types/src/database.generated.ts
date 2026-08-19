@@ -365,42 +365,39 @@ export type Database = {
     Functions: {
       admin_verify_driver: {
         Args: {
-          p_driver_id: string
           p_decision: string
+          p_driver_id: string
           p_rejection_reason?: string
         }
         Returns: Json
       }
       register_business_onboarding: {
         Args: {
-          p_legal_name: string
-          p_brand_name: string
-          p_tax_id: string
-          p_branch_name: string
           p_branch_address: string
           p_branch_latitude: number
           p_branch_longitude: number
+          p_branch_name: string
+          p_brand_name: string
+          p_legal_name: string
           p_pickup_instructions?: string
+          p_tax_id: string
         }
         Returns: Json
       }
       register_driver_onboarding: {
         Args: {
-          p_national_id_number: string
           p_license_number: string
+          p_national_id_number: string
+          p_vehicle_color: string
+          p_vehicle_license_plate: string
           p_vehicle_make: string
           p_vehicle_model: string
           p_vehicle_year: number
-          p_vehicle_color: string
-          p_vehicle_license_plate: string
         }
         Returns: Json
       }
       submit_driver_document: {
-        Args: {
-          p_document_type: string
-          p_storage_path: string
-        }
+        Args: { p_document_type: string; p_storage_path: string }
         Returns: Json
       }
     }
