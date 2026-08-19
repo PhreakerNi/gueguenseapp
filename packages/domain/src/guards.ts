@@ -64,7 +64,7 @@ export type IdentityContext = {
     role: BusinessMemberRole;
     status: BusinessMemberStatus;
     businessAccountStatus?: BusinessAccountStatus | undefined;
-    authorizedLocationIds?: string[] | undefined;
+    authorizedLocationIds: string[];
   }>;
   driver: null | {
     verificationStatus: DriverVerificationStatus;
@@ -106,17 +106,20 @@ export function evaluateBusinessAccess(
     return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
   }
 
-  // Owner has universal branch access
+  const authorizedLocations = activeMembership.authorizedLocationIds || [];
+
+  // Owner without locations requires first location creation onboarding (Section 21)
   if (activeMembership.role === "business_owner") {
-    const res: AccessEvaluation = { allowed: true };
-    if (activeMembership.authorizedLocationIds) {
-      res.authorizedLocationIds = activeMembership.authorizedLocationIds;
+    if (authorizedLocations.length === 0) {
+      return { allowed: false, reason: "ONBOARDING_REQUIRED" };
     }
-    return res;
+    return {
+      allowed: true,
+      authorizedLocationIds: authorizedLocations,
+    };
   }
 
-  // Manager and Employee require scoped branch authorization
-  const authorizedLocations = activeMembership.authorizedLocationIds || [];
+  // Manager and Employee require scoped branch authorization (Section 21)
   if (authorizedLocations.length === 0) {
     return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
   }
@@ -137,21 +140,25 @@ export function evaluateDriverAccess(
   if (!identity || !identity.driver) {
     return { allowed: false, reason: "ONBOARDING_REQUIRED" };
   }
-  // Strict requirement: driver must be VERIFIED and ACTIVE
-  if (
-    identity.driver.verificationStatus === "VERIFIED" &&
-    identity.driver.accountStatus === "ACTIVE"
-  ) {
+  const { verificationStatus, accountStatus } = identity.driver;
+
+  // Strict requirement: driver must be VERIFIED and ACTIVE (Section 23)
+  if (verificationStatus === "VERIFIED" && accountStatus === "ACTIVE") {
     return { allowed: true };
   }
+
+  // REGISTERED + PENDING/UNDER_REVIEW/REJECTED -> ONBOARDING_REQUIRED (Section 23)
   if (
-    identity.driver.verificationStatus === "PENDING" ||
-    identity.driver.verificationStatus === "UNDER_REVIEW" ||
-    identity.driver.verificationStatus === "REJECTED" ||
-    identity.driver.accountStatus === "REGISTERED"
+    accountStatus === "REGISTERED" &&
+    (verificationStatus === "PENDING" ||
+      verificationStatus === "UNDER_REVIEW" ||
+      verificationStatus === "REJECTED")
   ) {
     return { allowed: false, reason: "ONBOARDING_REQUIRED" };
   }
+
+  // ACTIVE + (PENDING | UNDER_REVIEW | REJECTED | EXPIRED) -> ACCOUNT_RESTRICTED
+  // SUSPENDED | BLOCKED | CLOSED -> ACCOUNT_RESTRICTED
   return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
 }
 

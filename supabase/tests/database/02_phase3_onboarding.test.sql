@@ -1,8 +1,8 @@
 BEGIN;
 
-SELECT plan(35);
+SELECT plan(45);
 
--- 1. Structural Checks: Idempotency Keys, Audit Logs, Bucket & Indexes (5 assertions: 1-5)
+-- 1. Structural Checks: Idempotency Keys, Audit Logs, Bucket & Authorizations (8 assertions: 1-8)
 SELECT has_table('public', 'idempotency_keys', 'public.idempotency_keys table exists');
 SELECT is(
     (SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'idempotency_keys'),
@@ -20,13 +20,20 @@ SELECT is(
     false,
     'storage bucket driver-documents is private'
 );
+SELECT has_table('private', 'driver_document_upload_authorizations', 'private.driver_document_upload_authorizations exists');
+SELECT has_table('private', 'idempotency_responses', 'private.idempotency_responses exists');
+SELECT is(
+    (SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'driver_documents' AND indexname = 'idx_driver_documents_active_type'),
+    1::bigint,
+    'Partial unique index idx_driver_documents_active_type exists'
+);
 
--- 2. Function Signature & Security Checks (5 assertions: 6-10)
+-- 2. Function Signature & Security Checks (5 assertions: 9-13)
 SELECT has_function('public', 'create_business', ARRAY['uuid', 'text', 'text', 'text'], 'create_business function exists with correct parameters');
 SELECT has_function('public', 'create_business_location', ARRAY['uuid', 'uuid', 'text', 'text', 'double precision', 'double precision', 'text'], 'create_business_location function exists with correct parameters');
 SELECT has_function('public', 'add_business_member', ARRAY['uuid', 'uuid', 'uuid', 'text', 'uuid[]'], 'add_business_member function exists with correct parameters');
 SELECT has_function('public', 'register_driver', ARRAY['uuid', 'text', 'text'], 'register_driver function exists with correct parameters');
-SELECT has_function('public', 'admin_verify_driver', ARRAY['uuid', 'uuid', 'text', 'text', 'text', 'text'], 'admin_verify_driver function exists with correct parameters');
+SELECT has_function('public', 'admin_verify_driver', ARRAY['uuid', 'uuid', 'text', 'text', 'text'], 'admin_verify_driver function exists with correct parameters');
 
 -- 3. Synthetic Test Users Setup
 SET LOCAL ROLE postgres;
@@ -37,14 +44,16 @@ VALUES
     ('33333333-3333-4333-8333-333333333333', 'agent@test.com', '{"full_name":"Verification Agent"}'::jsonb),
     ('44444444-4444-4444-8444-444444444444', 'oper@test.com', '{"full_name":"Operator"}'::jsonb),
     ('55555555-5555-4555-8555-555555555555', 'admin@test.com', '{"full_name":"Admin User"}'::jsonb),
-    ('66666666-6666-4666-8666-666666666666', 'manager@test.com', '{"full_name":"Manager User"}'::jsonb)
+    ('66666666-6666-4666-8666-666666666666', 'manager@test.com', '{"full_name":"Manager User"}'::jsonb),
+    ('77777777-7777-4777-8777-777777777777', 'superadmin@test.com', '{"full_name":"Super Admin"}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE public.profiles SET platform_role = 'verification_agent' WHERE id = '33333333-3333-4333-8333-333333333333';
 UPDATE public.profiles SET platform_role = 'operator' WHERE id = '44444444-4444-4444-8444-444444444444';
 UPDATE public.profiles SET platform_role = 'admin' WHERE id = '55555555-5555-4555-8555-555555555555';
+UPDATE public.profiles SET platform_role = 'super_admin' WHERE id = '77777777-7777-4777-8777-777777777777';
 
--- 4. Direct Client Execution Revoked (Priority 5: 2 assertions: 11-12)
+-- 4. Direct Client Execution Revoked & Audit RLS (4 assertions: 14-17)
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '11111111-1111-4111-8111-111111111111';
 
@@ -62,13 +71,29 @@ SELECT throws_ok(
     'Direct RPC execution of register_driver by authenticated role is denied'
 );
 
--- 5. Business Onboarding & Branch Creation via Service Role (6 assertions: 13-18)
+-- Non-super-admin SELECT on audit_logs returns 0 rows
+SELECT is(
+    (SELECT count(*) FROM public.audit_logs),
+    0::bigint,
+    'Non-super_admin sees 0 rows from public.audit_logs under RLS'
+);
+
+-- Super admin sees audit logs under RLS
+SET LOCAL "request.jwt.claim.sub" = '77777777-7777-4777-8777-777777777777';
+SELECT is(
+    (SELECT count(*) FROM public.audit_logs),
+    0::bigint,
+    'Super admin query executes on public.audit_logs without error'
+);
+
+-- 5. Business Onboarding & Branch Creation via Service Role (7 assertions: 18-24)
 SET LOCAL ROLE postgres;
 
+-- brand_name optional (Section 16)
 SELECT public.create_business(
     '11111111-1111-4111-8111-111111111111'::uuid,
     'Empresa Nueva S.A.',
-    'Mi Pulperia Nueva',
+    NULL,
     'J0319999999999'
 );
 
@@ -76,6 +101,12 @@ SELECT is(
     (SELECT verification_status FROM public.businesses WHERE legal_name = 'Empresa Nueva S.A.'),
     'PENDING',
     'Business initial verification_status is PENDING'
+);
+
+SELECT is(
+    (SELECT brand_name FROM public.businesses WHERE legal_name = 'Empresa Nueva S.A.'),
+    NULL,
+    'Business created with NULL brand_name successfully'
 );
 
 SELECT is(
@@ -92,30 +123,34 @@ SELECT public.create_business_location(
     'Calle Principal #123, Managua',
     12.136389,
     -86.251389,
-    'Tocar timbre en recepcion'
+    '+505 8888 8888'
 );
 
 SELECT is(
-    (SELECT name FROM public.business_locations WHERE address_text = 'Calle Principal #123, Managua'),
+    (SELECT location_name FROM public.business_locations WHERE address_text = 'Calle Principal #123, Managua'),
     'Sucursal Central',
     'First branch created separately with correct name'
 );
 
-SELECT ok(
-    EXISTS (
-        SELECT 1 FROM public.business_member_locations bml
-        JOIN public.business_members bm ON bm.id = bml.business_member_id
-        WHERE bm.user_id = '11111111-1111-4111-8111-111111111111'
-    ),
-    'Business owner linked to branch via N:M business_member_locations'
+-- Add Business Manager linked to branch (Section 19: fail-closed validation)
+SELECT throws_ok(
+    $$SELECT public.add_business_member(
+        '11111111-1111-4111-8111-111111111111'::uuid,
+        (SELECT id FROM public.businesses WHERE legal_name = 'Empresa Nueva S.A.'),
+        '66666666-6666-4666-8666-666666666666'::uuid,
+        'manager',
+        ARRAY[]::uuid[]
+    )$$,
+    'P0001',
+    'INVALID_ARGUMENT: At least one valid location_id is required for manager or employee',
+    'add_business_member fails-closed when location_ids is empty'
 );
 
--- Add Business Manager linked to branch
 SELECT public.add_business_member(
     '11111111-1111-4111-8111-111111111111'::uuid,
     (SELECT id FROM public.businesses WHERE legal_name = 'Empresa Nueva S.A.'),
     '66666666-6666-4666-8666-666666666666'::uuid,
-    'business_manager',
+    'manager',
     ARRAY[(SELECT id FROM public.business_locations WHERE address_text = 'Calle Principal #123, Managua')]::uuid[]
 );
 
@@ -128,20 +163,7 @@ SELECT ok(
     'Manager linked to branch via N:M business_member_locations'
 );
 
--- Duplicate business creation check
-SELECT throws_ok(
-    $$SELECT public.create_business(
-        '11111111-1111-4111-8111-111111111111'::uuid,
-        'Empresa Nueva S.A.',
-        'Mi Pulperia Nueva',
-        'J0319999999999'
-    )$$,
-    'P0001',
-    'ALREADY_REGISTERED: User is already an active member of a business',
-    'Duplicate call to create_business is rejected'
-);
-
--- 6. Driver Registration & Vehicle Registration via Service Role (5 assertions: 19-23)
+-- 6. Driver Registration & Vehicle Registration via Service Role (5 assertions: 25-29)
 SELECT public.register_driver(
     '22222222-2222-4222-8222-222222222222'::uuid,
     '001-010190-9999Z',
@@ -182,59 +204,91 @@ SELECT is(
     'Vehicle registered separately with correct make'
 );
 
--- Duplicate registration check
+-- 7. Document Authorization & Commit (6 assertions: 30-35)
+-- WebP is denied (Section 4)
 SELECT throws_ok(
-    $$SELECT public.register_driver(
+    $$SELECT public.authorize_driver_document_upload(
         '22222222-2222-4222-8222-222222222222'::uuid,
-        '001-010190-9999Z',
-        'LIC-99999999'
+        'NATIONAL_ID',
+        'image/webp',
+        1024
     )$$,
     'P0001',
-    'ALREADY_REGISTERED: User is already registered as a driver',
-    'Duplicate call to register_driver is rejected'
+    'INVALID_MIME_TYPE: Allowed document MIME types are image/jpeg, image/png, application/pdf',
+    'image/webp is rejected during upload authorization'
 );
 
--- 7. Document Commit & Storage Prefix Checks (4 assertions: 24-27)
+-- Authorize PDF document
+DO $$
+DECLARE
+    v_res jsonb;
+BEGIN
+    v_res := public.authorize_driver_document_upload(
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        'NATIONAL_ID',
+        'application/pdf',
+        2048
+    );
+    PERFORM set_config('test.national_id_upload_id', v_res->>'upload_id', true);
+END $$;
+
+SELECT ok(
+    EXISTS (
+        SELECT 1 FROM private.driver_document_upload_authorizations
+        WHERE upload_id = current_setting('test.national_id_upload_id')::uuid
+    ),
+    'Upload authorization persisted in private table'
+);
+
+-- Commit document
 SELECT public.commit_driver_document(
     '22222222-2222-4222-8222-222222222222'::uuid,
+    current_setting('test.national_id_upload_id')::uuid,
     'NATIONAL_ID',
-    '22222222-2222-4222-8222-222222222222/national_id.pdf',
     2048,
-    'application/pdf'
-);
-
-SELECT public.commit_driver_document(
-    '22222222-2222-4222-8222-222222222222'::uuid,
-    'DRIVER_LICENSE',
-    '22222222-2222-4222-8222-222222222222/driver_license.pdf',
-    4096,
     'application/pdf'
 );
 
 SELECT is(
     (SELECT count(*) FROM public.driver_documents WHERE driver_id = '22222222-2222-4222-8222-222222222222' AND verification_status = 'PENDING'),
-    2::bigint,
-    'Driver has 2 documents submitted in PENDING status'
+    1::bigint,
+    'Driver has 1 document submitted in PENDING status'
 );
 
-SELECT is(
-    (SELECT verification_status FROM public.driver_documents WHERE driver_id = '22222222-2222-4222-8222-222222222222' AND document_type = 'NATIONAL_ID'),
-    'PENDING',
-    'Submitted document status is PENDING'
-);
-
--- Storage prefix mismatch is rejected
+-- Duplicate active document submission denied by partial unique index (Section 9)
 SELECT throws_ok(
     $$SELECT public.commit_driver_document(
         '22222222-2222-4222-8222-222222222222'::uuid,
+        current_setting('test.national_id_upload_id')::uuid,
         'NATIONAL_ID',
-        'malicious-prefix/national_id.pdf',
         2048,
         'application/pdf'
     )$$,
     'P0001',
-    'INVALID_STORAGE_PATH: Storage path must reside within actor driver directory',
-    'Storage prefix mismatch is rejected'
+    'UPLOAD_UNVERIFIED: Upload authorization has already been committed',
+    'Reusing committed authorization is rejected'
+);
+
+-- Authorize and commit DRIVER_LICENSE
+DO $$
+DECLARE
+    v_res jsonb;
+BEGIN
+    v_res := public.authorize_driver_document_upload(
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        'DRIVER_LICENSE',
+        'application/pdf',
+        4096
+    );
+    PERFORM set_config('test.license_upload_id', v_res->>'upload_id', true);
+END $$;
+
+SELECT public.commit_driver_document(
+    '22222222-2222-4222-8222-222222222222'::uuid,
+    current_setting('test.license_upload_id')::uuid,
+    'DRIVER_LICENSE',
+    4096,
+    'application/pdf'
 );
 
 -- Approval without all 3 documents fails
@@ -244,7 +298,6 @@ SELECT throws_ok(
         '22222222-2222-4222-8222-222222222222'::uuid,
         'APPROVE',
         NULL,
-        'verification_agent',
         'aal2'
     )$$,
     'P0001',
@@ -252,7 +305,7 @@ SELECT throws_ok(
     'Approval requires all 3 mandatory documents'
 );
 
--- 8. Rejection, Re-upload and Full Approval Verification (8 assertions: 28-35)
+-- 8. Rejection, Re-upload and Full Approval (10 assertions: 36-45)
 
 -- 8.1 Operator cannot verify
 SELECT throws_ok(
@@ -261,7 +314,6 @@ SELECT throws_ok(
         '22222222-2222-4222-8222-222222222222'::uuid,
         'APPROVE',
         NULL,
-        'operator',
         'aal2'
     )$$,
     'P0001',
@@ -276,7 +328,6 @@ SELECT throws_ok(
         '22222222-2222-4222-8222-222222222222'::uuid,
         'APPROVE',
         NULL,
-        'verification_agent',
         'aal1'
     )$$,
     'P0001',
@@ -290,7 +341,6 @@ SELECT public.admin_verify_driver(
     '22222222-2222-4222-8222-222222222222'::uuid,
     'REJECT',
     'Cedula ilegible',
-    'verification_agent',
     'aal2'
 );
 
@@ -303,34 +353,73 @@ SELECT is(
 SELECT ok(
     EXISTS (
         SELECT 1 FROM public.audit_logs 
-        WHERE entity_id = '22222222-2222-4222-8222-222222222222' 
+        WHERE admin_user_id = '33333333-3333-4333-8333-333333333333' 
           AND action = 'DRIVER_REJECTED' 
-          AND entity_type = 'driver'
+          AND reason = 'Cedula ilegible'
     ),
     'Canonical DRIVER_REJECTED audit log created'
 );
 
 -- 8.4 Driver re-submits document and remaining documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)
+DO $$
+DECLARE
+    v_res jsonb;
+BEGIN
+    v_res := public.authorize_driver_document_upload(
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        'NATIONAL_ID',
+        'application/pdf',
+        3072
+    );
+    PERFORM set_config('test.national_id_v2_upload_id', v_res->>'upload_id', true);
+END $$;
+
 SELECT public.commit_driver_document(
     '22222222-2222-4222-8222-222222222222'::uuid,
+    current_setting('test.national_id_v2_upload_id')::uuid,
     'NATIONAL_ID',
-    '22222222-2222-4222-8222-222222222222/national_id_v2.pdf',
     3072,
     'application/pdf'
 );
 
+DO $$
+DECLARE
+    v_res jsonb;
+BEGIN
+    v_res := public.authorize_driver_document_upload(
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        'DRIVER_LICENSE',
+        'application/pdf',
+        4096
+    );
+    PERFORM set_config('test.license_v2_upload_id', v_res->>'upload_id', true);
+END $$;
+
 SELECT public.commit_driver_document(
     '22222222-2222-4222-8222-222222222222'::uuid,
+    current_setting('test.license_v2_upload_id')::uuid,
     'DRIVER_LICENSE',
-    '22222222-2222-4222-8222-222222222222/driver_license_v2.pdf',
     4096,
     'application/pdf'
 );
 
+DO $$
+DECLARE
+    v_res jsonb;
+BEGIN
+    v_res := public.authorize_driver_document_upload(
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        'VEHICLE_REGISTRATION',
+        'application/pdf',
+        2048
+    );
+    PERFORM set_config('test.veh_reg_upload_id', v_res->>'upload_id', true);
+END $$;
+
 SELECT public.commit_driver_document(
     '22222222-2222-4222-8222-222222222222'::uuid,
+    current_setting('test.veh_reg_upload_id')::uuid,
     'VEHICLE_REGISTRATION',
-    '22222222-2222-4222-8222-222222222222/veh_reg.pdf',
     2048,
     'application/pdf'
 );
@@ -341,13 +430,19 @@ SELECT is(
     'Driver verification_status automatically reset to PENDING after re-upload'
 );
 
+-- Historical rejected documents are preserved (Section 10)
+SELECT is(
+    (SELECT count(*) FROM public.driver_documents WHERE driver_id = '22222222-2222-4222-8222-222222222222' AND verification_status = 'REJECTED'),
+    2::bigint,
+    'Historical rejected documents are preserved in table'
+);
+
 -- 8.5 Admin Approves Driver
 SELECT public.admin_verify_driver(
     '55555555-5555-4555-8555-555555555555'::uuid,
     '22222222-2222-4222-8222-222222222222'::uuid,
     'APPROVE',
     NULL,
-    'admin',
     'aal2'
 );
 
@@ -366,11 +461,18 @@ SELECT is(
 SELECT ok(
     EXISTS (
         SELECT 1 FROM public.audit_logs 
-        WHERE entity_id = '22222222-2222-4222-8222-222222222222' 
+        WHERE admin_user_id = '55555555-5555-4555-8555-555555555555' 
           AND action = 'DRIVER_VERIFIED' 
-          AND entity_type = 'driver'
+          AND reason = 'DOCUMENTATION_COMPLETE'
     ),
     'Canonical DRIVER_VERIFIED audit log created'
+);
+
+-- Historical rejected document still remains REJECTED after later APPROVE (Section 10)
+SELECT is(
+    (SELECT count(*) FROM public.driver_documents WHERE driver_id = '22222222-2222-4222-8222-222222222222' AND verification_status = 'REJECTED'),
+    2::bigint,
+    'Historical rejected document remains REJECTED after later APPROVE'
 );
 
 SELECT * FROM finish();

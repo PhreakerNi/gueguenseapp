@@ -26,23 +26,6 @@ type PendingDriverItem = {
   national_id_number: string | null;
   license_number: string | null;
   created_at: string;
-  profiles: {
-    full_name: string | null;
-    phone: string | null;
-  } | null;
-  vehicles: Array<{
-    make: string;
-    model: string;
-    year: number;
-    color: string;
-    license_plate: string;
-  }> | null;
-  driver_documents: Array<{
-    id: string;
-    document_type: string;
-    storage_path: string;
-    verification_status: string;
-  }> | null;
 };
 
 export default async function AdminDashboardPage() {
@@ -82,41 +65,31 @@ export default async function AdminDashboardPage() {
     redirect("/mfa");
   }
 
-  // Fetch pending drivers for verification queue
-  const { data: rawPendingDrivers } = await supabase
-    .from("drivers")
-    .select(
-      `
-      id,
-      verification_status,
-      account_status,
-      national_id_number,
-      license_number,
-      created_at,
-      profiles:id (
-        full_name,
-        phone
-      ),
-      vehicles (
-        make,
-        model,
-        year,
-        color,
-        license_plate
-      ),
-      driver_documents (
-        id,
-        document_type,
-        storage_path,
-        verification_status
-      )
-    `,
-    )
-    .in("verification_status", ["PENDING", "UNDER_REVIEW"])
-    .order("created_at", { ascending: true });
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token;
+  const edgeUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
 
-  const pendingDrivers =
-    (rawPendingDrivers as unknown as PendingDriverItem[]) ?? [];
+  let pendingDrivers: PendingDriverItem[] = [];
+
+  if (token) {
+    try {
+      const res = await fetch(
+        `${edgeUrl}/functions/v1/api-v1/admin/verifications/drivers`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
+        },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        pendingDrivers = data.drivers || [];
+      }
+    } catch {}
+  }
+
   const canVerify = CAN_VERIFY_ROLES.includes(platformRole);
 
   async function handleSignOut() {
@@ -135,22 +108,26 @@ export default async function AdminDashboardPage() {
     if (!driverId || !decision) return;
 
     const serverSupabase = await createClient();
-    const { data: sessionData } = await serverSupabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-    const edgeUrl =
+    const { data: serverSession } = await serverSupabase.auth.getSession();
+    const serverToken = serverSession.session?.access_token;
+    const serverEdgeUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
 
-    if (token) {
-      await fetch(`${edgeUrl}/functions/v1/api-v1/admin/verify-driver`, {
+    if (serverToken) {
+      const idempotencyKey = crypto.randomUUID();
+      const endpoint =
+        decision === "APPROVE"
+          ? `${serverEdgeUrl}/functions/v1/api-v1/admin/drivers/${driverId}/approve`
+          : `${serverEdgeUrl}/functions/v1/api-v1/admin/drivers/${driverId}/reject`;
+
+      await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "Idempotency-Key": `admin_verify_${driverId}_${Date.now()}`,
+          Authorization: `Bearer ${serverToken}`,
+          "Idempotency-Key": idempotencyKey,
         },
         body: JSON.stringify({
-          driver_id: driverId,
-          decision,
           rejection_reason: rejectionReason || undefined,
         }),
       });
@@ -239,7 +216,7 @@ export default async function AdminDashboardPage() {
                 Cola de Verificación de Conductores
               </h3>
               <p className="text-xs text-slate-400">
-                Revisión de expedientes legales, documentos y motocicletas
+                Revisión de expedientes legales y documentos a través de api-v1
               </p>
             </div>
             <span className="px-3 py-1 text-xs font-bold rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
@@ -254,8 +231,6 @@ export default async function AdminDashboardPage() {
           ) : (
             <div className="space-y-4">
               {pendingDrivers.map((drv) => {
-                const vehicle = drv.vehicles?.[0];
-                const profileInfo = drv.profiles;
                 return (
                   <div
                     key={drv.id}
@@ -264,7 +239,7 @@ export default async function AdminDashboardPage() {
                     <div className="space-y-1">
                       <div className="flex items-center space-x-2">
                         <span className="font-semibold text-white">
-                          {profileInfo?.full_name ?? "Conductor"}
+                          ID: {drv.id.slice(0, 8)}...
                         </span>
                         <span className="text-xs font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
                           Cédula: {drv.national_id_number}
@@ -272,15 +247,10 @@ export default async function AdminDashboardPage() {
                         <span className="text-xs font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
                           Licencia: {drv.license_number}
                         </span>
+                        <span className="text-xs font-semibold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded">
+                          {drv.verification_status}
+                        </span>
                       </div>
-                      <p className="text-xs text-slate-400">
-                        Vehículo: {vehicle?.make} {vehicle?.model} (
-                        {vehicle?.year}) • Color: {vehicle?.color} • Placa:{" "}
-                        {vehicle?.license_plate}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        Documentos adjuntos: {drv.driver_documents?.length ?? 0}
-                      </p>
                     </div>
 
                     {canVerify ? (

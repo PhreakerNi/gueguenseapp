@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
+import * as Crypto from "expo-crypto";
 import { useAuth } from "../../src/context/auth-context";
 import { getSupabaseClient } from "../../src/supabase";
 import {
@@ -18,22 +19,49 @@ import {
 export default function BusinessOnboardingRequiredScreen() {
   const { identity, signOut, refreshIdentity } = useAuth();
 
+  // Wizard state: Step 1 = Empresa, Step 2 = Primera Sucursal
+  const existingOwnerMembership = identity?.businessMemberships?.find(
+    (m) => m.role === "business_owner" && m.status === "ACTIVE",
+  );
+
+  const [step, setStep] = useState<1 | 2>(existingOwnerMembership ? 2 : 1);
+  const [createdBusinessId, setCreatedBusinessId] = useState<string | null>(
+    existingOwnerMembership?.businessId || null,
+  );
+
+  useEffect(() => {
+    if (existingOwnerMembership) {
+      setStep(2);
+      setCreatedBusinessId(existingOwnerMembership.businessId);
+    } else {
+      setStep(1);
+    }
+  }, [existingOwnerMembership]);
+
+  // Step 1 Form
   const [legalName, setLegalName] = useState("");
   const [brandName, setBrandName] = useState("");
   const [taxId, setTaxId] = useState("");
+
+  // Step 2 Form
   const [branchName, setBranchName] = useState("");
   const [branchAddress, setBranchAddress] = useState("");
+  const [latitude, setLatitude] = useState("12.136389");
+  const [longitude, setLongitude] = useState("-86.251389");
+  const [phone, setPhone] = useState("");
   const [pickupInstructions, setPickupInstructions] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const handleRegister = async () => {
+  // Step 1: Create Business
+  const handleCreateBusiness = async () => {
     setErrorMsg(null);
 
     const bizValidation = businessCreationSchema.safeParse({
-      legalName,
-      brandName,
-      taxId,
+      legalName: legalName.trim(),
+      brandName: brandName.trim() || undefined,
+      taxId: taxId.trim(),
     });
 
     if (!bizValidation.success) {
@@ -43,13 +71,82 @@ export default function BusinessOnboardingRequiredScreen() {
       return;
     }
 
+    setLoading(true);
+    try {
+      const client = getSupabaseClient();
+      const { data: sessionData } = await client.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      if (!token) {
+        setErrorMsg("Sesión no válida. Por favor, inicia sesión nuevamente.");
+        return;
+      }
+
+      const edgeUrl =
+        process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+
+      const idempotencyKey = Crypto.randomUUID();
+
+      const bizRes = await fetch(`${edgeUrl}/functions/v1/api-v1/businesses`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({
+          legal_name: legalName.trim(),
+          brand_name: brandName.trim() || null,
+          tax_id: taxId.trim(),
+        }),
+      });
+
+      const bizData = await bizRes.json();
+      if (!bizRes.ok) {
+        setErrorMsg(
+          bizData.error?.message ||
+            bizData.error ||
+            "Error al registrar la empresa",
+        );
+        return;
+      }
+
+      setCreatedBusinessId(bizData.business_id);
+      setStep(2);
+      await refreshIdentity();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error inesperado";
+      setErrorMsg(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Step 2: Create First Location
+  const handleCreateLocation = async () => {
+    setErrorMsg(null);
+
+    const targetBizId =
+      createdBusinessId || existingOwnerMembership?.businessId;
+    if (!targetBizId) {
+      setErrorMsg(
+        "No se encontró una empresa activa para asociar la sucursal.",
+      );
+      setStep(1);
+      return;
+    }
+
+    const latNum = parseFloat(latitude);
+    const lngNum = parseFloat(longitude);
+
     const locValidation = businessLocationSchema.safeParse({
-      businessId: "00000000-0000-0000-0000-000000000000",
-      name: branchName,
-      addressText: branchAddress,
-      latitude: 12.136389,
-      longitude: -86.251389,
-      pickupInstructions: pickupInstructions || undefined,
+      businessId: targetBizId,
+      name: branchName.trim(),
+      addressText: branchAddress.trim(),
+      latitude: latNum,
+      longitude: lngNum,
+      phone: phone.trim() || undefined,
+      pickupInstructions: pickupInstructions.trim() || undefined,
     });
 
     if (!locValidation.success) {
@@ -73,54 +170,36 @@ export default function BusinessOnboardingRequiredScreen() {
       const edgeUrl =
         process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
 
-      // 1. Step 1: Create Business via api-v1
-      const bizRes = await fetch(
-        `${edgeUrl}/functions/v1/api-v1/business/onboarding`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            "Idempotency-Key": `biz_${identity?.userId}_${taxId.trim()}`,
-          },
-          body: JSON.stringify({
-            legal_name: legalName.trim(),
-            brand_name: brandName.trim(),
-            tax_id: taxId.trim(),
-          }),
-        },
-      );
+      const idempotencyKey = Crypto.randomUUID();
 
-      const bizData = await bizRes.json();
-      if (!bizRes.ok) {
-        setErrorMsg(bizData.error || "Error al crear la empresa");
-        return;
-      }
-
-      // 2. Step 2: Create Initial Branch Location via api-v1
       const locRes = await fetch(
-        `${edgeUrl}/functions/v1/api-v1/business/locations`,
+        `${edgeUrl}/functions/v1/api-v1/businesses/${targetBizId}/locations`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
-            "Idempotency-Key": `loc_${identity?.userId}_${bizData.business_id}_initial`,
+            "Idempotency-Key": idempotencyKey,
           },
           body: JSON.stringify({
-            business_id: bizData.business_id,
-            name: branchName.trim(),
+            business_id: targetBizId,
+            location_name: branchName.trim(),
             address_text: branchAddress.trim(),
-            latitude: 12.136389,
-            longitude: -86.251389,
-            pickup_instructions: pickupInstructions.trim() || undefined,
+            latitude: latNum,
+            longitude: lngNum,
+            phone: phone.trim() || null,
+            pickup_instructions: pickupInstructions.trim() || null,
           }),
         },
       );
 
       const locData = await locRes.json();
       if (!locRes.ok) {
-        setErrorMsg(locData.error || "Error al registrar la sucursal");
+        setErrorMsg(
+          locData.error?.message ||
+            locData.error ||
+            "Error al registrar la sucursal",
+        );
         return;
       }
 
@@ -138,8 +217,9 @@ export default function BusinessOnboardingRequiredScreen() {
       <View style={styles.container}>
         <Text style={styles.title}>Registro de Comercio</Text>
         <Text style={styles.message}>
-          Completa los datos de tu empresa y sucursal inicial para comenzar a
-          operar.
+          {step === 1
+            ? "Paso 1: Registra los datos legales y comerciales de tu empresa."
+            : "Paso 2: Registra la primera sucursal física de tu empresa."}
         </Text>
         <Text style={styles.detail}>
           Usuario: {identity?.profile.fullName ?? identity?.email}
@@ -151,84 +231,141 @@ export default function BusinessOnboardingRequiredScreen() {
           </View>
         )}
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Razón Social / Nombre Legal</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej. Distribuidora del Norte S.A."
-            value={legalName}
-            onChangeText={setLegalName}
-            autoCapitalize="words"
-          />
-        </View>
+        {step === 1 && (
+          <>
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Razón Social / Nombre Legal *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ej. Distribuidora del Norte S.A."
+                value={legalName}
+                onChangeText={setLegalName}
+                autoCapitalize="words"
+              />
+            </View>
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Nombre Comercial / Marca</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej. Pulpería La Central"
-            value={brandName}
-            onChangeText={setBrandName}
-            autoCapitalize="words"
-          />
-        </View>
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>
+                Nombre Comercial / Marca (Opcional)
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ej. Pulpería La Central"
+                value={brandName}
+                onChangeText={setBrandName}
+                autoCapitalize="words"
+              />
+            </View>
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>RUC / Cédula Tributaria</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej. J0310000000001"
-            value={taxId}
-            onChangeText={setTaxId}
-            autoCapitalize="characters"
-          />
-        </View>
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>RUC / Cédula Tributaria *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ej. J0310000000001"
+                value={taxId}
+                onChangeText={setTaxId}
+                autoCapitalize="characters"
+              />
+            </View>
 
-        <View style={styles.separator} />
-        <Text style={styles.subTitle}>Primera Sucursal</Text>
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleCreateBusiness}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Continuar a Sucursal</Text>
+              )}
+            </TouchableOpacity>
+          </>
+        )}
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Nombre de la Sucursal</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej. Sucursal Central"
-            value={branchName}
-            onChangeText={setBranchName}
-          />
-        </View>
+        {step === 2 && (
+          <>
+            <Text style={styles.subTitle}>Datos de la Primera Sucursal</Text>
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Dirección Física</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej. Calle Principal #123, Managua"
-            value={branchAddress}
-            onChangeText={setBranchAddress}
-            multiline
-          />
-        </View>
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Nombre de la Sucursal *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ej. Sucursal Central"
+                value={branchName}
+                onChangeText={setBranchName}
+              />
+            </View>
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Instrucciones de Retiro (Opcional)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej. Tocar timbre en recepción"
-            value={pickupInstructions}
-            onChangeText={setPickupInstructions}
-          />
-        </View>
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Dirección Física *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ej. Calle Principal #123, Managua"
+                value={branchAddress}
+                onChangeText={setBranchAddress}
+                multiline
+              />
+            </View>
 
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleRegister}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Completar Registro</Text>
-          )}
-        </TouchableOpacity>
+            <View style={styles.row}>
+              <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
+                <Text style={styles.label}>Latitud *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="12.136389"
+                  value={latitude}
+                  onChangeText={setLatitude}
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
+                <Text style={styles.label}>Longitud *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="-86.251389"
+                  value={longitude}
+                  onChangeText={setLongitude}
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Teléfono de Contacto (Opcional)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ej. +505 8888 8888"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>
+                Instrucciones de Retiro (Opcional)
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ej. Tocar timbre en recepción"
+                value={pickupInstructions}
+                onChangeText={setPickupInstructions}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleCreateLocation}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Completar Registro</Text>
+              )}
+            </TouchableOpacity>
+          </>
+        )}
 
         <TouchableOpacity style={styles.logoutButton} onPress={signOut}>
           <Text style={styles.logoutText}>Cerrar Sesión</Text>
@@ -272,10 +409,9 @@ const styles = StyleSheet.create({
     color: "#64748B",
     marginBottom: 20,
   },
-  separator: {
-    height: 1,
-    backgroundColor: "#E2E8F0",
-    marginVertical: 16,
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
   formGroup: {
     marginBottom: 16,

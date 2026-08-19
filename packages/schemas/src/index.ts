@@ -50,7 +50,14 @@ export type MfaVerifyInput = z.infer<typeof mfaVerifySchema>;
 
 // Phase 3: B2B Onboarding, Locations, Members & Driver Verification Schemas
 
-// 1. Business Creation Schema
+export const uuidV4Schema = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    "Must be a valid UUID v4",
+  );
+
+// 1. Business Creation Schema (brandName optional, Section 16)
 export const businessCreationSchema = z.object({
   legalName: z
     .string()
@@ -59,7 +66,9 @@ export const businessCreationSchema = z.object({
   brandName: z
     .string()
     .trim()
-    .min(2, "Brand name must be at least 2 characters"),
+    .min(2, "Brand name must be at least 2 characters")
+    .optional()
+    .nullable(),
   taxId: z.string().trim().min(3, "Tax ID must be at least 3 characters"),
 });
 
@@ -78,17 +87,25 @@ export const businessLocationSchema = z.object({
     .number()
     .min(-180)
     .max(180, "Longitude must be between -180 and 180"),
+  phone: z.string().trim().optional().nullable(),
   pickupInstructions: z.string().trim().optional(),
 });
 
 export type BusinessLocationInput = z.infer<typeof businessLocationSchema>;
 
-// 3. Business Member Schema (N:M Scope Support)
+// 3. Business Member Schema (N:M Scope Support, Section 19)
 export const businessMemberSchema = z.object({
   businessId: z.string().uuid("Invalid business ID"),
   userId: z.string().uuid("Invalid user ID"),
-  role: z.enum(["business_manager", "business_employee"]),
-  locationIds: z.array(z.string().uuid()).default([]),
+  role: z.enum([
+    "business_manager",
+    "business_employee",
+    "manager",
+    "employee",
+  ]),
+  locationIds: z
+    .array(z.string().uuid())
+    .min(1, "At least one location is required"),
 });
 
 export type BusinessMemberInput = z.infer<typeof businessMemberSchema>;
@@ -102,7 +119,9 @@ export const businessOnboardingSchema = z.object({
   brandName: z
     .string()
     .trim()
-    .min(2, "Brand name must be at least 2 characters"),
+    .min(2, "Brand name must be at least 2 characters")
+    .optional()
+    .nullable(),
   taxId: z.string().trim().min(3, "Tax ID must be at least 3 characters"),
   branchName: z
     .string()
@@ -135,7 +154,7 @@ export const driverOnboardingSchema = z.object({
 
 export type DriverOnboardingInput = z.infer<typeof driverOnboardingSchema>;
 
-// 5. Vehicle Registration Schema (Separated step)
+// 5. Vehicle Registration Schema (Separated step, Section 24)
 export const vehicleRegistrationSchema = z.object({
   make: z.string().trim().min(2, "Vehicle make must be at least 2 characters"),
   model: z.string().trim().min(1, "Vehicle model is required"),
@@ -155,7 +174,7 @@ export type VehicleRegistrationInput = z.infer<
   typeof vehicleRegistrationSchema
 >;
 
-// 6. Driver Document Types & Commit Schema
+// 6. Driver Document Types & Upload Schemas (Section 4, 6, 7)
 export const driverDocumentTypeSchema = z.enum([
   "NATIONAL_ID",
   "DRIVER_LICENSE",
@@ -166,6 +185,34 @@ export const driverDocumentTypeSchema = z.enum([
 
 export type DriverDocumentType = z.infer<typeof driverDocumentTypeSchema>;
 
+export const uploadAuthorizationSchema = z.object({
+  document_type: driverDocumentTypeSchema.or(
+    z.enum([
+      "NATIONAL_ID",
+      "DRIVER_LICENSE",
+      "VEHICLE_REGISTRATION",
+      "CRIMINAL_RECORD",
+      "INSURANCE",
+    ]),
+  ),
+  mime_type: z.enum(["image/jpeg", "image/png", "application/pdf"]),
+  size_bytes: z.number().int().min(1).max(10485760),
+});
+
+export type UploadAuthorizationInput = z.infer<
+  typeof uploadAuthorizationSchema
+>;
+
+export const driverDocumentCommitSchema = z.object({
+  upload_id: z.string().uuid("Invalid upload ID"),
+  document_type: driverDocumentTypeSchema,
+});
+
+export type DriverDocumentCommitInput = z.infer<
+  typeof driverDocumentCommitSchema
+>;
+
+// Legacy schema compatibility
 export const driverDocumentSubmitSchema = z.object({
   documentType: driverDocumentTypeSchema,
   storagePath: z.string().trim().min(3, "Storage path is required"),

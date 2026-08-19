@@ -62,7 +62,7 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
       });
     });
 
-    it("should grant access when user has an active membership and active business", () => {
+    it("should grant access when user has an active membership, active business, and >=1 location", () => {
       const activeIdentity: IdentityContext = {
         userId: "u-1",
         email: "test@business.com",
@@ -79,12 +79,42 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
             role: "business_owner",
             status: "ACTIVE",
             businessAccountStatus: "ACTIVE",
+            authorizedLocationIds: ["loc-1"],
           },
         ],
         driver: null,
       };
       assert.deepStrictEqual(evaluateBusinessAccess(activeIdentity), {
         allowed: true,
+        authorizedLocationIds: ["loc-1"],
+      });
+    });
+
+    it("should require onboarding when business_owner has active business but 0 authorized locations", () => {
+      const noLocIdentity: IdentityContext = {
+        userId: "u-1",
+        email: "test@business.com",
+        profile: {
+          platformRole: "none",
+          fullName: "Test",
+          phone: null,
+          avatarUrl: null,
+        },
+        businessMemberships: [
+          {
+            membershipId: "m-1",
+            businessId: "b-1",
+            role: "business_owner",
+            status: "ACTIVE",
+            businessAccountStatus: "ACTIVE",
+            authorizedLocationIds: [],
+          },
+        ],
+        driver: null,
+      };
+      assert.deepStrictEqual(evaluateBusinessAccess(noLocIdentity), {
+        allowed: false,
+        reason: "ONBOARDING_REQUIRED",
       });
     });
 
@@ -105,6 +135,7 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
             role: "business_owner",
             status: "SUSPENDED",
             businessAccountStatus: "ACTIVE",
+            authorizedLocationIds: ["loc-1"],
           },
         ],
         driver: null,
@@ -133,6 +164,7 @@ describe("@gueguense/domain - Auth & Identity Guards", () => {
             role: "business_owner",
             status: "ACTIVE",
             businessAccountStatus: "SUSPENDED",
+            authorizedLocationIds: ["loc-1"],
           },
         ],
         driver: null,

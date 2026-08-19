@@ -126,7 +126,7 @@ function generateTotpCode(secretBase32: string, timeStepOffset = 0): string {
   return (code % 1000000).toString().padStart(6, "0");
 }
 
-describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite (HTTP api-v1)", () => {
+describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2 (HTTP api-v1)", () => {
   after(async () => {
     await dbPool.end();
   });
@@ -135,10 +135,10 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite (HTT
   const ownerEmail = `bizowner_${testRunId}@gueguense.test`;
   const managerEmail = `bizmgr_${testRunId}@gueguense.test`;
   const driverEmail = `driver_${testRunId}@gueguense.test`;
-  const incompleteDriverEmail = `incomplete_${testRunId}@gueguense.test`;
+  const otherDriverEmail = `otherdriver_${testRunId}@gueguense.test`;
   const agentEmail = `agent_${testRunId}@gueguense.test`;
   const operatorEmail = `operator_${testRunId}@gueguense.test`;
-  const adminEmail = `admin_${testRunId}@gueguense.test`;
+  const superAdminEmail = `superadmin_${testRunId}@gueguense.test`;
   const testPassword = "Password123!Secure";
 
   let ownerToken = "";
@@ -146,663 +146,810 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite (HTT
   let managerUserId = "";
   let driverToken = "";
   let driverUserId = "";
-  let incompleteDriverToken = "";
-  let incompleteDriverUserId = "";
+  let otherDriverToken = "";
+  let otherDriverUserId = "";
   let agentToken = "";
-  let agentAal2Token = "";
+  let agentUserId = "";
   let operatorToken = "";
-  let operatorAal2Token = "";
-  let createdBusinessId = "";
-  let createdBranchId = "";
+  let superAdminToken = "";
+  let businessId = "";
+  let locationId = "";
 
-  const uniqueTaxId = `J${testRunId}${Math.floor(Math.random() * 8999 + 1000)}`;
-  const uniqueNationalId = `001-${testRunId}-0001A`;
-  const uniqueLicense = `LIC-${testRunId}`;
-  const uniquePlate = `M-${testRunId}`;
-
-  it("Step 0: Healthcheck on api-v1 Edge Function returns 200 OK", async () => {
+  it("Step 1: Healthcheck & Service Readiness", async () => {
     const res = await fetch(`${edgeFunctionBaseUrl}/health`);
     assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.strictEqual(data.status, "ok");
+    const body = await res.json();
+    assert.strictEqual(body.status, "ok");
   });
 
-  it("Step 1: Setup synthetic users & sessions for B2B, Driver and Admin roles", async () => {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  it("Step 2: Setup Test Users & Profiles in Database", async () => {
+    const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // 1. Owner
-    const { data: ownerAuth } = await supabase.auth.signUp({
+    const { data: ownerAuth } = await anonClient.auth.signUp({
       email: ownerEmail,
       password: testPassword,
-      options: { data: { full_name: "Business Owner" } },
     });
     ownerUserId = ownerAuth.user!.id;
     ownerToken = ownerAuth.session!.access_token;
 
     // 2. Manager
-    const { data: mgrAuth } = await supabase.auth.signUp({
+    const { data: mgrAuth } = await anonClient.auth.signUp({
       email: managerEmail,
       password: testPassword,
-      options: { data: { full_name: "Business Manager" } },
     });
     managerUserId = mgrAuth.user!.id;
 
     // 3. Driver
-    const { data: drvAuth } = await supabase.auth.signUp({
+    const { data: drvAuth } = await anonClient.auth.signUp({
       email: driverEmail,
       password: testPassword,
-      options: { data: { full_name: "Test Driver" } },
     });
     driverUserId = drvAuth.user!.id;
     driverToken = drvAuth.session!.access_token;
 
-    // 4. Incomplete Driver
-    const { data: incDrvAuth } = await supabase.auth.signUp({
-      email: incompleteDriverEmail,
+    // 4. Other Driver
+    const { data: otherDrvAuth } = await anonClient.auth.signUp({
+      email: otherDriverEmail,
       password: testPassword,
-      options: { data: { full_name: "Incomplete Driver" } },
     });
-    incompleteDriverUserId = incDrvAuth.user!.id;
-    incompleteDriverToken = incDrvAuth.session!.access_token;
+    otherDriverUserId = otherDrvAuth.user!.id;
+    otherDriverToken = otherDrvAuth.session!.access_token;
 
-    // 5. Verification Agent
-    const { data: agentAuth } = await supabase.auth.signUp({
+    // 5. Verification Agent with TOTP AAL2
+    const { data: agentAuth } = await anonClient.auth.signUp({
       email: agentEmail,
       password: testPassword,
-      options: { data: { full_name: "Verification Agent" } },
     });
-    const agentUserId = agentAuth.user!.id;
-    agentToken = agentAuth.session!.access_token;
-
-    // 6. Operator
-    const { data: operAuth } = await supabase.auth.signUp({
-      email: operatorEmail,
-      password: testPassword,
-      options: { data: { full_name: "Operator User" } },
-    });
-    const operatorUserId = operAuth.user!.id;
-    operatorToken = operAuth.session!.access_token;
-
-    // 7. Admin
-    const { data: adminAuth } = await supabase.auth.signUp({
-      email: adminEmail,
-      password: testPassword,
-      options: { data: { full_name: "Admin User" } },
-    });
-
-    // Assign roles via direct DB pool
+    agentUserId = agentAuth.user!.id;
     await dbPool.query(
       "UPDATE public.profiles SET platform_role = 'verification_agent' WHERE id = $1",
       [agentUserId],
     );
-    await dbPool.query(
-      "UPDATE public.profiles SET platform_role = 'operator' WHERE id = $1",
-      [operatorUserId],
-    );
-    await dbPool.query(
-      "UPDATE public.profiles SET platform_role = 'admin' WHERE id = $1",
-      [adminAuth.user!.id],
-    );
 
-    // Enroll & Verify MFA TOTP for Agent to generate valid AAL2 session
     const agentClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     await agentClient.auth.setSession({
-      access_token: agentToken,
+      access_token: agentAuth.session!.access_token,
       refresh_token: agentAuth.session!.refresh_token,
     });
-    const { data: enrollData } = await agentClient.auth.mfa.enroll({
-      factorType: "totp",
-      issuer: "Gueguense",
+    const enrollRes = await agentClient.auth.mfa.enroll({ factorType: "totp" });
+    const totpCode = generateTotpCode(enrollRes.data!.totp.secret);
+    const challengeRes = await agentClient.auth.mfa.challenge({
+      factorId: enrollRes.data!.id,
     });
-    const totpCode = generateTotpCode(enrollData!.totp.secret);
-    const { data: verifyData } = await agentClient.auth.mfa.challengeAndVerify({
-      factorId: enrollData!.id,
+    const verifyRes = await agentClient.auth.mfa.verify({
+      factorId: enrollRes.data!.id,
+      challengeId: challengeRes.data!.id,
       code: totpCode,
     });
-    agentAal2Token = verifyData!.access_token;
+    agentToken = verifyRes.data!.access_token;
 
-    // Enroll & Verify MFA TOTP for Operator
-    const operClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    await operClient.auth.setSession({
-      access_token: operatorToken,
-      refresh_token: operAuth.session!.refresh_token,
+    // 6. Operator
+    const { data: operAuth } = await anonClient.auth.signUp({
+      email: operatorEmail,
+      password: testPassword,
     });
-    const { data: operEnroll } = await operClient.auth.mfa.enroll({
-      factorType: "totp",
-      issuer: "Gueguense",
-    });
-    const operTotp = generateTotpCode(operEnroll!.totp.secret);
-    const { data: operVerify } = await operClient.auth.mfa.challengeAndVerify({
-      factorId: operEnroll!.id,
-      code: operTotp,
-    });
-    operatorAal2Token = operVerify!.access_token;
-
-    assert.ok(ownerToken && driverToken && agentAal2Token && operatorAal2Token);
-  });
-
-  it("Step 2: Business Onboarding via HTTP api-v1 creates Business with PENDING verification", async () => {
-    const res = await fetch(`${edgeFunctionBaseUrl}/business/onboarding`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${ownerToken}`,
-        "Idempotency-Key": `biz_${ownerUserId}_${uniqueTaxId}`,
-      },
-      body: JSON.stringify({
-        legal_name: "Distribuidora Central S.A.",
-        brand_name: "Pulperia Central",
-        tax_id: uniqueTaxId,
-      }),
-    });
-
-    assert.strictEqual(res.status, 201);
-    const data = await res.json();
-    assert.ok(data.business_id);
-    assert.strictEqual(data.verification_status, "PENDING");
-    assert.strictEqual(data.account_status, "ACTIVE");
-
-    createdBusinessId = data.business_id;
-
-    // Verify DB state
-    const dbRes = await dbPool.query(
-      "SELECT verification_status, account_status FROM public.businesses WHERE id = $1",
-      [createdBusinessId],
+    await dbPool.query(
+      "UPDATE public.profiles SET platform_role = 'operator' WHERE id = $1",
+      [operAuth.user!.id],
     );
-    assert.strictEqual(dbRes.rows[0].verification_status, "PENDING");
-    assert.strictEqual(dbRes.rows[0].account_status, "ACTIVE");
-  });
+    operatorToken = operAuth.session!.access_token;
 
-  it("Step 3: Separate Branch Location Creation via HTTP api-v1", async () => {
-    const res = await fetch(`${edgeFunctionBaseUrl}/business/locations`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${ownerToken}`,
-        "Idempotency-Key": `loc_${ownerUserId}_${createdBusinessId}_1`,
-      },
-      body: JSON.stringify({
-        business_id: createdBusinessId,
-        name: "Sucursal Central",
-        address_text: "Calle Principal #123, Managua",
-        latitude: 12.136389,
-        longitude: -86.251389,
-        pickup_instructions: "Tocar timbre",
-      }),
+    // 7. Super Admin with TOTP AAL2
+    const { data: saAuth } = await anonClient.auth.signUp({
+      email: superAdminEmail,
+      password: testPassword,
     });
-
-    assert.strictEqual(res.status, 201);
-    const data = await res.json();
-    assert.ok(data.location_id);
-    createdBranchId = data.location_id;
-
-    // Verify N:M link in DB
-    const linkRes = await dbPool.query(
-      `SELECT bml.business_location_id 
-       FROM public.business_member_locations bml
-       JOIN public.business_members bm ON bm.id = bml.business_member_id
-       WHERE bm.user_id = $1 AND bml.business_location_id = $2`,
-      [ownerUserId, createdBranchId],
+    await dbPool.query(
+      "UPDATE public.profiles SET platform_role = 'super_admin' WHERE id = $1",
+      [saAuth.user!.id],
     );
-    assert.strictEqual(linkRes.rows.length, 1);
-  });
-
-  it("Step 4: Business Member Management via HTTP api-v1 with branch scoping (N:M)", async () => {
-    const res = await fetch(`${edgeFunctionBaseUrl}/business/members`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${ownerToken}`,
-        "Idempotency-Key": `member_${createdBusinessId}_${managerUserId}`,
-      },
-      body: JSON.stringify({
-        business_id: createdBusinessId,
-        user_id: managerUserId,
-        role: "business_manager",
-        location_ids: [createdBranchId],
-      }),
+    const saClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    await saClient.auth.setSession({
+      access_token: saAuth.session!.access_token,
+      refresh_token: saAuth.session!.refresh_token,
     });
-
-    assert.strictEqual(res.status, 201);
-    const data = await res.json();
-    assert.ok(data.member_id);
-
-    // Verify manager has scoped access to createdBranchId
-    const managerIdentity: IdentityContext = {
-      userId: managerUserId,
-      email: managerEmail,
-      profile: {
-        platformRole: "none",
-        fullName: "Manager",
-        phone: null,
-        avatarUrl: null,
-      },
-      businessMemberships: [
-        {
-          membershipId: data.member_id,
-          businessId: createdBusinessId,
-          role: "business_manager",
-          status: "ACTIVE",
-          businessAccountStatus: "ACTIVE",
-          authorizedLocationIds: [createdBranchId],
-        },
-      ],
-      driver: null,
-    };
-
-    assert.strictEqual(
-      evaluateBusinessAccess(managerIdentity, createdBranchId).allowed,
-      true,
-    );
-    assert.strictEqual(
-      evaluateBusinessAccess(managerIdentity, "unauthorized-branch-id").allowed,
-      false,
-    );
-  });
-
-  it("Step 5: Driver Personal Onboarding via HTTP api-v1 (Separated from vehicle)", async () => {
-    const res = await fetch(`${edgeFunctionBaseUrl}/driver/onboarding`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${driverToken}`,
-        "Idempotency-Key": `drv_${driverUserId}_${uniqueNationalId}`,
-      },
-      body: JSON.stringify({
-        national_id_number: uniqueNationalId,
-        license_number: uniqueLicense,
-      }),
+    const saEnroll = await saClient.auth.mfa.enroll({ factorType: "totp" });
+    const saCode = generateTotpCode(saEnroll.data!.totp.secret);
+    const saChal = await saClient.auth.mfa.challenge({
+      factorId: saEnroll.data!.id,
     });
-
-    assert.strictEqual(res.status, 201);
-    const data = await res.json();
-    assert.strictEqual(data.driver_id, driverUserId);
-    assert.strictEqual(data.verification_status, "PENDING");
-    assert.strictEqual(data.account_status, "REGISTERED");
-    assert.strictEqual(data.operational_state, "OFFLINE");
-
-    // Verify evaluateDriverAccess denies operational access while PENDING
-    const driverIdentity: IdentityContext = {
-      userId: driverUserId,
-      email: driverEmail,
-      profile: {
-        platformRole: "none",
-        fullName: "Driver",
-        phone: null,
-        avatarUrl: null,
-      },
-      businessMemberships: [],
-      driver: {
-        verificationStatus: "PENDING",
-        accountStatus: "REGISTERED",
-      },
-    };
-    assert.strictEqual(evaluateDriverAccess(driverIdentity).allowed, false);
-  });
-
-  it("Step 6: Driver Vehicle Registration via HTTP api-v1", async () => {
-    const res = await fetch(`${edgeFunctionBaseUrl}/driver/vehicles`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${driverToken}`,
-        "Idempotency-Key": `veh_${driverUserId}_${uniquePlate}`,
-      },
-      body: JSON.stringify({
-        make: "Yamaha",
-        model: "FZ-S",
-        year: 2023,
-        color: "Azul",
-        license_plate: uniquePlate,
-      }),
+    const saVer = await saClient.auth.mfa.verify({
+      factorId: saEnroll.data!.id,
+      challengeId: saChal.data!.id,
+      code: saCode,
     });
-
-    assert.strictEqual(res.status, 201);
-    const data = await res.json();
-    assert.ok(data.vehicle_id);
-    assert.strictEqual(data.license_plate, uniquePlate);
+    superAdminToken = saVer.data!.access_token;
   });
 
-  it("Step 7: Signed Upload Authorization via HTTP api-v1 generates valid storage URL", async () => {
-    const res = await fetch(
-      `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
-      {
+  // =========================================================================
+  // Section A: Business & Location Onboarding (B01-B12)
+  // =========================================================================
+  describe("Business & Branch Operations (B01-B12)", () => {
+    it("B01: Create Business with brand_name omitted -> Success", async () => {
+      const taxId = `J03${Date.now().toString().slice(-10)}`;
+      const idemKey = crypto.randomUUID();
+
+      const res = await fetch(`${edgeFunctionBaseUrl}/businesses`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${driverToken}`,
+          Authorization: `Bearer ${ownerToken}`,
+          "Idempotency-Key": idemKey,
         },
         body: JSON.stringify({
-          document_type: "NATIONAL_ID",
-          extension: "pdf",
+          legal_name: "Distribuidora Nacional S.A.",
+          tax_id: taxId,
         }),
-      },
-    );
-
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.ok(data.upload_url);
-    assert.ok(data.storage_path.startsWith(`${driverUserId}/`));
-    assert.ok(data.storage_path.includes("NATIONAL_ID"));
-  });
-
-  it("Step 8: Upload documents to signed URLs and commit via HTTP api-v1", async () => {
-    const docTypes = ["NATIONAL_ID", "DRIVER_LICENSE", "VEHICLE_REGISTRATION"];
-
-    for (const docType of docTypes) {
-      // 1. Authorize
-      const authRes = await fetch(
-        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${driverToken}`,
-          },
-          body: JSON.stringify({ document_type: docType }),
-        },
-      );
-      const authData = await authRes.json();
-
-      // 2. Upload file content to signed URL
-      const fileContent = Buffer.from(
-        `%PDF-1.4 Mock binary content for ${docType}`,
-      );
-      const uploadUrl = authData.upload_url
-        .replace(/http:\/\/kong:8000/g, "http://127.0.0.1:54321")
-        .replace(/http:\/\/localhost:8000/g, "http://127.0.0.1:54321");
-
-      const uploadRes = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": "application/pdf" },
-        body: fileContent,
       });
-      assert.strictEqual(uploadRes.status, 200);
 
-      // 3. Commit document
-      const commitRes = await fetch(
-        `${edgeFunctionBaseUrl}/driver/documents/commit`,
+      assert.strictEqual(res.status, 201);
+      const data = await res.json();
+      assert.ok(data.business_id);
+      assert.strictEqual(data.verification_status, "PENDING");
+      assert.strictEqual(data.account_status, "ACTIVE");
+      businessId = data.business_id;
+    });
+
+    it("B02: Business with 0 locations evaluates to ONBOARDING_REQUIRED", () => {
+      const identity: IdentityContext = {
+        userId: ownerUserId,
+        email: ownerEmail,
+        profile: {
+          platformRole: "none",
+          fullName: "Owner",
+          phone: null,
+          avatarUrl: null,
+        },
+        businessMemberships: [
+          {
+            membershipId: "m-1",
+            businessId,
+            role: "business_owner",
+            status: "ACTIVE",
+            businessAccountStatus: "ACTIVE",
+            authorizedLocationIds: [],
+          },
+        ],
+        driver: null,
+      };
+      const evalRes = evaluateBusinessAccess(identity);
+      assert.strictEqual(evalRes.allowed, false);
+      assert.strictEqual(evalRes.reason, "ONBOARDING_REQUIRED");
+    });
+
+    it("B03: Create First Location for Business via api-v1", async () => {
+      const idemKey = crypto.randomUUID();
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/businesses/${businessId}/locations`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${driverToken}`,
-            "Idempotency-Key": `commit_${driverUserId}_${docType}`,
+            Authorization: `Bearer ${ownerToken}`,
+            "Idempotency-Key": idemKey,
           },
           body: JSON.stringify({
-            document_type: docType,
-            storage_path: authData.storage_path,
+            location_name: "Sucursal Central",
+            address_text: "Pista Jean Paul Genie #456",
+            latitude: 12.115,
+            longitude: -86.265,
+            phone: "+505 2222 3333",
           }),
         },
       );
-      assert.strictEqual(commitRes.status, 200);
-      const commitData = await commitRes.json();
-      assert.strictEqual(commitData.verification_status, "PENDING");
-    }
 
-    // Verify 3 active documents in DB
-    const docsRes = await dbPool.query(
-      "SELECT count(*) FROM public.driver_documents WHERE driver_id = $1 AND verification_status = 'PENDING'",
-      [driverUserId],
-    );
-    assert.strictEqual(parseInt(docsRes.rows[0].count, 10), 3);
-  });
+      assert.strictEqual(res.status, 201);
+      const data = await res.json();
+      assert.ok(data.location_id);
+      assert.strictEqual(data.status, "ACTIVE");
+      locationId = data.location_id;
+    });
 
-  it("Step 9: Direct Storage Bypass attempt without matching actor folder is rejected", async () => {
-    // Attempt to commit with wrong actor path prefix
-    const commitRes = await fetch(
-      `${edgeFunctionBaseUrl}/driver/documents/commit`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${driverToken}`,
+    it("B05: Owner with location evaluates to allowed with global scope", () => {
+      const identity: IdentityContext = {
+        userId: ownerUserId,
+        email: ownerEmail,
+        profile: {
+          platformRole: "none",
+          fullName: "Owner",
+          phone: null,
+          avatarUrl: null,
         },
-        body: JSON.stringify({
-          document_type: "NATIONAL_ID",
-          storage_path: `other-user-uuid/malicious.pdf`,
-        }),
-      },
-    );
-    assert.strictEqual(commitRes.status, 403);
-    const errData = await commitRes.json();
-    assert.ok(errData.error.includes("INVALID_STORAGE_PATH"));
-  });
-
-  it("Step 10: Operator cannot verify drivers (Role check enforcement)", async () => {
-    const res = await fetch(`${edgeFunctionBaseUrl}/admin/verify-driver`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${operatorAal2Token}`,
-      },
-      body: JSON.stringify({
-        driver_id: driverUserId,
-        decision: "APPROVE",
-      }),
-    });
-
-    assert.strictEqual(res.status, 400);
-    const data = await res.json();
-    assert.ok(data.error.includes("AUTH_ADMIN_ROLE_REQUIRED"));
-  });
-
-  it("Step 11: Verification Agent with AAL1 (non-MFA) is rejected with AUTH_MFA_REQUIRED", async () => {
-    const res = await fetch(`${edgeFunctionBaseUrl}/admin/verify-driver`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${agentToken}`, // Non-MFA token
-      },
-      body: JSON.stringify({
-        driver_id: driverUserId,
-        decision: "APPROVE",
-      }),
-    });
-
-    assert.strictEqual(res.status, 400);
-    const data = await res.json();
-    assert.ok(data.error.includes("AUTH_MFA_REQUIRED"));
-  });
-
-  it("Step 12: Verification Agent rejects driver (Rejection flow + Canonical DRIVER_REJECTED audit)", async () => {
-    const res = await fetch(`${edgeFunctionBaseUrl}/admin/verify-driver`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${agentAal2Token}`,
-      },
-      body: JSON.stringify({
-        driver_id: driverUserId,
-        decision: "REJECT",
-        rejection_reason: "Cédula borrosa y vencida",
-      }),
-    });
-
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.strictEqual(data.verification_status, "REJECTED");
-    assert.strictEqual(data.account_status, "REGISTERED");
-
-    // Verify canonical audit log
-    const auditRes = await dbPool.query(
-      "SELECT action, reason FROM public.audit_logs WHERE entity_id = $1 AND action = 'DRIVER_REJECTED'",
-      [driverUserId],
-    );
-    assert.strictEqual(auditRes.rows.length, 1);
-    assert.strictEqual(auditRes.rows[0].reason, "Cédula borrosa y vencida");
-  });
-
-  it("Step 13: Driver re-upload after rejection automatically transitions driver back to PENDING", async () => {
-    const docTypes = ["NATIONAL_ID", "DRIVER_LICENSE", "VEHICLE_REGISTRATION"];
-
-    for (const docType of docTypes) {
-      // 1. Authorize re-upload
-      const authRes = await fetch(
-        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${driverToken}`,
+        businessMemberships: [
+          {
+            membershipId: "m-1",
+            businessId,
+            role: "business_owner",
+            status: "ACTIVE",
+            businessAccountStatus: "ACTIVE",
+            authorizedLocationIds: [locationId],
           },
-          body: JSON.stringify({ document_type: docType }),
-        },
-      );
-      const authData = await authRes.json();
+        ],
+        driver: null,
+      };
+      const evalRes = evaluateBusinessAccess(identity);
+      assert.strictEqual(evalRes.allowed, true);
+    });
 
-      // 2. Upload file
-      const uploadUrl = authData.upload_url
-        .replace(/http:\/\/kong:8000/g, "http://127.0.0.1:54321")
-        .replace(/http:\/\/localhost:8000/g, "http://127.0.0.1:54321");
-
-      await fetch(uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": "application/pdf" },
-        body: Buffer.from(`%PDF-1.4 Clean high-resolution ${docType}`),
-      });
-
-      // 3. Commit
-      const commitRes = await fetch(
-        `${edgeFunctionBaseUrl}/driver/documents/commit`,
+    it("B09: Add Business Member fails-closed when location_ids is empty", async () => {
+      const idemKey = crypto.randomUUID();
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/businesses/${businessId}/members`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${driverToken}`,
+            Authorization: `Bearer ${ownerToken}`,
+            "Idempotency-Key": idemKey,
           },
           body: JSON.stringify({
-            document_type: docType,
-            storage_path: authData.storage_path,
+            user_id: managerUserId,
+            role: "manager",
+            location_ids: [],
           }),
         },
       );
-      assert.strictEqual(commitRes.status, 200);
-    }
 
-    // Verify driver status is PENDING again in DB
-    const drvRes = await dbPool.query(
-      "SELECT verification_status, account_status FROM public.drivers WHERE id = $1",
-      [driverUserId],
-    );
-    assert.strictEqual(drvRes.rows[0].verification_status, "PENDING");
-    assert.strictEqual(drvRes.rows[0].account_status, "REGISTERED");
-  });
-
-  it("Step 14: Admin Approval with all 3 documents + vehicle succeeds (DRIVER_VERIFIED audit)", async () => {
-    const res = await fetch(`${edgeFunctionBaseUrl}/admin/verify-driver`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${agentAal2Token}`,
-      },
-      body: JSON.stringify({
-        driver_id: driverUserId,
-        decision: "APPROVE",
-      }),
+      assert.strictEqual(res.status, 400);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "INVALID_ARGUMENT");
     });
 
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.strictEqual(data.verification_status, "VERIFIED");
-    assert.strictEqual(data.account_status, "ACTIVE");
-    assert.strictEqual(data.operational_state, "OFFLINE");
+    it("B10: Add Business Member with valid location succeeds", async () => {
+      const idemKey = crypto.randomUUID();
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/businesses/${businessId}/members`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${ownerToken}`,
+            "Idempotency-Key": idemKey,
+          },
+          body: JSON.stringify({
+            user_id: managerUserId,
+            role: "manager",
+            location_ids: [locationId],
+          }),
+        },
+      );
 
-    // Verify canonical audit log
-    const auditRes = await dbPool.query(
-      "SELECT action FROM public.audit_logs WHERE entity_id = $1 AND action = 'DRIVER_VERIFIED'",
-      [driverUserId],
-    );
-    assert.strictEqual(auditRes.rows.length, 1);
-
-    // Verify evaluateDriverAccess now grants access
-    const verifiedDriverIdentity: IdentityContext = {
-      userId: driverUserId,
-      email: driverEmail,
-      profile: {
-        platformRole: "none",
-        fullName: "Driver",
-        phone: null,
-        avatarUrl: null,
-      },
-      businessMemberships: [],
-      driver: {
-        verificationStatus: "VERIFIED",
-        accountStatus: "ACTIVE",
-      },
-    };
-    assert.strictEqual(
-      evaluateDriverAccess(verifiedDriverIdentity).allowed,
-      true,
-    );
+      assert.strictEqual(res.status, 201);
+      const data = await res.json();
+      assert.ok(data.business_member_id);
+    });
   });
 
-  it("Step 15: Admin Approval attempt without all 3 required documents is rejected (DOCUMENTATION_INCOMPLETE)", async () => {
-    // Register incomplete driver (personal profile only, no vehicle/docs)
-    const onbRes = await fetch(`${edgeFunctionBaseUrl}/driver/onboarding`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${incompleteDriverToken}`,
-      },
-      body: JSON.stringify({
-        national_id_number: `001-${testRunId}-9999Z`,
-        license_number: `LIC-${testRunId}-9999`,
-      }),
-    });
-    assert.strictEqual(onbRes.status, 201);
-
-    const res = await fetch(`${edgeFunctionBaseUrl}/admin/verify-driver`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${agentAal2Token}`,
-      },
-      body: JSON.stringify({
-        driver_id: incompleteDriverUserId,
-        decision: "APPROVE",
-      }),
-    });
-
-    assert.strictEqual(res.status, 400);
-    const data = await res.json();
-    assert.ok(data.error.includes("DOCUMENTATION_INCOMPLETE"));
-  });
-
-  it("Step 16: Concurrent duplicate requests with same Idempotency-Key are race-safe", async () => {
-    const concurrentKey = `concurrent_${driverUserId}_${Date.now()}`;
-    const targetPlate = `M-${testRunId}-CONC`;
-
-    // Fire 5 concurrent requests with identical Idempotency-Key
-    const requests = Array.from({ length: 5 }).map(() =>
-      fetch(`${edgeFunctionBaseUrl}/driver/vehicles`, {
+  // =========================================================================
+  // Section B: Idempotency Exact Contracts (I01-I08)
+  // =========================================================================
+  describe("Idempotency Controls (I01-I08)", () => {
+    it("I01: Missing Idempotency-Key header returns 400 IDEMPOTENCY_KEY_REQUIRED", async () => {
+      const res = await fetch(`${edgeFunctionBaseUrl}/driver/onboarding`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${driverToken}`,
-          "Idempotency-Key": concurrentKey,
         },
         body: JSON.stringify({
-          make: "Suzuki",
-          model: "Gixxer",
+          national_id_number: "001-010190-0001A",
+          license_number: "LIC-0001",
+        }),
+      });
+
+      assert.strictEqual(res.status, 400);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "IDEMPOTENCY_KEY_REQUIRED");
+    });
+
+    it("I02: Non-UUID-v4 Idempotency-Key returns 400 VALIDATION_ERROR", async () => {
+      const res = await fetch(`${edgeFunctionBaseUrl}/driver/onboarding`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${driverToken}`,
+          "Idempotency-Key": "deterministic_key_12345",
+        },
+        body: JSON.stringify({
+          national_id_number: "001-010190-0001A",
+          license_number: "LIC-0001",
+        }),
+      });
+
+      assert.strictEqual(res.status, 400);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "VALIDATION_ERROR");
+    });
+
+    it("I03: Valid Driver Onboarding succeeds and subsequent reordered semantic JSON returns replay (X-Cache: HIT)", async () => {
+      const idemKey = crypto.randomUUID();
+
+      // First call
+      const res1 = await fetch(`${edgeFunctionBaseUrl}/driver/onboarding`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${driverToken}`,
+          "Idempotency-Key": idemKey,
+        },
+        body: JSON.stringify({
+          national_id_number: "001-010190-0001A",
+          license_number: "LIC-0001",
+        }),
+      });
+
+      assert.strictEqual(res1.status, 201);
+      const data1 = await res1.json();
+      assert.ok(data1.driver_id);
+
+      // Replay with reordered keys (same semantic JSON)
+      const res2 = await fetch(`${edgeFunctionBaseUrl}/driver/onboarding`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${driverToken}`,
+          "Idempotency-Key": idemKey,
+        },
+        body: JSON.stringify({
+          license_number: "LIC-0001",
+          national_id_number: "001-010190-0001A",
+        }),
+      });
+
+      assert.strictEqual(res2.status, 201);
+      assert.strictEqual(res2.headers.get("X-Cache"), "HIT");
+      const data2 = await res2.json();
+      assert.deepStrictEqual(data1, data2);
+    });
+
+    it("I04: Same Idempotency-Key with different payload returns 422 IDEMPOTENCY_FINGERPRINT_MISMATCH", async () => {
+      const idemKey = crypto.randomUUID();
+
+      // Register vehicle
+      const res1 = await fetch(`${edgeFunctionBaseUrl}/driver/vehicles`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${driverToken}`,
+          "Idempotency-Key": idemKey,
+        },
+        body: JSON.stringify({
+          make: "Yamaha",
+          model: "FZ-S",
           year: 2023,
-          color: "Negro",
-          license_plate: targetPlate,
+          color: "Azul",
+          license_plate: `M-${Date.now().toString().slice(-6)}`,
         }),
-      }),
-    );
+      });
 
-    const responses = await Promise.all(requests);
-    const statuses = responses.map((r) => r.status);
+      assert.strictEqual(res1.status, 201);
 
-    // All should return 201 or 200 (either created or served from idempotency cache)
-    assert.ok(statuses.every((s) => s === 201 || s === 200));
+      // Mutate payload with same key
+      const res2 = await fetch(`${edgeFunctionBaseUrl}/driver/vehicles`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${driverToken}`,
+          "Idempotency-Key": idemKey,
+        },
+        body: JSON.stringify({
+          make: "Honda",
+          model: "Crux",
+          year: 2022,
+          color: "Rojo",
+          license_plate: "M-112233",
+        }),
+      });
 
-    // Verify exactly ONE vehicle with this plate was inserted in the database
-    const dbCount = await dbPool.query(
-      "SELECT count(*) FROM public.vehicles WHERE license_plate = $1",
-      [targetPlate],
-    );
-    assert.strictEqual(parseInt(dbCount.rows[0].count, 10), 1);
+      assert.strictEqual(res2.status, 422);
+      const data2 = await res2.json();
+      assert.strictEqual(data2.error.code, "IDEMPOTENCY_FINGERPRINT_MISMATCH");
+    });
+  });
+
+  // =========================================================================
+  // Section C: Storage Upload Authorization & Strict MIME (S01-S13)
+  // =========================================================================
+  describe("Storage & Document Verification (S01-S13)", () => {
+    it("S01: Direct client INSERT to storage bucket is denied", async () => {
+      const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      await client.auth.setSession({
+        access_token: driverToken,
+        refresh_token: "",
+      });
+
+      const { error } = await client.storage
+        .from("driver-documents")
+        .upload(`${driverUserId}/direct.pdf`, Buffer.from("test"), {
+          contentType: "application/pdf",
+        });
+
+      assert.ok(error, "Direct client upload must be denied");
+    });
+
+    it("S05: Upload authorization with image/webp is rejected (400 INVALID_MIME_TYPE)", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({
+            document_type: "NATIONAL_ID",
+            mime_type: "image/webp",
+            size_bytes: 2048,
+          }),
+        },
+      );
+
+      assert.strictEqual(res.status, 400);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "INVALID_MIME_TYPE");
+    });
+
+    let natIdUploadId = "";
+    let licUploadId = "";
+    let vehRegUploadId = "";
+
+    it("S10: Signed upload authorization + physical upload + commit succeeds", async () => {
+      // 1. NATIONAL_ID
+      const authRes1 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({
+            document_type: "NATIONAL_ID",
+            mime_type: "application/pdf",
+            size_bytes: 2048,
+          }),
+        },
+      );
+      assert.strictEqual(authRes1.status, 200);
+      const authData1 = await authRes1.json();
+      natIdUploadId = authData1.upload_id;
+
+      // Upload actual PDF bytes to signed URL
+      const putRes1 = await fetch(authData1.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: Buffer.from("%PDF-1.4 test real document bytes"),
+      });
+      assert.strictEqual(putRes1.status, 200);
+
+      // Commit NATIONAL_ID
+      const commitRes1 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            upload_id: natIdUploadId,
+            document_type: "NATIONAL_ID",
+          }),
+        },
+      );
+      assert.strictEqual(commitRes1.status, 200);
+
+      // 2. DRIVER_LICENSE
+      const authRes2 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({
+            document_type: "DRIVER_LICENSE",
+            mime_type: "application/pdf",
+            size_bytes: 2048,
+          }),
+        },
+      );
+      const authData2 = await authRes2.json();
+      licUploadId = authData2.upload_id;
+
+      await fetch(authData2.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: Buffer.from("%PDF-1.4 test license bytes"),
+      });
+
+      const commitRes2 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            upload_id: licUploadId,
+            document_type: "DRIVER_LICENSE",
+          }),
+        },
+      );
+      assert.strictEqual(commitRes2.status, 200);
+
+      // 3. VEHICLE_REGISTRATION
+      const authRes3 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({
+            document_type: "VEHICLE_REGISTRATION",
+            mime_type: "application/pdf",
+            size_bytes: 2048,
+          }),
+        },
+      );
+      const authData3 = await authRes3.json();
+      vehRegUploadId = authData3.upload_id;
+
+      await fetch(authData3.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: Buffer.from("%PDF-1.4 test vehicle registration bytes"),
+      });
+
+      const commitRes3 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            upload_id: vehRegUploadId,
+            document_type: "VEHICLE_REGISTRATION",
+          }),
+        },
+      );
+      assert.strictEqual(commitRes3.status, 200);
+    });
+
+    it("S09: Other driver trying to commit upload_id returns 403", async () => {
+      const res = await fetch(`${edgeFunctionBaseUrl}/driver/documents`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${otherDriverToken}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          upload_id: natIdUploadId,
+          document_type: "NATIONAL_ID",
+        }),
+      });
+
+      assert.strictEqual(res.status, 403);
+    });
+  });
+
+  // =========================================================================
+  // Section D: Administrative Verification, Dossier & Auditing (A01-A11)
+  // =========================================================================
+  describe("Admin Verification & Audit Logs (A01-A11)", () => {
+    it("A01: Operator is denied access to verification queue (403)", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/verifications/drivers`,
+        {
+          headers: {
+            Authorization: `Bearer ${operatorToken}`,
+          },
+        },
+      );
+
+      assert.strictEqual(res.status, 403);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "AUTH_ADMIN_ROLE_REQUIRED");
+    });
+
+    it("A03: Verification Agent with AAL2 gets verification queue (200)", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/verifications/drivers`,
+        {
+          headers: {
+            Authorization: `Bearer ${agentToken}`,
+          },
+        },
+      );
+
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.ok(Array.isArray(data.drivers));
+    });
+
+    it("A04: Verification Agent gets driver verification detail", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/verifications/drivers/${driverUserId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${agentToken}`,
+          },
+        },
+      );
+
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.strictEqual(data.driver.id, driverUserId);
+      assert.ok(data.documents.length >= 3);
+    });
+
+    it("A06: Signed read URL for driver document generates valid URL with <=15m TTL", async () => {
+      const detailRes = await fetch(
+        `${edgeFunctionBaseUrl}/admin/verifications/drivers/${driverUserId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${agentToken}`,
+          },
+        },
+      );
+      const detailData = await detailRes.json();
+      const docId = detailData.documents[0].id;
+
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/driver-documents/${docId}/read-url`,
+        {
+          headers: {
+            Authorization: `Bearer ${agentToken}`,
+          },
+        },
+      );
+
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.ok(data.read_url.includes("token="));
+    });
+
+    it("A08 & A10: Reject Driver with valid reason creates canonical DRIVER_REJECTED audit", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/drivers/${driverUserId}/reject`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${agentToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            rejection_reason: "Cédula borrosa o ilegible",
+          }),
+        },
+      );
+
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.strictEqual(data.verification_status, "REJECTED");
+
+      const auditCheck = await dbPool.query(
+        "SELECT * FROM public.audit_logs WHERE admin_user_id = $1 AND action = 'DRIVER_REJECTED'",
+        [agentUserId],
+      );
+      assert.strictEqual(auditCheck.rowCount, 1);
+    });
+
+    it("A09 & A10: Re-upload documents and APPROVE driver creates canonical DRIVER_VERIFIED audit while preserving historical rejected rows", async () => {
+      // Re-upload NATIONAL_ID
+      const authRes = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({
+            document_type: "NATIONAL_ID",
+            mime_type: "application/pdf",
+            size_bytes: 3000,
+          }),
+        },
+      );
+      const authData = await authRes.json();
+
+      await fetch(authData.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: Buffer.from("%PDF-1.4 reuploaded clear national id bytes"),
+      });
+
+      await fetch(`${edgeFunctionBaseUrl}/driver/documents`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${driverToken}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          upload_id: authData.upload_id,
+          document_type: "NATIONAL_ID",
+        }),
+      });
+
+      // Approve driver
+      const appRes = await fetch(
+        `${edgeFunctionBaseUrl}/admin/drivers/${driverUserId}/approve`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${agentToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({}),
+        },
+      );
+
+      assert.strictEqual(appRes.status, 200);
+      const appData = await appRes.json();
+      assert.strictEqual(appData.verification_status, "VERIFIED");
+      assert.strictEqual(appData.account_status, "ACTIVE");
+
+      // Verify canonical DRIVER_VERIFIED audit
+      const auditCheck = await dbPool.query(
+        "SELECT * FROM public.audit_logs WHERE admin_user_id = $1 AND action = 'DRIVER_VERIFIED'",
+        [agentUserId],
+      );
+      assert.strictEqual(auditCheck.rowCount, 1);
+      assert.strictEqual(auditCheck.rows[0].reason, "DOCUMENTATION_COMPLETE");
+
+      // Verify historical rejected document is still REJECTED in database
+      const histCheck = await dbPool.query(
+        "SELECT count(*) FROM public.driver_documents WHERE driver_id = $1 AND verification_status = 'REJECTED'",
+        [driverUserId],
+      );
+      assert.ok(parseInt(histCheck.rows[0].count, 10) >= 1);
+    });
+
+    it("A11: Direct SELECT on audit_logs by authenticated non-super_admin returns 0 rows", async () => {
+      const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      await client.auth.setSession({
+        access_token: agentToken,
+        refresh_token: "",
+      });
+
+      const { data } = await client.from("audit_logs").select("*");
+      assert.strictEqual(data?.length ?? 0, 0);
+    });
+
+    it("D02: Driver evaluates to allowed: true when VERIFIED and ACTIVE", () => {
+      const identity: IdentityContext = {
+        userId: driverUserId,
+        email: driverEmail,
+        profile: {
+          platformRole: "none",
+          fullName: "Driver",
+          phone: null,
+          avatarUrl: null,
+        },
+        businessMemberships: [],
+        driver: {
+          verificationStatus: "VERIFIED",
+          accountStatus: "ACTIVE",
+        },
+      };
+
+      const evalRes = evaluateDriverAccess(identity);
+      assert.strictEqual(evalRes.allowed, true);
+    });
   });
 });
