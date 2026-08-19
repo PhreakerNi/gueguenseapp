@@ -108,6 +108,20 @@ CREATE UNIQUE INDEX idx_driver_documents_active_type
 ON public.driver_documents (driver_id, document_type)
 WHERE verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED');
 
+-- Drop old RPC signatures before recreation to avoid parameter renaming conflicts
+DROP FUNCTION IF EXISTS public.create_business(UUID, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.create_business_location(UUID, UUID, TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT);
+DROP FUNCTION IF EXISTS public.add_business_member(UUID, UUID, UUID, TEXT, UUID[]);
+DROP FUNCTION IF EXISTS public.register_driver(UUID, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.register_vehicle(UUID, TEXT, TEXT, INTEGER, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.authorize_driver_document_upload(UUID, TEXT, TEXT, BIGINT);
+DROP FUNCTION IF EXISTS public.commit_driver_document(UUID, UUID, TEXT, BIGINT, TEXT);
+DROP FUNCTION IF EXISTS public.commit_driver_document(UUID, TEXT, TEXT, BIGINT, TEXT);
+DROP FUNCTION IF EXISTS public.admin_verify_driver(UUID, UUID, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.acquire_idempotency_lock(UUID, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.commit_idempotency_response(UUID, TEXT, INTEGER, JSONB);
+DROP FUNCTION IF EXISTS public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB);
+
 -- 7. Create Business RPC (brand_name optional, Section 16)
 CREATE OR REPLACE FUNCTION public.create_business(
     p_actor_id UUID,
