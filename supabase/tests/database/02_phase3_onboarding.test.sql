@@ -90,12 +90,12 @@ SELECT ok(
     'Business owner linked to first branch via N:M business_member_locations'
 );
 
--- Idempotency check: duplicate call returns existing business
+-- Duplicate onboarding check: duplicate call is rejected
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '11111111-1111-4111-8111-111111111111';
 SET LOCAL "request.jwt.claims" = '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}';
 
-SELECT lives_ok(
+SELECT throws_ok(
     $$SELECT public.register_business_onboarding(
         'Empresa Legal S.A.',
         'Mi Pulperia',
@@ -105,7 +105,9 @@ SELECT lives_ok(
         12.136389,
         -86.251389
     )$$,
-    'Idempotent call to register_business_onboarding returns gracefully'
+    'P0001',
+    'ALREADY_REGISTERED: User is already an active member of a business',
+    'Duplicate call to register_business_onboarding is rejected'
 );
 
 -- 5. Driver Onboarding & Vehicle Registration Test (6 assertions: 15-20)
@@ -154,12 +156,12 @@ SELECT is(
     'Vehicle created with correct license_plate'
 );
 
--- Idempotency check: duplicate call updates profile/vehicle and returns existing driver
+-- Duplicate registration check: duplicate call is rejected
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '22222222-2222-4222-8222-222222222222';
 SET LOCAL "request.jwt.claims" = '{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated"}';
 
-SELECT lives_ok(
+SELECT throws_ok(
     $$SELECT public.register_driver_onboarding(
         '001-010190-0001A',
         'LIC-98765432',
@@ -169,7 +171,9 @@ SELECT lives_ok(
         'Negro',
         'M-998877'
     )$$,
-    'Idempotent call to register_driver_onboarding completes gracefully'
+    'P0001',
+    'ALREADY_REGISTERED: User is already registered as a driver',
+    'Duplicate call to register_driver_onboarding is rejected'
 );
 
 -- 6. Document Submission Tests (4 assertions: 21-24)
