@@ -136,6 +136,19 @@ jobs:
       - name: Start Supabase Local Stack
         run: pnpm supabase:start
 
+      - name: Verify Migration Immutability (v1.3 against SHA 62e4fda)
+        run: |
+          git fetch --depth=1 origin 62e4fda22e236177160397374904e2f34019f5a9
+          git diff --exit-code 62e4fda22e236177160397374904e2f34019f5a9 -- supabase/migrations/20260820000001_phase3_security_closure_v1_3.sql
+
+      - name: Test Forward Migration Upgrade (v1.3 -> v1.4)
+        run: |
+          mv supabase/migrations/20260820000002_phase3_security_microclosure_v1_4.sql /tmp/
+          pnpm supabase:reset
+          mv /tmp/20260820000002_phase3_security_microclosure_v1_4.sql supabase/migrations/
+          pnpm supabase migration up --local
+          pnpm supabase:reset
+
       - name: Reset Database & Apply Foundation Migrations
         run: pnpm supabase:reset
 

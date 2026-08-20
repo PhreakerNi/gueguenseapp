@@ -1083,7 +1083,7 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       assert.strictEqual(data.error.code, "AUTH_ADMIN_ROLE_REQUIRED");
     });
 
-    it("A03: Verification Agent with AAL2 gets verification queue (200)", async () => {
+    it("A03: Verification Agent with AAL2 gets verification queue (200) with strict data minimization (no PII)", async () => {
       const res = await fetch(
         `${edgeFunctionBaseUrl}/admin/verifications/drivers`,
         {
@@ -1096,6 +1096,56 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       assert.strictEqual(res.status, 200);
       const data = await res.json();
       assert.ok(Array.isArray(data.drivers));
+      for (const item of data.drivers) {
+        assert.strictEqual(
+          item.national_id_number,
+          undefined,
+          "Queue item must NOT expose national_id_number",
+        );
+        assert.strictEqual(
+          item.license_number,
+          undefined,
+          "Queue item must NOT expose license_number",
+        );
+        assert.ok(item.id, "Queue item must have id");
+        assert.ok(
+          item.verification_status,
+          "Queue item must have verification_status",
+        );
+        assert.ok(item.account_status, "Queue item must have account_status");
+        assert.ok(item.created_at, "Queue item must have created_at");
+      }
+    });
+
+    it("A03b: Direct service role RPC get_admin_driver_verification_queue returns raw JSON without PII", async () => {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/rpc/get_admin_driver_verification_queue`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          },
+          body: JSON.stringify({}),
+        },
+      );
+
+      assert.strictEqual(res.status, 200);
+      const queue = await res.json();
+      assert.ok(Array.isArray(queue));
+      for (const item of queue) {
+        assert.strictEqual(
+          item.national_id_number,
+          undefined,
+          "RPC queue item must NOT expose national_id_number",
+        );
+        assert.strictEqual(
+          item.license_number,
+          undefined,
+          "RPC queue item must NOT expose license_number",
+        );
+      }
     });
 
     it("A04: Verification Agent gets driver verification detail", async () => {

@@ -698,14 +698,16 @@ Deno.serve(async (req: Request) => {
 
       const { data: drivers, error: driversError } = await serviceClient
         .from("drivers")
-        .select(
-          "id, verification_status, account_status, national_id_number, license_number, created_at",
-        )
+        .select("id, verification_status, account_status, created_at")
         .in("verification_status", ["PENDING", "UNDER_REVIEW"])
         .order("created_at", { ascending: false });
 
       if (driversError) {
-        return errorResponse("DATABASE_ERROR", driversError.message, 500);
+        return errorResponse(
+          "DATABASE_ERROR",
+          "Database operation failed",
+          500,
+        );
       }
 
       return jsonResponse({
@@ -944,7 +946,7 @@ Deno.serve(async (req: Request) => {
   } catch (err: any) {
     return errorResponse(
       "INTERNAL_SERVER_ERROR",
-      err?.message || "An unexpected error occurred",
+      "An unexpected server error occurred",
       500,
     );
   }

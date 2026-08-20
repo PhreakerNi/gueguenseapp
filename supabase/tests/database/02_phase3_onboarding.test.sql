@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(61);
+SELECT plan(64);
 
 -- 1. Structural Checks: Idempotency Keys, Audit Logs, Bucket & Authorizations (8 assertions: 1-8)
 SELECT has_table('public', 'idempotency_keys', 'public.idempotency_keys table exists');
@@ -648,6 +648,24 @@ SELECT throws_ok(
 -- Restore presence record
 INSERT INTO public.driver_presence (driver_id, operational_state)
 VALUES ('22222222-2222-4222-8222-222222222222', 'OFFLINE');
+
+-- Queue data minimization tests (Section 6)
+SELECT ok(
+    (SELECT public.get_admin_driver_verification_queue()) IS NOT NULL,
+    'get_admin_driver_verification_queue returns data via service_role'
+);
+
+SELECT is(
+    (SELECT (public.get_admin_driver_verification_queue()->0) ? 'national_id_number'),
+    false,
+    'get_admin_driver_verification_queue does not expose national_id_number'
+);
+
+SELECT is(
+    (SELECT (public.get_admin_driver_verification_queue()->0) ? 'license_number'),
+    false,
+    'get_admin_driver_verification_queue does not expose license_number'
+);
 
 -- 8.5 Admin Approves Driver
 SELECT public.admin_verify_driver(
