@@ -4,6 +4,17 @@
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
+-- 0. Update check constraints on private.driver_document_upload_authorizations
+-- ----------------------------------------------------------------------------
+
+ALTER TABLE private.driver_document_upload_authorizations
+    DROP CONSTRAINT IF EXISTS driver_document_upload_authorizations_document_type_check;
+
+ALTER TABLE private.driver_document_upload_authorizations
+    ADD CONSTRAINT driver_document_upload_authorizations_document_type_check
+    CHECK (document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION', 'CRIMINAL_RECORD', 'INSURANCE'));
+
+-- ----------------------------------------------------------------------------
 -- 1. Idempotency Engine with Enforced 24h Expiry & Atomic Handling
 -- ----------------------------------------------------------------------------
 

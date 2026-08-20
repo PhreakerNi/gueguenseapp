@@ -897,7 +897,10 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
           }),
         },
       );
+      assert.strictEqual(authRes.status, 200);
       const authData = await authRes.json();
+      assert.ok(authData.upload_id);
+
       // DO NOT upload file to storage bucket
       const commitRes = await fetch(`${edgeFunctionBaseUrl}/driver/documents`, {
         method: "POST",
