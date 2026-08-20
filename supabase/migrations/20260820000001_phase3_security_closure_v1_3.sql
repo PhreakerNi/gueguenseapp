@@ -638,3 +638,95 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.get_driver_document_storage_path(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_driver_document_storage_path(UUID) TO anon, authenticated, service_role;
+
+-- ----------------------------------------------------------------------------
+-- 6. Updated Authorize Driver Document Upload (Allowing all canonical types)
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.authorize_driver_document_upload(
+    p_actor_id UUID,
+    p_document_type TEXT,
+    p_mime_type TEXT,
+    p_file_size BIGINT
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_clean_type TEXT;
+    v_clean_mime TEXT;
+    v_upload_id UUID;
+    v_storage_path TEXT;
+    v_expires_at TIMESTAMPTZ;
+    v_file_ext TEXT;
+BEGIN
+    IF p_actor_id IS NULL THEN
+        RAISE EXCEPTION 'AUTH_REQUIRED: Valid actor user ID is required';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM public.drivers WHERE id = p_actor_id) THEN
+        RAISE EXCEPTION 'DRIVER_NOT_FOUND: Driver profile does not exist';
+    END IF;
+
+    v_clean_type := pg_catalog.upper(pg_catalog.btrim(p_document_type));
+    IF v_clean_type NOT IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION', 'CRIMINAL_RECORD', 'INSURANCE') THEN
+        RAISE EXCEPTION 'INVALID_DOCUMENT_TYPE: Allowed types are NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION, CRIMINAL_RECORD, INSURANCE';
+    END IF;
+
+    v_clean_mime := pg_catalog.btrim(p_mime_type);
+    -- Strict MIME allowlist: image/jpeg, image/png, application/pdf ONLY (webp is DENIED, Section 4)
+    IF v_clean_mime NOT IN ('image/jpeg', 'image/png', 'application/pdf') THEN
+        RAISE EXCEPTION 'INVALID_MIME_TYPE: Allowed document MIME types are image/jpeg, image/png, application/pdf';
+    END IF;
+
+    IF p_file_size IS NULL OR p_file_size <= 0 OR p_file_size > 10485760 THEN
+        RAISE EXCEPTION 'INVALID_FILE_SIZE: File size must be between 1 byte and 10MB';
+    END IF;
+
+    IF v_clean_mime = 'image/jpeg' THEN
+        v_file_ext := 'jpg';
+    ELSIF v_clean_mime = 'image/png' THEN
+        v_file_ext := 'png';
+    ELSE
+        v_file_ext := 'pdf';
+    END IF;
+
+    v_upload_id := gen_random_uuid();
+    v_storage_path := p_actor_id::text || '/' || pg_catalog.lower(v_clean_type) || '_' || v_upload_id::text || '.' || v_file_ext;
+    v_expires_at := NOW() + interval '15 minutes';
+
+    INSERT INTO private.driver_document_upload_authorizations (
+        upload_id,
+        driver_id,
+        document_type,
+        storage_path,
+        mime_type,
+        max_size_bytes,
+        expires_at
+    )
+    VALUES (
+        v_upload_id,
+        p_actor_id,
+        v_clean_type,
+        v_storage_path,
+        v_clean_mime,
+        p_file_size,
+        v_expires_at
+    );
+
+    RETURN jsonb_build_object(
+        'upload_id', v_upload_id,
+        'driver_id', p_actor_id,
+        'document_type', v_clean_type,
+        'storage_path', v_storage_path,
+        'mime_type', v_clean_mime,
+        'max_size_bytes', p_file_size,
+        'expires_at', v_expires_at
+    );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.authorize_driver_document_upload(UUID, TEXT, TEXT, BIGINT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.authorize_driver_document_upload(UUID, TEXT, TEXT, BIGINT) TO authenticated, service_role;

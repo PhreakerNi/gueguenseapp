@@ -449,7 +449,8 @@ Deno.serve(async (req: Request) => {
     const memberMatch = path.match(/^\/businesses\/([^\/]+)\/members$/);
     if (req.method === "POST" && memberMatch) {
       const businessId = memberMatch[1];
-      const targetUserId = body.target_user_id || body.targetUserId;
+      const targetUserId =
+        body.target_user_id || body.targetUserId || body.user_id || body.userId;
       const role = body.role;
       const authorizedLocationIds =
         body.authorized_location_ids ||
