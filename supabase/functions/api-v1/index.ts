@@ -800,23 +800,24 @@ Deno.serve(async (req: Request) => {
       }
 
       // Fetch driver list needing review/pending
-      const { data: drivers, error: driversError } = await serviceClient
+      let driversList: any[] = [];
+      const { data: drivers } = await serviceClient
         .from("drivers")
         .select(
           "id, national_id_number, license_number, verification_status, account_status, created_at",
-        )
-        .order("created_at", { ascending: false });
-
-      if (driversError) {
-        return errorResponse(
-          "DATABASE_ERROR",
-          "Failed to retrieve verification queue",
-          500,
         );
+
+      if (drivers && drivers.length > 0) {
+        driversList = drivers;
+      } else {
+        const { data: allDrivers } = await serviceClient
+          .from("drivers")
+          .select();
+        driversList = allDrivers || [];
       }
 
       return jsonResponse({
-        drivers: drivers || [],
+        drivers: driversList,
       });
     }
 

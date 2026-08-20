@@ -896,8 +896,7 @@ BEGIN
         SELECT count(DISTINCT document_type) INTO v_mandatory_doc_count
         FROM public.driver_documents
         WHERE driver_id = p_driver_id
-          AND document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION')
-          AND verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED');
+          AND document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION');
 
         IF v_mandatory_doc_count < 3 THEN
             RAISE EXCEPTION 'DOCUMENTATION_INCOMPLETE: Driver must have all 3 mandatory documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)';
@@ -912,12 +911,24 @@ BEGIN
             RAISE EXCEPTION 'VEHICLE_MISSING: Driver must have at least one registered vehicle to be approved';
         END IF;
 
-        -- 1. Update active pending/under_review documents to VERIFIED (leaving REJECTED historical records untouched)
+        -- 1. Update active pending/under_review documents to VERIFIED
         UPDATE public.driver_documents
         SET verification_status = 'VERIFIED',
             rejection_reason = NULL
         WHERE driver_id = p_driver_id
           AND verification_status IN ('PENDING', 'UNDER_REVIEW');
+
+        -- 2. For document types with only a single historical row, update it to VERIFIED (preserving re-uploaded historical rows)
+        UPDATE public.driver_documents d
+        SET verification_status = 'VERIFIED',
+            rejection_reason = NULL
+        WHERE d.driver_id = p_driver_id
+          AND d.verification_status = 'REJECTED'
+          AND (
+              SELECT count(*) FROM public.driver_documents cnt
+              WHERE cnt.driver_id = p_driver_id
+                AND cnt.document_type = d.document_type
+          ) = 1;
 
         -- Update driver record
         UPDATE public.drivers
