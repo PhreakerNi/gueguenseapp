@@ -535,7 +535,7 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 5. Canonical Platform Role Lookup RPC (Strictly public.profiles ONLY)
+-- 5. Canonical Platform Role & Admin Verification RPCs (Strictly public schema)
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.get_user_platform_role(p_user_id UUID)
@@ -553,3 +553,88 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.get_user_platform_role(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_user_platform_role(UUID) TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.get_admin_driver_verification_queue()
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_drivers jsonb;
+BEGIN
+    SELECT jsonb_agg(
+        jsonb_build_object(
+            'id', d.id,
+            'verification_status', d.verification_status,
+            'account_status', d.account_status,
+            'national_id_number', d.national_id_number,
+            'license_number', d.license_number,
+            'created_at', d.created_at
+        ) ORDER BY d.created_at DESC
+    ) INTO v_drivers
+    FROM public.drivers d
+    WHERE d.verification_status IN ('PENDING', 'UNDER_REVIEW');
+
+    RETURN COALESCE(v_drivers, '[]'::jsonb);
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_admin_driver_verification_queue() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_admin_driver_verification_queue() TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.get_admin_driver_verification_detail(p_driver_id UUID)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_driver RECORD;
+    v_vehicles jsonb;
+    v_documents jsonb;
+BEGIN
+    SELECT * INTO v_driver
+    FROM public.drivers
+    WHERE id = p_driver_id;
+
+    IF v_driver.id IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    SELECT COALESCE(jsonb_agg(to_jsonb(v)), '[]'::jsonb) INTO v_vehicles
+    FROM public.vehicles v
+    WHERE v.driver_id = p_driver_id;
+
+    SELECT COALESCE(jsonb_agg(to_jsonb(doc) ORDER BY doc.created_at DESC), '[]'::jsonb) INTO v_documents
+    FROM public.driver_documents doc
+    WHERE doc.driver_id = p_driver_id;
+
+    RETURN jsonb_build_object(
+        'driver', to_jsonb(v_driver),
+        'vehicle', (CASE WHEN jsonb_array_length(v_vehicles) > 0 THEN v_vehicles->0 ELSE 'null'::jsonb END),
+        'vehicles', v_vehicles,
+        'documents', v_documents
+    );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_admin_driver_verification_detail(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_admin_driver_verification_detail(UUID) TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.get_driver_document_storage_path(p_document_id UUID)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    SELECT jsonb_build_object('id', id, 'storage_path', storage_path)
+    FROM public.driver_documents
+    WHERE id = p_document_id;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_driver_document_storage_path(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_driver_document_storage_path(UUID) TO anon, authenticated, service_role;

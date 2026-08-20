@@ -604,10 +604,22 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      let signedUploadUrl = uploadUrlData.signedUrl;
+      if (
+        signedUploadUrl.includes("://kong:") ||
+        signedUploadUrl.includes("://kong/")
+      ) {
+        const publicBase = supabaseUrl.replace(/\/+$/, "");
+        signedUploadUrl = signedUploadUrl.replace(
+          /^https?:\/\/[^\/]+/,
+          publicBase,
+        );
+      }
+
       return jsonResponse({
         upload_id: authData.upload_id,
         storage_path: authData.storage_path,
-        upload_url: uploadUrlData.signedUrl,
+        upload_url: signedUploadUrl,
         expires_at: authData.expires_at,
       });
     }
@@ -675,6 +687,16 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      const { data: rpcDrivers, error: rpcDriversErr } =
+        await serviceClient.rpc("get_admin_driver_verification_queue");
+
+      if (!rpcDriversErr && Array.isArray(rpcDrivers)) {
+        return jsonResponse({
+          drivers: rpcDrivers,
+          count: rpcDrivers.length,
+        });
+      }
+
       const { data: drivers, error: driversError } = await serviceClient
         .from("drivers")
         .select(
@@ -703,9 +725,6 @@ Deno.serve(async (req: Request) => {
       const targetDriverId = driverDetailMatch[1];
 
       const role = await getProfileRole(userId);
-      console.log(
-        `[API-V1 Route 9] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal}`,
-      );
       if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
@@ -720,6 +739,22 @@ Deno.serve(async (req: Request) => {
           "AUTH_MFA_REQUIRED",
           "AAL2 MFA is required for administrative verification",
           403,
+        );
+      }
+
+      const { data: rpcDetail, error: rpcDetailErr } = await serviceClient.rpc(
+        "get_admin_driver_verification_detail",
+        { p_driver_id: targetDriverId },
+      );
+
+      if (!rpcDetailErr && rpcDetail) {
+        return jsonResponse(rpcDetail);
+      }
+      if (!rpcDetailErr && rpcDetail === null) {
+        return errorResponse(
+          "DRIVER_NOT_FOUND",
+          "Driver profile not found",
+          404,
         );
       }
 
@@ -766,9 +801,6 @@ Deno.serve(async (req: Request) => {
       const docId = readUrlMatch[1];
 
       const role = await getProfileRole(userId);
-      console.log(
-        `[API-V1 Route 10] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal}`,
-      );
       if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
@@ -786,13 +818,27 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const { data: doc, error: docError } = await serviceClient
-        .from("driver_documents")
-        .select("id, storage_path")
-        .eq("id", docId)
-        .maybeSingle();
+      let storagePath: string | null = null;
+      const { data: rpcDoc, error: rpcDocErr } = await serviceClient.rpc(
+        "get_driver_document_storage_path",
+        { p_document_id: docId },
+      );
 
-      if (docError || !doc || !doc.storage_path) {
+      if (!rpcDocErr && rpcDoc?.storage_path) {
+        storagePath = rpcDoc.storage_path;
+      } else {
+        const { data: doc, error: docError } = await serviceClient
+          .from("driver_documents")
+          .select("id, storage_path")
+          .eq("id", docId)
+          .maybeSingle();
+
+        if (doc && doc.storage_path) {
+          storagePath = doc.storage_path;
+        }
+      }
+
+      if (!storagePath) {
         return errorResponse(
           "DOCUMENT_NOT_FOUND",
           "Driver document not found",
@@ -804,7 +850,7 @@ Deno.serve(async (req: Request) => {
       const { data: signedData, error: signedError } =
         await serviceClient.storage
           .from("driver-documents")
-          .createSignedUrl(doc.storage_path, 900);
+          .createSignedUrl(storagePath, 900);
 
       if (signedError || !signedData?.signedUrl) {
         return errorResponse(
@@ -814,9 +860,18 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      let signedReadUrl = signedData.signedUrl;
+      if (
+        signedReadUrl.includes("://kong:") ||
+        signedReadUrl.includes("://kong/")
+      ) {
+        const publicBase = supabaseUrl.replace(/\/+$/, "");
+        signedReadUrl = signedReadUrl.replace(/^https?:\/\/[^\/]+/, publicBase);
+      }
+
       return jsonResponse({
-        document_id: doc.id,
-        read_url: signedData.signedUrl,
+        document_id: docId,
+        read_url: signedReadUrl,
         expires_in_seconds: 900,
       });
     }

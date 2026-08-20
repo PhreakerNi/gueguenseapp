@@ -470,12 +470,23 @@ export type Database = {
         }
         Returns: Json
       }
-      get_user_platform_role: {
+      get_admin_driver_verification_detail: {
         Args: {
-          p_user_id: string
+          p_driver_id: string
         }
-        Returns: string
+        Returns: Json
       }
+      get_admin_driver_verification_queue: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      get_driver_document_storage_path: {
+        Args: {
+          p_document_id: string
+        }
+        Returns: Json
+      }
+      get_user_platform_role: { Args: { p_user_id: string }; Returns: string }
       register_driver: {
         Args: {
           p_actor_id: string

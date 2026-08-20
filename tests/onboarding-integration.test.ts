@@ -1240,25 +1240,34 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         },
       );
       const authData = await authRes.json();
+      const uploadUrl1 =
+        authData.upload_url?.replace(
+          /^https?:\/\/kong(:\d+)?/i,
+          SUPABASE_URL,
+        ) || authData.upload_url;
 
-      await fetch(authData.upload_url, {
+      await fetch(uploadUrl1, {
         method: "PUT",
         headers: { "Content-Type": "application/pdf" },
         body: Buffer.from("%PDF-1.4 reuploaded clear national id bytes"),
       });
 
-      await fetch(`${edgeFunctionBaseUrl}/driver/documents`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${driverToken}`,
-          "Idempotency-Key": crypto.randomUUID(),
+      const commitRes1 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            upload_id: authData.upload_id,
+            document_type: "NATIONAL_ID",
+          }),
         },
-        body: JSON.stringify({
-          upload_id: authData.upload_id,
-          document_type: "NATIONAL_ID",
-        }),
-      });
+      );
+      assert.strictEqual(commitRes1.status, 200);
 
       // Re-upload DRIVER_LICENSE
       const authRes2 = await fetch(
@@ -1277,25 +1286,34 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         },
       );
       const authData2 = await authRes2.json();
+      const uploadUrl2 =
+        authData2.upload_url?.replace(
+          /^https?:\/\/kong(:\d+)?/i,
+          SUPABASE_URL,
+        ) || authData2.upload_url;
 
-      await fetch(authData2.upload_url, {
+      await fetch(uploadUrl2, {
         method: "PUT",
         headers: { "Content-Type": "application/pdf" },
         body: Buffer.from("%PDF-1.4 reuploaded clear license bytes"),
       });
 
-      await fetch(`${edgeFunctionBaseUrl}/driver/documents`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${driverToken}`,
-          "Idempotency-Key": crypto.randomUUID(),
+      const commitRes2 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            upload_id: authData2.upload_id,
+            document_type: "DRIVER_LICENSE",
+          }),
         },
-        body: JSON.stringify({
-          upload_id: authData2.upload_id,
-          document_type: "DRIVER_LICENSE",
-        }),
-      });
+      );
+      assert.strictEqual(commitRes2.status, 200);
 
       // Re-upload VEHICLE_REGISTRATION
       const authRes3 = await fetch(
@@ -1314,25 +1332,34 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         },
       );
       const authData3 = await authRes3.json();
+      const uploadUrl3 =
+        authData3.upload_url?.replace(
+          /^https?:\/\/kong(:\d+)?/i,
+          SUPABASE_URL,
+        ) || authData3.upload_url;
 
-      await fetch(authData3.upload_url, {
+      await fetch(uploadUrl3, {
         method: "PUT",
         headers: { "Content-Type": "application/pdf" },
         body: Buffer.from("%PDF-1.4 reuploaded clear registration bytes"),
       });
 
-      await fetch(`${edgeFunctionBaseUrl}/driver/documents`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${driverToken}`,
-          "Idempotency-Key": crypto.randomUUID(),
+      const commitRes3 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            upload_id: authData3.upload_id,
+            document_type: "VEHICLE_REGISTRATION",
+          }),
         },
-        body: JSON.stringify({
-          upload_id: authData3.upload_id,
-          document_type: "VEHICLE_REGISTRATION",
-        }),
-      });
+      );
+      assert.strictEqual(commitRes3.status, 200);
 
       // Approve driver
       const appRes = await fetch(
