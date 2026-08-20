@@ -652,7 +652,7 @@ Deno.serve(async (req: Request) => {
       const { data: drivers, error: driversError } = await serviceClient
         .from("drivers")
         .select(
-          "id, user_id, verification_status, account_status, created_at, updated_at",
+          "id, verification_status, account_status, national_id_number, license_number, created_at",
         )
         .in("verification_status", ["PENDING", "UNDER_REVIEW"])
         .order("created_at", { ascending: false });
