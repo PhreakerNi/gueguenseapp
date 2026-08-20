@@ -1618,8 +1618,8 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         "INSERT INTO public.drivers (id, national_id_number, license_number, verification_status, account_status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING",
         [
           dummyDriverId,
-          "001-010190-8888D",
-          "LIC-88888888",
+          "001-010190-7777D",
+          "LIC-77777777",
           "PENDING",
           "REGISTERED",
         ],
