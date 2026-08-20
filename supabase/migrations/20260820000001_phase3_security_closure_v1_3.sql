@@ -533,3 +533,23 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- ----------------------------------------------------------------------------
+-- 5. Canonical Platform Role Lookup RPC (Strictly public.profiles ONLY)
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.get_user_platform_role(p_user_id UUID)
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    SELECT COALESCE(
+        (SELECT platform_role FROM public.profiles WHERE id = p_user_id),
+        'none'
+    );
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_user_platform_role(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_user_platform_role(UUID) TO anon, authenticated, service_role;

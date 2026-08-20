@@ -344,6 +344,15 @@ Deno.serve(async (req: Request) => {
     // Helper: Platform Role from public.profiles ONLY (Section 4)
     // -------------------------------------------------------------
     async function getProfileRole(targetUserId: string): Promise<string> {
+      const { data: rpcRole, error: rpcErr } = await serviceClient.rpc(
+        "get_user_platform_role",
+        { p_user_id: targetUserId },
+      );
+
+      if (!rpcErr && typeof rpcRole === "string" && rpcRole) {
+        return rpcRole;
+      }
+
       const { data: profile, error: profileErr } = await serviceClient
         .from("profiles")
         .select("platform_role")
