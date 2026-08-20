@@ -257,10 +257,17 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
           code: totpCode,
         });
 
-      if (!verErr && verifyRes?.access_token) {
-        agentToken = verifyRes.access_token;
-        agentVerified = true;
-        break;
+      if (!verErr) {
+        const { data: sessData } = await agentClient.auth.getSession();
+        agentToken =
+          (verifyRes as any)?.access_token ||
+          (verifyRes as any)?.session?.access_token ||
+          sessData.session?.access_token ||
+          "";
+        if (agentToken) {
+          agentVerified = true;
+          break;
+        }
       }
     }
     assert.strictEqual(
@@ -268,7 +275,21 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       true,
       "Verification agent MFA verification must succeed",
     );
-    assert.ok(agentToken, "Verification agent must achieve AAL2 token");
+    const { data: agentAalData } =
+      await agentClient.auth.mfa.getAuthenticatorAssuranceLevel();
+    assert.strictEqual(
+      agentAalData?.currentLevel,
+      "aal2",
+      "Agent session must reach AAL2 after TOTP verification",
+    );
+    const agentJwt = JSON.parse(
+      Buffer.from(agentToken.split(".")[1], "base64").toString(),
+    );
+    assert.strictEqual(
+      agentJwt.aal,
+      "aal2",
+      "Agent JWT token must contain aal2 claim",
+    );
 
     // 6. Operator
     const { data: operAuth } = await anonClient.auth.signUp({
@@ -326,10 +347,17 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         code: saCode,
       });
 
-      if (!saVerErr && saVer?.access_token) {
-        superAdminToken = saVer.access_token;
-        saVerified = true;
-        break;
+      if (!saVerErr) {
+        const { data: saSess } = await saClient.auth.getSession();
+        superAdminToken =
+          (saVer as any)?.access_token ||
+          (saVer as any)?.session?.access_token ||
+          saSess.session?.access_token ||
+          "";
+        if (superAdminToken) {
+          saVerified = true;
+          break;
+        }
       }
     }
     assert.strictEqual(
@@ -337,7 +365,21 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       true,
       "Super Admin MFA verification must succeed",
     );
-    assert.ok(superAdminToken, "Super Admin must achieve AAL2 token");
+    const { data: saAalData } =
+      await saClient.auth.mfa.getAuthenticatorAssuranceLevel();
+    assert.strictEqual(
+      saAalData?.currentLevel,
+      "aal2",
+      "Super admin session must reach AAL2 after TOTP verification",
+    );
+    const saJwt = JSON.parse(
+      Buffer.from(superAdminToken.split(".")[1], "base64").toString(),
+    );
+    assert.strictEqual(
+      saJwt.aal,
+      "aal2",
+      "Super admin JWT token must contain aal2 claim",
+    );
   });
 
   // =========================================================================
