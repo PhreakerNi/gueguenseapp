@@ -860,9 +860,11 @@ Deno.serve(async (req: Request) => {
       }
 
       let driverData: any = null;
-      const { data: driverRows } = await serviceClient
+      const { data: driverRows, error: driverErr } = await serviceClient
         .from("drivers")
-        .select()
+        .select(
+          "id, national_id_number, license_number, verification_status, account_status, rating_avg, total_deliveries, created_at",
+        )
         .eq("id", targetDriverId);
 
       if (driverRows && driverRows.length > 0) {
@@ -870,7 +872,9 @@ Deno.serve(async (req: Request) => {
       } else {
         const { data: allDrivers } = await serviceClient
           .from("drivers")
-          .select();
+          .select(
+            "id, national_id_number, license_number, verification_status, account_status, rating_avg, total_deliveries, created_at",
+          );
         driverData =
           allDrivers?.find((d: any) => d.id === targetDriverId) || null;
       }
@@ -881,13 +885,17 @@ Deno.serve(async (req: Request) => {
 
       let { data: vehicles } = await serviceClient
         .from("vehicles")
-        .select()
+        .select(
+          "id, driver_id, make, model, year, color, license_plate, created_at",
+        )
         .eq("driver_id", targetDriverId);
 
       if (!vehicles || vehicles.length === 0) {
         const { data: allVehicles } = await serviceClient
           .from("vehicles")
-          .select();
+          .select(
+            "id, driver_id, make, model, year, color, license_plate, created_at",
+          );
         vehicles =
           allVehicles?.filter((v: any) => v.driver_id === targetDriverId) || [];
       }
