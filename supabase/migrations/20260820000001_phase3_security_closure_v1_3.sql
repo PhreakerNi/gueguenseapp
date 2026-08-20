@@ -69,7 +69,7 @@ BEGIN
     END IF;
 
     -- Execute target operation dynamically
-    IF p_operation_fn = 'create_business' THEN
+    IF p_operation_fn IN ('create_business') THEN
         v_result := public.create_business(
             p_actor_user_id,
             p_operation_params->>'legal_name',
@@ -78,19 +78,19 @@ BEGIN
         );
         v_status := 201;
 
-    ELSIF p_operation_fn = 'create_business_location' THEN
+    ELSIF p_operation_fn IN ('create_business_location') THEN
         v_result := public.create_business_location(
             p_actor_user_id,
             (p_operation_params->>'business_id')::uuid,
-            p_operation_params->>'name',
-            p_operation_params->>'address_text',
+            COALESCE(p_operation_params->>'location_name', p_operation_params->>'name'),
+            COALESCE(p_operation_params->>'address_text', p_operation_params->>'address_line_1'),
             (p_operation_params->>'latitude')::double precision,
             (p_operation_params->>'longitude')::double precision,
             p_operation_params->>'pickup_instructions'
         );
         v_status := 201;
 
-    ELSIF p_operation_fn = 'add_business_member' THEN
+    ELSIF p_operation_fn IN ('add_business_member', 'create_business_member') THEN
         v_result := public.add_business_member(
             p_actor_user_id,
             (p_operation_params->>'business_id')::uuid,
@@ -99,12 +99,14 @@ BEGIN
             CASE 
                 WHEN p_operation_params->'location_ids' IS NOT NULL AND jsonb_typeof(p_operation_params->'location_ids') = 'array' 
                 THEN ARRAY(SELECT jsonb_array_elements_text(p_operation_params->'location_ids')::uuid)
+                WHEN p_operation_params->'authorized_location_ids' IS NOT NULL AND jsonb_typeof(p_operation_params->'authorized_location_ids') = 'array' 
+                THEN ARRAY(SELECT jsonb_array_elements_text(p_operation_params->'authorized_location_ids')::uuid)
                 ELSE ARRAY[]::uuid[]
             END
         );
         v_status := 201;
 
-    ELSIF p_operation_fn = 'register_driver' THEN
+    ELSIF p_operation_fn IN ('register_driver', 'create_driver_profile') THEN
         v_result := public.register_driver(
             p_actor_user_id,
             p_operation_params->>'national_id_number',
@@ -112,7 +114,7 @@ BEGIN
         );
         v_status := 201;
 
-    ELSIF p_operation_fn = 'register_vehicle' THEN
+    ELSIF p_operation_fn IN ('register_vehicle', 'create_driver_vehicle') THEN
         v_result := public.register_vehicle(
             p_actor_user_id,
             p_operation_params->>'make',

@@ -1294,7 +1294,11 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
 
       // Simulate 24h expiration by updating expires_at in database
       await dbPool.query(
-        "UPDATE private.idempotency_keys SET expires_at = NOW() - INTERVAL '1 hour' WHERE key = $1",
+        "UPDATE private.idempotency_responses SET expires_at = NOW() - INTERVAL '1 hour' WHERE key = $1",
+        [key],
+      );
+      await dbPool.query(
+        "UPDATE public.idempotency_keys SET expires_at = NOW() - INTERVAL '1 hour' WHERE key = $1",
         [key],
       );
 

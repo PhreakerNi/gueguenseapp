@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(52);
+SELECT plan(45);
 
 -- 1. Structural Checks: Idempotency Keys, Audit Logs, Bucket & Authorizations (8 assertions: 1-8)
 SELECT has_table('public', 'idempotency_keys', 'public.idempotency_keys table exists');
