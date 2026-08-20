@@ -94,9 +94,7 @@ Deno.serve(async (req: Request) => {
 
   // 2. Environment Variables Check (Fail-Closed, Section 14)
   const supabaseUrl =
-    Deno.env.get("SUPABASE_URL") ||
-    Deno.env.get("API_URL") ||
-    "http://127.0.0.1:54321";
+    Deno.env.get("SUPABASE_URL") || Deno.env.get("API_URL") || "";
   const supabaseServiceKey =
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
     Deno.env.get("SERVICE_ROLE_KEY") ||

@@ -87,15 +87,14 @@ export default async function DriverVerificationDetailPage({
 
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;
-  const edgeUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+  const edgeUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 
   let driver: DriverDetail | null = null;
   let vehicle: Vehicle | null = null;
   let documents: DriverDocument[] = [];
   let fetchError: string | null = null;
 
-  if (token) {
+  if (token && edgeUrl) {
     try {
       const res = await fetch(
         `${edgeUrl}/functions/v1/api-v1/admin/verifications/drivers/${driverId}`,
@@ -108,15 +107,16 @@ export default async function DriverVerificationDetailPage({
       );
       if (res.ok) {
         const data = await res.json();
-        driver = data.driver || null;
-        vehicle = data.vehicle || (data.vehicles?.[0] ?? null);
+        driver = data.driver;
+        vehicle = data.vehicle;
         documents = data.documents || [];
       } else {
-        const errData = await res.json();
-        fetchError = errData.error?.message || "Conductor no encontrado";
+        const err = await res.json().catch(() => ({}));
+        fetchError =
+          err.error?.message || "No se pudo cargar el detalle del conductor.";
       }
     } catch {
-      fetchError = "Error de comunicación con el servicio de verificación";
+      fetchError = "Error de red al consultar el expediente.";
     }
   }
 
@@ -125,10 +125,10 @@ export default async function DriverVerificationDetailPage({
     const serverSupabase = await createClient();
     const { data: sData } = await serverSupabase.auth.getSession();
     const authToken = sData.session?.access_token;
-    const sEdgeUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+    const sEdgeUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 
     if (!authToken) redirect("/login");
+    if (!sEdgeUrl) throw new Error("Configuración de servidor no disponible");
 
     const idempotencyKey = crypto.randomUUID();
     const res = await fetch(
@@ -162,10 +162,10 @@ export default async function DriverVerificationDetailPage({
     const serverSupabase = await createClient();
     const { data: sData } = await serverSupabase.auth.getSession();
     const authToken = sData.session?.access_token;
-    const sEdgeUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+    const sEdgeUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 
     if (!authToken) redirect("/login");
+    if (!sEdgeUrl) throw new Error("Configuración de servidor no disponible");
 
     const idempotencyKey = crypto.randomUUID();
     const res = await fetch(
@@ -348,9 +348,9 @@ export default async function DriverVerificationDetailPage({
                     )}
                   </div>
                   <a
-                    href={`${edgeUrl}/functions/v1/api-v1/admin/driver-documents/${doc.id}/read-url`}
+                    href={`/api/documents/${doc.id}/read`}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noreferrer noopener"
                     className="px-3 py-1.5 text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded-lg transition-colors inline-flex items-center gap-1.5 self-start md:self-auto"
                   >
                     Ver Documento (Firmado)

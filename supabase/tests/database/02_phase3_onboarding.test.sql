@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(45);
+SELECT plan(63);
 
 -- 1. Structural Checks: Idempotency Keys, Audit Logs, Bucket & Authorizations (8 assertions: 1-8)
 SELECT has_table('public', 'idempotency_keys', 'public.idempotency_keys table exists');
@@ -54,7 +54,7 @@ UPDATE public.profiles SET platform_role = 'operator' WHERE id = '44444444-4444-
 UPDATE public.profiles SET platform_role = 'admin' WHERE id = '55555555-5555-4555-8555-555555555555';
 UPDATE public.profiles SET platform_role = 'super_admin' WHERE id = '77777777-7777-4777-8777-777777777777';
 
--- 4. Direct Client Execution Revoked & Audit RLS (4 assertions: 14-17)
+-- 4. Direct Client Execution Revoked & Audit RLS (20 assertions: 14-33)
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '11111111-1111-4111-8111-111111111111';
 
@@ -72,7 +72,111 @@ SELECT throws_ok(
     'Direct RPC execution of register_driver by authenticated role is denied'
 );
 
+SELECT throws_ok(
+    $$SELECT public.get_user_platform_role('11111111-1111-4111-8111-111111111111'::uuid)$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of get_user_platform_role by authenticated role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.get_admin_driver_verification_queue()$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of get_admin_driver_verification_queue by authenticated role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.get_admin_driver_verification_detail('22222222-2222-4222-8222-222222222222'::uuid)$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of get_admin_driver_verification_detail by authenticated role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.get_driver_document_storage_path('00000000-0000-0000-0000-000000000000'::uuid)$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of get_driver_document_storage_path by authenticated role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.authorize_driver_document_upload('22222222-2222-4222-8222-222222222222'::uuid, 'NATIONAL_ID', 'application/pdf', 2048)$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of authorize_driver_document_upload by authenticated role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.commit_driver_document('22222222-2222-4222-8222-222222222222'::uuid, '00000000-0000-0000-0000-000000000000'::uuid, 'NATIONAL_ID')$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of commit_driver_document by authenticated role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.admin_verify_driver('33333333-3333-4333-8333-333333333333'::uuid, '22222222-2222-4222-8222-222222222222'::uuid, 'APPROVE')$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of admin_verify_driver by authenticated role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.execute_idempotent_operation('11111111-1111-4111-8111-111111111111'::uuid, 'test', 'a0000000-0000-4000-8000-000000000001', 'fp', 'create_business', '{}'::jsonb)$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of execute_idempotent_operation by authenticated role is denied'
+);
+
+-- Anon role cannot execute sensitive/helper RPCs
+SET LOCAL ROLE anon;
+
+SELECT throws_ok(
+    $$SELECT public.get_user_platform_role('11111111-1111-4111-8111-111111111111'::uuid)$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of get_user_platform_role by anon role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.get_admin_driver_verification_queue()$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of get_admin_driver_verification_queue by anon role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.get_admin_driver_verification_detail('22222222-2222-4222-8222-222222222222'::uuid)$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of get_admin_driver_verification_detail by anon role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.get_driver_document_storage_path('00000000-0000-0000-0000-000000000000'::uuid)$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of get_driver_document_storage_path by anon role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.authorize_driver_document_upload('22222222-2222-4222-8222-222222222222'::uuid, 'NATIONAL_ID', 'application/pdf', 2048)$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of authorize_driver_document_upload by anon role is denied'
+);
+
+SELECT throws_ok(
+    $$SELECT public.admin_verify_driver('33333333-3333-4333-8333-333333333333'::uuid, '22222222-2222-4222-8222-222222222222'::uuid, 'APPROVE')$$,
+    '42501',
+    NULL,
+    'Direct RPC execution of admin_verify_driver by anon role is denied'
+);
+
 -- Non-super-admin SELECT on audit_logs returns 0 rows
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '11111111-1111-4111-8111-111111111111';
+
 SELECT is(
     (SELECT count(*) FROM public.audit_logs),
     0::bigint,
@@ -410,6 +514,20 @@ SELECT ok(
     'Canonical DRIVER_REJECTED audit log created'
 );
 
+-- Rejecting an already REJECTED driver is denied
+SELECT throws_ok(
+    $$SELECT public.admin_verify_driver(
+        '33333333-3333-4333-8333-333333333333'::uuid,
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        'REJECT'::text,
+        'Second reject attempt'::text,
+        'aal2'::text
+    )$$,
+    'P0001',
+    'INVALID_STATE: Driver verification status is REJECTED, cannot be rejected',
+    'Rejecting an already REJECTED driver is denied with INVALID_STATE'
+);
+
 -- 8.4 Driver re-submits documents after rejection (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)
 DO $$
 DECLARE
@@ -511,6 +629,26 @@ SELECT is(
     'Historical rejected documents are preserved in table'
 );
 
+-- 8.4b Approve without driver_presence throws INVALID_STATE
+DELETE FROM public.driver_presence WHERE driver_id = '22222222-2222-4222-8222-222222222222';
+
+SELECT throws_ok(
+    $$SELECT public.admin_verify_driver(
+        '55555555-5555-4555-8555-555555555555'::uuid,
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        'APPROVE'::text,
+        NULL::text,
+        'aal2'::text
+    )$$,
+    'P0001',
+    'INVALID_STATE: Driver presence record missing',
+    'Approving driver without driver_presence throws INVALID_STATE'
+);
+
+-- Restore presence record
+INSERT INTO public.driver_presence (driver_id, operational_state)
+VALUES ('22222222-2222-4222-8222-222222222222', 'OFFLINE');
+
 -- 8.5 Admin Approves Driver
 SELECT public.admin_verify_driver(
     '55555555-5555-4555-8555-555555555555'::uuid,
@@ -564,7 +702,7 @@ SELECT throws_ok(
         'aal2'::text
     )$$,
     'P0001',
-    'INVALID_STATE: Cannot reject already verified driver',
+    'INVALID_STATE: Driver verification status is VERIFIED, cannot be rejected',
     'Rejecting an already VERIFIED driver is denied'
 );
 

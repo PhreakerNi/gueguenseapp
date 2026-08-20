@@ -58,6 +58,33 @@ export default function DriverOnboardingRequiredScreen() {
     },
   });
 
+  const [onboardingIdempotencyKey] = useState(() => Crypto.randomUUID());
+  const [vehicleIdempotencyKey] = useState(() => Crypto.randomUUID());
+  const [docSessions, setDocSessions] = useState<
+    Record<
+      DocTypes,
+      {
+        uploadId?: string;
+        uploadUrl?: string;
+        commitIdempotencyKey: string;
+        uploaded: boolean;
+      }
+    >
+  >({
+    NATIONAL_ID: {
+      commitIdempotencyKey: Crypto.randomUUID(),
+      uploaded: false,
+    },
+    DRIVER_LICENSE: {
+      commitIdempotencyKey: Crypto.randomUUID(),
+      uploaded: false,
+    },
+    VEHICLE_REGISTRATION: {
+      commitIdempotencyKey: Crypto.randomUUID(),
+      uploaded: false,
+    },
+  });
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -100,6 +127,17 @@ export default function DriverOnboardingRequiredScreen() {
               status: "LISTO",
             },
           }));
+
+          // Reset upload session for this document intention
+          setDocSessions((prev) => ({
+            ...prev,
+            [docType]: {
+              uploadId: undefined,
+              uploadUrl: undefined,
+              commitIdempotencyKey: Crypto.randomUUID(),
+              uploaded: false,
+            },
+          }));
         }
       }
     } catch {
@@ -113,49 +151,78 @@ export default function DriverOnboardingRequiredScreen() {
     token: string,
     edgeUrl: string,
   ) => {
-    // 1. Authorize
-    const authRes = await fetch(
-      `${edgeUrl}/functions/v1/api-v1/driver/documents/upload-authorization`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+    let session = docSessions[docType];
+    let uploadId = session.uploadId;
+    let uploadUrl = session.uploadUrl;
+
+    // 1. Authorize if not already authorized for this intention
+    if (!uploadId || !uploadUrl) {
+      const authRes = await fetch(
+        `${edgeUrl}/functions/v1/api-v1/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            document_type: docType,
+            mime_type: docInfo.mimeType,
+            size_bytes: docInfo.size,
+          }),
         },
-        body: JSON.stringify({
-          document_type: docType,
-          mime_type: docInfo.mimeType,
-          size_bytes: docInfo.size,
-        }),
-      },
-    );
-
-    if (!authRes.ok) {
-      const err = await authRes.json();
-      throw new Error(
-        err.error?.message || `Error autorizando subida de ${docType}`,
       );
+
+      if (!authRes.ok) {
+        const err = await authRes.json();
+        throw new Error(
+          err.error?.message || `Error autorizando subida de ${docType}`,
+        );
+      }
+
+      const authData = await authRes.json();
+      uploadId = authData.upload_id;
+      uploadUrl = authData.upload_url;
+
+      session = {
+        ...session,
+        uploadId,
+        uploadUrl,
+      };
+      setDocSessions((prev) => ({
+        ...prev,
+        [docType]: session,
+      }));
     }
 
-    const { upload_id, upload_url } = await authRes.json();
+    // 2. Physical upload to signed URL if not yet completed
+    if (!session.uploaded && uploadUrl) {
+      const fileRes = await fetch(docInfo.uri);
+      const fileBlob = await fileRes.blob();
 
-    // 2. Physical upload to signed URL
-    const fileRes = await fetch(docInfo.uri);
-    const fileBlob = await fileRes.blob();
+      const putRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": docInfo.mimeType,
+        },
+        body: fileBlob,
+      });
 
-    const putRes = await fetch(upload_url, {
-      method: "PUT",
-      headers: {
-        "Content-Type": docInfo.mimeType,
-      },
-      body: fileBlob,
-    });
+      if (!putRes.ok) {
+        throw new Error(`Error al transferir bytes de ${docType}`);
+      }
 
-    if (!putRes.ok) {
-      throw new Error(`Error al transferir bytes de ${docType}`);
+      session = {
+        ...session,
+        uploaded: true,
+      };
+      setDocSessions((prev) => ({
+        ...prev,
+        [docType]: session,
+      }));
     }
 
-    // 3. Commit
+    // 3. Commit reusing the stable idempotency key for this document intention
     const commitRes = await fetch(
       `${edgeUrl}/functions/v1/api-v1/driver/documents`,
       {
@@ -163,10 +230,10 @@ export default function DriverOnboardingRequiredScreen() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
-          "Idempotency-Key": Crypto.randomUUID(),
+          "Idempotency-Key": session.commitIdempotencyKey,
         },
         body: JSON.stringify({
-          upload_id,
+          upload_id: uploadId,
           document_type: docType,
         }),
       },
@@ -222,10 +289,13 @@ export default function DriverOnboardingRequiredScreen() {
         return;
       }
 
-      const edgeUrl =
-        process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+      const edgeUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || "";
+      if (!edgeUrl) {
+        setErrorMsg("Error de configuración de servidor.");
+        return;
+      }
 
-      // 1. Onboarding personal
+      // 1. Onboarding personal using stable intention idempotency key
       const onboardingRes = await fetch(
         `${edgeUrl}/functions/v1/api-v1/driver/onboarding`,
         {
@@ -233,7 +303,7 @@ export default function DriverOnboardingRequiredScreen() {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
-            "Idempotency-Key": Crypto.randomUUID(),
+            "Idempotency-Key": onboardingIdempotencyKey,
           },
           body: JSON.stringify({
             national_id_number: nationalIdNumber.trim(),
@@ -249,7 +319,7 @@ export default function DriverOnboardingRequiredScreen() {
         );
       }
 
-      // 2. Registro de Vehículo
+      // 2. Registro de Vehículo using stable intention idempotency key
       const vehicleRes = await fetch(
         `${edgeUrl}/functions/v1/api-v1/driver/vehicles`,
         {
@@ -257,7 +327,7 @@ export default function DriverOnboardingRequiredScreen() {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
-            "Idempotency-Key": Crypto.randomUUID(),
+            "Idempotency-Key": vehicleIdempotencyKey,
           },
           body: JSON.stringify({
             make: vehicleMake.trim(),
@@ -322,8 +392,11 @@ export default function DriverOnboardingRequiredScreen() {
         return;
       }
 
-      const edgeUrl =
-        process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+      const edgeUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || "";
+      if (!edgeUrl) {
+        setErrorMsg("Error de configuración de servidor.");
+        return;
+      }
 
       await uploadAndCommitDocument(
         "NATIONAL_ID",

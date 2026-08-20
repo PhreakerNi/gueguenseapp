@@ -84,8 +84,11 @@ export default function BusinessOnboardingRequiredScreen() {
         return;
       }
 
-      const edgeUrl =
-        process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+      const edgeUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || "";
+      if (!edgeUrl) {
+        setErrorMsg("Error de configuración de servidor.");
+        return;
+      }
 
       const bizRes = await fetch(`${edgeUrl}/functions/v1/api-v1/businesses`, {
         method: "POST",
@@ -167,8 +170,11 @@ export default function BusinessOnboardingRequiredScreen() {
         return;
       }
 
-      const edgeUrl =
-        process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+      const edgeUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || "";
+      if (!edgeUrl) {
+        setErrorMsg("Error de configuración de servidor.");
+        return;
+      }
 
       const locRes = await fetch(
         `${edgeUrl}/functions/v1/api-v1/businesses/${targetBizId}/locations`,

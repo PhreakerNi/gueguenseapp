@@ -1,6 +1,5 @@
 import React from "react";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { createClient } from "../lib/supabase/server";
 import type { PlatformRole } from "@gueguense/types";
@@ -14,18 +13,10 @@ const ADMIN_ALLOWED_ROLES: PlatformRole[] = [
   "verification_agent",
 ];
 
-const CAN_VERIFY_ROLES: PlatformRole[] = [
-  "super_admin",
-  "admin",
-  "verification_agent",
-];
-
 type PendingDriverItem = {
   id: string;
   verification_status: string;
   account_status: string;
-  national_id_number: string | null;
-  license_number: string | null;
   created_at: string;
 };
 
@@ -68,12 +59,11 @@ export default async function AdminDashboardPage() {
 
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;
-  const edgeUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+  const edgeUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 
   let pendingDrivers: PendingDriverItem[] = [];
 
-  if (token) {
+  if (token && edgeUrl) {
     try {
       const res = await fetch(
         `${edgeUrl}/functions/v1/api-v1/admin/verifications/drivers`,
@@ -91,50 +81,11 @@ export default async function AdminDashboardPage() {
     } catch {}
   }
 
-  const canVerify = CAN_VERIFY_ROLES.includes(platformRole);
-
   async function handleSignOut() {
     "use server";
     const serverSupabase = await createClient();
     await serverSupabase.auth.signOut();
     redirect("/login");
-  }
-
-  async function handleVerifyDriver(formData: FormData) {
-    "use server";
-    const driverId = formData.get("driverId") as string;
-    const decision = formData.get("decision") as string;
-    const rejectionReason = formData.get("rejectionReason") as string | null;
-
-    if (!driverId || !decision) return;
-
-    const serverSupabase = await createClient();
-    const { data: serverSession } = await serverSupabase.auth.getSession();
-    const serverToken = serverSession.session?.access_token;
-    const serverEdgeUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
-
-    if (serverToken) {
-      const idempotencyKey = crypto.randomUUID();
-      const endpoint =
-        decision === "APPROVE"
-          ? `${serverEdgeUrl}/functions/v1/api-v1/admin/drivers/${driverId}/approve`
-          : `${serverEdgeUrl}/functions/v1/api-v1/admin/drivers/${driverId}/reject`;
-
-      await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${serverToken}`,
-          "Idempotency-Key": idempotencyKey,
-        },
-        body: JSON.stringify({
-          rejection_reason: rejectionReason || undefined,
-        }),
-      });
-    }
-
-    revalidatePath("/");
   }
 
   return (
@@ -202,8 +153,10 @@ export default async function AdminDashboardPage() {
               {profile?.platform_role?.replace("_", " ") ?? "None"}
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              {canVerify
-                ? "Autorizado para aprobar conductores"
+              {platformRole === "verification_agent" ||
+              platformRole === "admin" ||
+              platformRole === "super_admin"
+                ? "Autorizado para gestionar expedientes de conductores"
                 : "Solo lectura (Operador)"}
             </p>
           </div>
@@ -240,71 +193,25 @@ export default async function AdminDashboardPage() {
                     <div className="space-y-1">
                       <div className="flex items-center space-x-2">
                         <span className="font-semibold text-white">
-                          ID: {drv.id.slice(0, 8)}...
-                        </span>
-                        <span className="text-xs font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
-                          Cédula: {drv.national_id_number}
-                        </span>
-                        <span className="text-xs font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
-                          Licencia: {drv.license_number}
+                          Conductor: {drv.id.slice(0, 8)}...
                         </span>
                         <span className="text-xs font-semibold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded">
                           {drv.verification_status}
                         </span>
+                        <span className="text-xs text-slate-400 font-mono">
+                          {new Date(drv.created_at).toLocaleDateString()}
+                        </span>
                       </div>
                     </div>
 
-                    {canVerify ? (
-                      <div className="flex items-center space-x-3">
-                        <Link
-                          href={`/verifications/${drv.id}`}
-                          className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold rounded-lg transition"
-                        >
-                          Ver Expediente &rarr;
-                        </Link>
-
-                        <form action={handleVerifyDriver}>
-                          <input type="hidden" name="driverId" value={drv.id} />
-                          <input
-                            type="hidden"
-                            name="decision"
-                            value="APPROVE"
-                          />
-                          <button
-                            type="submit"
-                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition cursor-pointer"
-                          >
-                            Aprobar
-                          </button>
-                        </form>
-
-                        <form
-                          action={handleVerifyDriver}
-                          className="flex items-center space-x-2"
-                        >
-                          <input type="hidden" name="driverId" value={drv.id} />
-                          <input type="hidden" name="decision" value="REJECT" />
-                          <input
-                            type="text"
-                            name="rejectionReason"
-                            placeholder="Motivo de rechazo"
-                            defaultValue="Documentos ilegibles"
-                            required
-                            className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded text-xs text-white placeholder-slate-500"
-                          />
-                          <button
-                            type="submit"
-                            className="px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg transition cursor-pointer"
-                          >
-                            Rechazar
-                          </button>
-                        </form>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-slate-500 italic">
-                        Aprobación restringida a verification_agent
-                      </span>
-                    )}
+                    <div className="flex items-center space-x-3">
+                      <Link
+                        href={`/verifications/${drv.id}`}
+                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold rounded-lg transition inline-flex items-center gap-1"
+                      >
+                        Ver Expediente &rarr;
+                      </Link>
+                    </div>
                   </div>
                 );
               })}

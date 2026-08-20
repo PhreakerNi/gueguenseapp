@@ -267,7 +267,7 @@ BEGIN
     END IF;
 
     -- 3. Validate document type matches authorization
-    IF v_auth_record.document_type <> v_clean_type THEN
+    IF pg_catalog.upper(pg_catalog.btrim(v_auth_record.document_type)) <> v_clean_type THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: Document type does not match authorization';
     END IF;
 
@@ -435,6 +435,11 @@ BEGIN
             RAISE EXCEPTION 'INVALID_STATE: Driver account status must be REGISTERED, currently %', v_current_acc_status;
         END IF;
 
+        -- Check driver presence exists (Approve MUST NOT create driver_presence)
+        IF NOT EXISTS (SELECT 1 FROM public.driver_presence WHERE driver_id = p_driver_id) THEN
+            RAISE EXCEPTION 'INVALID_STATE: Driver presence record missing';
+        END IF;
+
         -- Check vehicle exists
         SELECT count(*) INTO v_vehicle_count
         FROM public.vehicles
@@ -468,19 +473,11 @@ BEGIN
             account_status = 'ACTIVE'
         WHERE id = p_driver_id;
 
-        -- Upsert driver presence to OFFLINE
-        INSERT INTO public.driver_presence (
-            driver_id,
-            operational_state,
-            location_updated_at
-        ) VALUES (
-            p_driver_id,
-            'OFFLINE',
-            pg_catalog.clock_timestamp()
-        )
-        ON CONFLICT (driver_id) DO UPDATE
+        -- Update driver presence to OFFLINE (Approve does NOT insert driver_presence)
+        UPDATE public.driver_presence
         SET operational_state = 'OFFLINE',
-            location_updated_at = pg_catalog.clock_timestamp();
+            location_updated_at = pg_catalog.clock_timestamp()
+        WHERE driver_id = p_driver_id;
 
         -- Insert audit log
         INSERT INTO public.audit_logs (
@@ -506,9 +503,13 @@ BEGIN
             RAISE EXCEPTION 'INVALID_ARGUMENT: rejection_reason is required when rejecting driver';
         END IF;
 
-        -- Rejecting already VERIFIED driver is denied
-        IF v_current_ver_status = 'VERIFIED' THEN
-            RAISE EXCEPTION 'INVALID_STATE: Cannot reject already verified driver';
+        -- Reject is ONLY permitted when driver is in (PENDING, UNDER_REVIEW) and account_status = REGISTERED
+        IF v_current_ver_status NOT IN ('PENDING', 'UNDER_REVIEW') THEN
+            RAISE EXCEPTION 'INVALID_STATE: Driver verification status is %, cannot be rejected', v_current_ver_status;
+        END IF;
+
+        IF v_current_acc_status <> 'REGISTERED' THEN
+            RAISE EXCEPTION 'INVALID_STATE: Driver account status must be REGISTERED, currently %', v_current_acc_status;
         END IF;
 
         -- Update current pending/under_review documents to REJECTED (historical rows remain untouched!)
@@ -562,9 +563,6 @@ AS $$
     );
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.get_user_platform_role(UUID) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_user_platform_role(UUID) TO anon, authenticated, service_role;
-
 CREATE OR REPLACE FUNCTION public.get_admin_driver_verification_queue()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -591,9 +589,6 @@ BEGIN
     RETURN COALESCE(v_drivers, '[]'::jsonb);
 END;
 $$;
-
-REVOKE EXECUTE ON FUNCTION public.get_admin_driver_verification_queue() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_admin_driver_verification_queue() TO anon, authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.get_admin_driver_verification_detail(p_driver_id UUID)
 RETURNS jsonb
@@ -632,9 +627,6 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.get_admin_driver_verification_detail(UUID) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_admin_driver_verification_detail(UUID) TO anon, authenticated, service_role;
-
 CREATE OR REPLACE FUNCTION public.get_driver_document_storage_path(p_document_id UUID)
 RETURNS jsonb
 LANGUAGE sql
@@ -646,9 +638,6 @@ AS $$
     FROM public.driver_documents
     WHERE id = p_document_id;
 $$;
-
-REVOKE EXECUTE ON FUNCTION public.get_driver_document_storage_path(UUID) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_driver_document_storage_path(UUID) TO anon, authenticated, service_role;
 
 -- ----------------------------------------------------------------------------
 -- 6. Updated Authorize Driver Document Upload (Allowing all canonical types)
@@ -739,5 +728,52 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.authorize_driver_document_upload(UUID, TEXT, TEXT, BIGINT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.authorize_driver_document_upload(UUID, TEXT, TEXT, BIGINT) TO authenticated, service_role;
+-- ----------------------------------------------------------------------------
+-- 7. Revoke Execution on ALL Phase 3 RPCs from PUBLIC/anon/authenticated
+--    Grant Execution EXCLUSIVELY to service_role (Bypass Lockdown)
+-- ----------------------------------------------------------------------------
+
+REVOKE EXECUTE ON FUNCTION public.get_user_platform_role(UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_user_platform_role(UUID) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.get_admin_driver_verification_queue() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_admin_driver_verification_queue() TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.get_admin_driver_verification_detail(UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_admin_driver_verification_detail(UUID) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.get_driver_document_storage_path(UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_driver_document_storage_path(UUID) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.authorize_driver_document_upload(UUID, TEXT, TEXT, BIGINT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.authorize_driver_document_upload(UUID, TEXT, TEXT, BIGINT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.commit_driver_document(UUID, UUID, TEXT, BIGINT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.commit_driver_document(UUID, UUID, TEXT, BIGINT, TEXT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.commit_driver_document(UUID, UUID, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.commit_driver_document(UUID, UUID, TEXT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.admin_verify_driver(UUID, UUID, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_verify_driver(UUID, UUID, TEXT, TEXT, TEXT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.admin_verify_driver(UUID, UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_verify_driver(UUID, UUID, TEXT, TEXT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.create_business(UUID, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_business(UUID, TEXT, TEXT, TEXT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.create_business_location(UUID, UUID, TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_business_location(UUID, UUID, TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.create_business_member(UUID, UUID, UUID, TEXT, UUID[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_business_member(UUID, UUID, UUID, TEXT, UUID[]) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.register_driver(UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.register_driver(UUID, TEXT, TEXT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.register_vehicle(UUID, TEXT, TEXT, INTEGER, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.register_vehicle(UUID, TEXT, TEXT, INTEGER, TEXT, TEXT) TO service_role;

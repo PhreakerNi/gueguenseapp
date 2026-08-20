@@ -1242,13 +1242,8 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       );
 
       const data = await res.json();
-      if (res.status !== 200) {
-        console.error(
-          "A08b FAILED RESPONSE:",
-          JSON.stringify({ status: res.status, data }),
-        );
-      }
-      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(data.error.code, "INVALID_STATE");
     });
 
     it("A09 & A10: Re-upload documents and APPROVE driver creates canonical DRIVER_VERIFIED audit while preserving historical rejected rows", async () => {
@@ -1541,6 +1536,107 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
 
       const { data } = await client.from("audit_logs").select("*");
       assert.strictEqual(data?.length ?? 0, 0);
+    });
+
+    it("R01: Direct PostgREST RPC execution of sensitive/helper functions by authenticated user is denied (401/403/404)", async () => {
+      const endpoints = [
+        "get_user_platform_role",
+        "get_admin_driver_verification_queue",
+        "get_admin_driver_verification_detail",
+        "get_driver_document_storage_path",
+        "authorize_driver_document_upload",
+        "commit_driver_document",
+        "admin_verify_driver",
+        "execute_idempotent_operation",
+        "create_business",
+        "register_driver",
+      ];
+
+      for (const ep of endpoints) {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${ep}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({}),
+        });
+
+        // PostgREST returns 401, 403 or 404 (function not exposed in schema cache)
+        assert.ok(
+          [401, 403, 404].includes(res.status),
+          `Expected direct RPC ${ep} to be denied with 401/403/404, got ${res.status}`,
+        );
+      }
+    });
+
+    it("R02: Direct PostgREST RPC execution of sensitive/helper functions by anon is denied (401/403/404)", async () => {
+      const endpoints = [
+        "get_user_platform_role",
+        "get_admin_driver_verification_queue",
+        "get_admin_driver_verification_detail",
+        "get_driver_document_storage_path",
+        "authorize_driver_document_upload",
+        "commit_driver_document",
+        "admin_verify_driver",
+        "execute_idempotent_operation",
+      ];
+
+      for (const ep of endpoints) {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${ep}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({}),
+        });
+
+        assert.ok(
+          [401, 403, 404].includes(res.status),
+          `Expected direct anon RPC ${ep} to be denied with 401/403/404, got ${res.status}`,
+        );
+      }
+    });
+
+    it("A09c: Approve driver when driver_presence is missing returns 400 INVALID_STATE", async () => {
+      const dummyDriverId = "99999999-9999-4999-8999-999999999999";
+      await dbPool.query(
+        "INSERT INTO auth.users (id, email) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+        [dummyDriverId, "dummydriver@test.com"],
+      );
+      await dbPool.query(
+        "INSERT INTO public.drivers (id, national_id_number, license_number, verification_status, account_status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING",
+        [
+          dummyDriverId,
+          "001-010190-8888D",
+          "LIC-88888888",
+          "PENDING",
+          "REGISTERED",
+        ],
+      );
+      await dbPool.query(
+        "DELETE FROM public.driver_presence WHERE driver_id = $1",
+        [dummyDriverId],
+      );
+
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/drivers/${dummyDriverId}/approve`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${agentToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({}),
+        },
+      );
+
+      const data = await res.json();
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(data.error.code, "INVALID_STATE");
     });
 
     it("D02: Driver evaluates to allowed: true when VERIFIED and ACTIVE", () => {
