@@ -824,7 +824,7 @@ Deno.serve(async (req: Request) => {
       /^\/admin\/verifications\/drivers\/([^\/]+)$/,
     );
     if (req.method === "GET" && adminDriverDetailMatch) {
-      const targetDriverId = adminDriverDetailMatch[1];
+      const targetDriverId = adminDriverDetailMatch[1].trim();
 
       // Validate Admin Profile Role
       const { data: profileData } = await serviceClient
@@ -856,13 +856,24 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const { data: driverData, error: driverError } = await serviceClient
+      let { data: driverData, error: driverError } = await serviceClient
         .from("drivers")
         .select("*")
         .eq("id", targetDriverId)
         .maybeSingle();
 
-      if (driverError || !driverData) {
+      if (!driverData) {
+        const { data: fallbackDriver } = await serviceClient
+          .from("drivers")
+          .select(
+            "id, verification_status, account_status, national_id_number, license_number, rating_avg, total_deliveries, created_at",
+          )
+          .eq("id", targetDriverId)
+          .maybeSingle();
+        driverData = fallbackDriver;
+      }
+
+      if (!driverData) {
         return errorResponse("DRIVER_NOT_FOUND", "Driver not found", 404);
       }
 
