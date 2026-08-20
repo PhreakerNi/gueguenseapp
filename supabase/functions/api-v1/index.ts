@@ -145,7 +145,11 @@ Deno.serve(async (req: Request) => {
   try {
     const parts = token.split(".");
     if (parts.length === 3) {
-      const payloadJson = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
+      let base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      while (base64.length % 4 !== 0) {
+        base64 += "=";
+      }
+      const payloadJson = atob(base64);
       const payload = JSON.parse(payloadJson);
       if (payload && payload.aal === "aal2") {
         jwtAal = "aal2";
