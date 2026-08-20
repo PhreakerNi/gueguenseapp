@@ -893,18 +893,29 @@ BEGIN
             RAISE EXCEPTION 'VEHICLE_MISSING: Driver must have at least one registered vehicle to be approved';
         END IF;
 
-        -- Update driver documents to VERIFIED (updating the latest non-verified document per type, preserving historical rejected rows)
+        -- 1. Update active pending/under_review documents to VERIFIED
         UPDATE public.driver_documents
         SET verification_status = 'VERIFIED',
             rejection_reason = NULL
-        WHERE id IN (
-            SELECT id FROM (
-                SELECT DISTINCT ON (document_type) id, verification_status
-                FROM public.driver_documents
-                WHERE driver_id = p_driver_id
-                ORDER BY document_type, created_at DESC
-            ) latest
-            WHERE latest.verification_status <> 'VERIFIED'
+        WHERE driver_id = p_driver_id
+          AND verification_status IN ('PENDING', 'UNDER_REVIEW');
+
+        -- 2. For document types with no active VERIFIED document, update the latest document to VERIFIED
+        UPDATE public.driver_documents d
+        SET verification_status = 'VERIFIED',
+            rejection_reason = NULL
+        WHERE d.id IN (
+            SELECT DISTINCT ON (document_type) id
+            FROM public.driver_documents
+            WHERE driver_id = p_driver_id
+            ORDER BY document_type, created_at DESC, id DESC
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM public.driver_documents active_doc
+            WHERE active_doc.driver_id = p_driver_id
+              AND active_doc.document_type = d.document_type
+              AND active_doc.verification_status = 'VERIFIED'
+              AND active_doc.id <> d.id
         );
 
         -- Update driver record
