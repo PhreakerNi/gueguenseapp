@@ -432,8 +432,8 @@ export type Database = {
         Args: {
           p_actor_id: string
           p_document_type: string
-          p_file_size: number
-          p_mime_type: string
+          p_file_size?: number
+          p_mime_type?: string
           p_upload_id: string
         }
         Returns: Json

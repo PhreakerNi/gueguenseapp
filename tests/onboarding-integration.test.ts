@@ -214,17 +214,27 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       access_token: agentAuth.session!.access_token,
       refresh_token: agentAuth.session!.refresh_token,
     });
-    const enrollRes = await agentClient.auth.mfa.enroll({ factorType: "totp" });
-    const totpCode = generateTotpCode(enrollRes.data!.totp.secret);
-    const challengeRes = await agentClient.auth.mfa.challenge({
-      factorId: enrollRes.data!.id,
+    const enrollRes = await agentClient.auth.mfa.enroll({
+      factorType: "totp",
+      issuer: "Gueguense",
     });
-    const verifyRes = await agentClient.auth.mfa.verify({
-      factorId: enrollRes.data!.id,
-      challengeId: challengeRes.data!.id,
-      code: totpCode,
-    });
-    agentToken = verifyRes.data!.access_token;
+    for (const offset of [0, -1, 1]) {
+      const totpCode = generateTotpCode(enrollRes.data!.totp.secret, offset);
+      const challengeRes = await agentClient.auth.mfa.challenge({
+        factorId: enrollRes.data!.id,
+      });
+      if (challengeRes.error) continue;
+      const verifyRes = await agentClient.auth.mfa.verify({
+        factorId: enrollRes.data!.id,
+        challengeId: challengeRes.data!.id,
+        code: totpCode,
+      });
+      if (verifyRes.data?.access_token) {
+        agentToken = verifyRes.data.access_token;
+        break;
+      }
+    }
+    assert.ok(agentToken, "Verification agent must achieve AAL2 token");
 
     // 6. Operator
     const { data: operAuth } = await anonClient.auth.signUp({
@@ -251,17 +261,27 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       access_token: saAuth.session!.access_token,
       refresh_token: saAuth.session!.refresh_token,
     });
-    const saEnroll = await saClient.auth.mfa.enroll({ factorType: "totp" });
-    const saCode = generateTotpCode(saEnroll.data!.totp.secret);
-    const saChal = await saClient.auth.mfa.challenge({
-      factorId: saEnroll.data!.id,
+    const saEnroll = await saClient.auth.mfa.enroll({
+      factorType: "totp",
+      issuer: "Gueguense",
     });
-    const saVer = await saClient.auth.mfa.verify({
-      factorId: saEnroll.data!.id,
-      challengeId: saChal.data!.id,
-      code: saCode,
-    });
-    superAdminToken = saVer.data!.access_token;
+    for (const offset of [0, -1, 1]) {
+      const saCode = generateTotpCode(saEnroll.data!.totp.secret, offset);
+      const saChal = await saClient.auth.mfa.challenge({
+        factorId: saEnroll.data!.id,
+      });
+      if (saChal.error) continue;
+      const saVer = await saClient.auth.mfa.verify({
+        factorId: saEnroll.data!.id,
+        challengeId: saChal.data!.id,
+        code: saCode,
+      });
+      if (saVer.data?.access_token) {
+        superAdminToken = saVer.data.access_token;
+        break;
+      }
+    }
+    assert.ok(superAdminToken, "Super Admin must achieve AAL2 token");
   });
 
   // =========================================================================
