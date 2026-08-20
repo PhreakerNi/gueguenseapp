@@ -344,12 +344,18 @@ Deno.serve(async (req: Request) => {
     // Helper: Platform Role from public.profiles ONLY (Section 4)
     // -------------------------------------------------------------
     async function getProfileRole(targetUserId: string): Promise<string> {
-      const { data: profile } = await serviceClient
+      const { data: profile, error: profileErr } = await serviceClient
         .from("profiles")
         .select("platform_role")
         .eq("id", targetUserId)
         .maybeSingle();
 
+      if (profileErr) {
+        console.error(
+          `[getProfileRole Error for ${targetUserId}]:`,
+          JSON.stringify(profileErr),
+        );
+      }
       return profile?.platform_role || "none";
     }
 
@@ -385,13 +391,20 @@ Deno.serve(async (req: Request) => {
     const locMatch = path.match(/^\/businesses\/([^\/]+)\/locations$/);
     if (req.method === "POST" && locMatch) {
       const businessId = locMatch[1];
-      const name = body.name;
-      const addressLine1 = body.address_line_1 || body.addressLine1;
+      const name = body.name || body.location_name || body.locationName;
+      const addressLine1 =
+        body.address_line_1 ||
+        body.addressLine1 ||
+        body.address_text ||
+        body.addressText;
       const latitude = body.latitude;
       const longitude = body.longitude;
       const phone = body.phone || null;
       const pickupInstructions =
-        body.pickup_instructions || body.pickupInstructions || null;
+        body.pickup_instructions ||
+        body.pickupInstructions ||
+        body.instructions ||
+        null;
 
       if (
         !name ||
@@ -430,7 +443,11 @@ Deno.serve(async (req: Request) => {
       const targetUserId = body.target_user_id || body.targetUserId;
       const role = body.role;
       const authorizedLocationIds =
-        body.authorized_location_ids || body.authorizedLocationIds || null;
+        body.authorized_location_ids ||
+        body.authorizedLocationIds ||
+        body.location_ids ||
+        body.locationIds ||
+        null;
 
       if (!targetUserId || !role) {
         return errorResponse(
@@ -677,7 +694,9 @@ Deno.serve(async (req: Request) => {
       const targetDriverId = driverDetailMatch[1];
 
       const role = await getProfileRole(userId);
-      console.log(`[API-V1 Route 9] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal}`);
+      console.log(
+        `[API-V1 Route 9] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal}`,
+      );
       if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
@@ -738,7 +757,9 @@ Deno.serve(async (req: Request) => {
       const docId = readUrlMatch[1];
 
       const role = await getProfileRole(userId);
-      console.log(`[API-V1 Route 10] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal}`);
+      console.log(
+        `[API-V1 Route 10] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal}`,
+      );
       if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
@@ -808,7 +829,9 @@ Deno.serve(async (req: Request) => {
         body.rejection_reason || body.rejectionReason || body.reason || null;
 
       const role = await getProfileRole(userId);
-      console.log(`[API-V1 Route 11] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal} | decision: ${decision}`);
+      console.log(
+        `[API-V1 Route 11] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal} | decision: ${decision}`,
+      );
       if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
