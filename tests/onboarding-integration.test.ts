@@ -735,8 +735,14 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       const authData1 = await authRes1.json();
       natIdUploadId = authData1.upload_id;
 
+      const uploadUrl1 =
+        authData1.upload_url?.replace(
+          /^https?:\/\/kong(:\d+)?/i,
+          SUPABASE_URL,
+        ) || authData1.upload_url;
+
       // Upload actual PDF bytes to signed URL
-      const putRes1 = await fetch(authData1.upload_url, {
+      const putRes1 = await fetch(uploadUrl1, {
         method: "PUT",
         headers: { "Content-Type": "application/pdf" },
         body: Buffer.from("%PDF-1.4 test real document bytes"),
@@ -780,7 +786,13 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       const authData2 = await authRes2.json();
       licUploadId = authData2.upload_id;
 
-      await fetch(authData2.upload_url, {
+      const uploadUrl2 =
+        authData2.upload_url?.replace(
+          /^https?:\/\/kong(:\d+)?/i,
+          SUPABASE_URL,
+        ) || authData2.upload_url;
+
+      await fetch(uploadUrl2, {
         method: "PUT",
         headers: { "Content-Type": "application/pdf" },
         body: Buffer.from("%PDF-1.4 test license bytes"),
@@ -822,7 +834,13 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       const authData3 = await authRes3.json();
       vehRegUploadId = authData3.upload_id;
 
-      await fetch(authData3.upload_url, {
+      const uploadUrl3 =
+        authData3.upload_url?.replace(
+          /^https?:\/\/kong(:\d+)?/i,
+          SUPABASE_URL,
+        ) || authData3.upload_url;
+
+      await fetch(uploadUrl3, {
         method: "PUT",
         headers: { "Content-Type": "application/pdf" },
         body: Buffer.from("%PDF-1.4 test vehicle registration bytes"),
@@ -916,7 +934,13 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         },
       );
       const authData = await authRes.json();
-      await fetch(authData.upload_url, {
+      const uploadUrl =
+        authData.upload_url?.replace(
+          /^https?:\/\/kong(:\d+)?/i,
+          SUPABASE_URL,
+        ) || authData.upload_url;
+
+      await fetch(uploadUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/pdf" },
         body: Buffer.from("%PDF-1.4 duplicate test bytes"),
@@ -1123,7 +1147,9 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
           },
         },
       );
+      assert.strictEqual(detailRes.status, 200);
       const detailData = await detailRes.json();
+      assert.ok(detailData.documents?.length >= 1);
       const docId = detailData.documents[0].id;
 
       const res = await fetch(
