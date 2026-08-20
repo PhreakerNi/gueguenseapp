@@ -3,17 +3,6 @@
 
 BEGIN;
 
--- 0. Table Alterations / Schema Upgrades for existing foundation tables
-ALTER TABLE public.drivers
-ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-
-ALTER TABLE public.driver_documents
-ADD COLUMN IF NOT EXISTS file_size BIGINT,
-ADD COLUMN IF NOT EXISTS mime_type TEXT,
-ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
-ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES auth.users(id),
-ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-
 -- 1. Storage Bucket and RLS Hardening (Section 1 & 4)
 UPDATE storage.buckets
 SET allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'application/pdf']
@@ -913,16 +902,14 @@ BEGIN
         -- Update driver documents to VERIFIED (only active ones)
         UPDATE public.driver_documents
         SET verification_status = 'VERIFIED',
-            reviewed_at = NOW(),
-            reviewed_by = p_actor_id
+            rejection_reason = NULL
         WHERE driver_id = p_driver_id
           AND verification_status IN ('PENDING', 'UNDER_REVIEW');
 
         -- Update driver record
         UPDATE public.drivers
         SET verification_status = 'VERIFIED',
-            account_status = 'ACTIVE',
-            updated_at = NOW()
+            account_status = 'ACTIVE'
         WHERE id = p_driver_id;
 
         -- Insert Canonical Audit Log (Section 11)
@@ -952,14 +939,12 @@ BEGIN
         -- Update current active documents to REJECTED (historical preservation, Section 10)
         UPDATE public.driver_documents
         SET verification_status = 'REJECTED',
-            reviewed_at = NOW(),
-            reviewed_by = p_actor_id
+            rejection_reason = v_clean_reason
         WHERE driver_id = p_driver_id
           AND verification_status IN ('PENDING', 'UNDER_REVIEW');
 
         UPDATE public.drivers
-        SET verification_status = 'REJECTED',
-            updated_at = NOW()
+        SET verification_status = 'REJECTED'
         WHERE id = p_driver_id;
 
         -- Insert Canonical Audit Log (Section 11)

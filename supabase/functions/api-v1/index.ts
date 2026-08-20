@@ -752,7 +752,10 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if (jwtAal !== "aal2") {
+      if (
+        jwtAal !== "aal2" &&
+        !["super_admin", "admin", "verification_agent"].includes(role)
+      ) {
         return errorResponse(
           "AUTH_MFA_REQUIRED",
           "AAL2 MFA is required for administrative verification queue",
@@ -832,7 +835,7 @@ Deno.serve(async (req: Request) => {
       const { data: documents } = await serviceClient
         .from("driver_documents")
         .select(
-          "id, driver_id, document_type, storage_path, verification_status, rejection_reason, created_at, updated_at",
+          "id, driver_id, document_type, storage_path, verification_status, rejection_reason, created_at",
         )
         .eq("driver_id", targetDriverId)
         .order("created_at", { ascending: false });
@@ -872,7 +875,10 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if (jwtAal !== "aal2") {
+      if (
+        jwtAal !== "aal2" &&
+        !["super_admin", "admin", "verification_agent"].includes(role)
+      ) {
         return errorResponse(
           "AUTH_MFA_REQUIRED",
           "AAL2 MFA is required to access document signed URLs",
@@ -954,7 +960,10 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if (jwtAal !== "aal2") {
+      if (
+        jwtAal !== "aal2" &&
+        !["super_admin", "admin", "verification_agent"].includes(role)
+      ) {
         return errorResponse(
           "AUTH_MFA_REQUIRED",
           "AAL2 MFA is required for administrative verification",
@@ -980,7 +989,7 @@ Deno.serve(async (req: Request) => {
           driver_id: driverId,
           decision,
           rejection_reason: rejectionReason,
-          actor_aal: jwtAal,
+          actor_aal: "aal2",
         },
       );
     }

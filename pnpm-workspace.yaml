@@ -15,19 +15,24 @@ allowBuilds:
   supabase: true
   unrs-resolver: true
 minimumReleaseAgeExclude:
-  - "@expo/cli@57.0.14 || 57.0.16"
-  - "@expo/fingerprint@0.20.7 || 0.20.8"
+  - "@expo/cli@57.0.14 || 57.0.16 || 57.0.17"
+  - "@expo/fingerprint@0.20.7 || 0.20.8 || 0.20.9"
   - "@expo/inline-modules@0.1.5 || 0.1.6"
-  - "@expo/local-build-cache-provider@57.0.6"
-  - "@expo/metro-config@57.0.8"
-  - "@expo/metro-runtime@57.0.9 || 57.0.11"
-  - "@expo/prebuild-config@57.0.11"
-  - "@expo/ui@57.0.10"
+  - "@expo/local-build-cache-provider@57.0.6 || 57.0.7"
+  - "@expo/metro-config@57.0.8 || 57.0.9"
+  - "@expo/metro-runtime@57.0.9 || 57.0.11 || 57.0.12"
+  - "@expo/prebuild-config@57.0.11 || 57.0.13"
+  - "@expo/ui@57.0.10 || 57.0.12"
   - expo-asset@57.0.10 || 57.0.12
-  - expo-constants@57.0.10 || 57.0.12
-  - expo-router@57.0.12 || 57.0.14
+  - expo-constants@57.0.10 || 57.0.12 || 57.0.13
+  - expo-router@57.0.12 || 57.0.14 || 57.0.15
   - expo-secure-store@57.0.1
   - expo-server@57.0.2
-  - expo@57.0.12 || 57.0.14
+  - expo@57.0.12 || 57.0.14 || 57.0.15
   - "@expo/config@57.0.8"
   - "@expo/log-box@57.0.3"
+  - "@expo/router-server@57.0.7"
+  - expo-file-system@57.0.5
+  - expo-modules-core@57.0.12
+  - expo-modules-jsi@57.0.5
+  - expo-linking@57.0.7
