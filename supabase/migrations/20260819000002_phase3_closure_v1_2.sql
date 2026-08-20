@@ -790,16 +790,12 @@ BEGIN
         driver_id,
         document_type,
         storage_path,
-        file_size,
-        mime_type,
         verification_status
     )
     VALUES (
         p_actor_id,
         p_document_type,
         v_auth_record.storage_path,
-        p_file_size,
-        p_mime_type,
         'PENDING'
     )
     RETURNING id INTO v_doc_id;
@@ -811,8 +807,7 @@ BEGIN
 
     -- Reset driver verification status to PENDING if previously REJECTED
     UPDATE public.drivers
-    SET verification_status = 'PENDING',
-        updated_at = NOW()
+    SET verification_status = 'PENDING'
     WHERE id = p_actor_id AND verification_status = 'REJECTED';
 
     RETURN jsonb_build_object(
