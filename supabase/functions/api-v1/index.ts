@@ -677,6 +677,7 @@ Deno.serve(async (req: Request) => {
       const targetDriverId = driverDetailMatch[1];
 
       const role = await getProfileRole(userId);
+      console.log(`[API-V1 Route 9] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal}`);
       if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
@@ -737,6 +738,7 @@ Deno.serve(async (req: Request) => {
       const docId = readUrlMatch[1];
 
       const role = await getProfileRole(userId);
+      console.log(`[API-V1 Route 10] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal}`);
       if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
@@ -806,6 +808,7 @@ Deno.serve(async (req: Request) => {
         body.rejection_reason || body.rejectionReason || body.reason || null;
 
       const role = await getProfileRole(userId);
+      console.log(`[API-V1 Route 11] path: ${path} | userId: ${userId} | role: ${role} | jwtAal: ${jwtAal} | decision: ${decision}`);
       if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",

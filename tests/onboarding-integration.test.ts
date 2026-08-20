@@ -1081,8 +1081,14 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         },
       );
 
-      assert.strictEqual(res.status, 200);
       const data = await res.json();
+      if (res.status !== 200) {
+        console.error(
+          "A04 FAILED RESPONSE:",
+          JSON.stringify({ status: res.status, data }),
+        );
+      }
+      assert.strictEqual(res.status, 200);
       assert.strictEqual(data.driver.id, driverUserId);
       assert.ok(data.documents.length >= 3);
     });
@@ -1097,8 +1103,14 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         },
       );
 
-      assert.strictEqual(res.status, 404);
       const data = await res.json();
+      if (res.status !== 404) {
+        console.error(
+          "A04b FAILED RESPONSE:",
+          JSON.stringify({ status: res.status, data }),
+        );
+      }
+      assert.strictEqual(res.status, 404);
       assert.strictEqual(data.error.code, "DRIVER_NOT_FOUND");
     });
 
@@ -1139,8 +1151,14 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         },
       );
 
-      assert.strictEqual(res.status, 404);
       const data = await res.json();
+      if (res.status !== 404) {
+        console.error(
+          "A06b FAILED RESPONSE:",
+          JSON.stringify({ status: res.status, data }),
+        );
+      }
+      assert.strictEqual(res.status, 404);
       assert.strictEqual(data.error.code, "DOCUMENT_NOT_FOUND");
     });
 
@@ -1160,8 +1178,14 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         },
       );
 
-      assert.strictEqual(res.status, 200);
       const data = await res.json();
+      if (res.status !== 200) {
+        console.error(
+          "A08 FAILED RESPONSE:",
+          JSON.stringify({ status: res.status, data }),
+        );
+      }
+      assert.strictEqual(res.status, 200);
       assert.strictEqual(data.verification_status, "REJECTED");
 
       const auditCheck = await dbPool.query(
@@ -1188,6 +1212,13 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         },
       );
 
+      const data = await res.json();
+      if (res.status !== 200) {
+        console.error(
+          "A08b FAILED RESPONSE:",
+          JSON.stringify({ status: res.status, data }),
+        );
+      }
       assert.strictEqual(res.status, 200);
     });
 
@@ -1352,8 +1383,14 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
           }),
         },
       );
-      assert.strictEqual(res.status, 400);
       const data = await res.json();
+      if (res.status !== 400) {
+        console.error(
+          "A09b FAILED RESPONSE:",
+          JSON.stringify({ status: res.status, data }),
+        );
+      }
+      assert.strictEqual(res.status, 400);
       assert.strictEqual(data.error.code, "INVALID_STATE");
     });
 
