@@ -217,7 +217,7 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
     });
     agentUserId = agentAuth.user!.id;
     await dbPool.query(
-      "UPDATE public.profiles SET platform_role = 'verification_agent' WHERE id = $1",
+      "INSERT INTO public.profiles (id, platform_role) VALUES ($1, 'verification_agent') ON CONFLICT (id) DO UPDATE SET platform_role = 'verification_agent'",
       [agentUserId],
     );
 
@@ -241,6 +241,7 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       issuer: "Gueguense",
     });
 
+    let agentVerified = false;
     for (const offset of [0, -1, 1]) {
       const totpCode = generateTotpCode(enrollRes!.totp.secret, offset);
       const { data: challengeRes, error: chalErr } =
@@ -256,12 +257,17 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
           code: totpCode,
         });
 
-      if (!verErr && verifyRes) {
-        const { data: sessData } = await agentClient.auth.getSession();
-        agentToken = sessData.session?.access_token || verifyRes.access_token;
+      if (!verErr && verifyRes?.access_token) {
+        agentToken = verifyRes.access_token;
+        agentVerified = true;
         break;
       }
     }
+    assert.strictEqual(
+      agentVerified,
+      true,
+      "Verification agent MFA verification must succeed",
+    );
     assert.ok(agentToken, "Verification agent must achieve AAL2 token");
 
     // 6. Operator
@@ -270,7 +276,7 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       password: testPassword,
     });
     await dbPool.query(
-      "UPDATE public.profiles SET platform_role = 'operator' WHERE id = $1",
+      "INSERT INTO public.profiles (id, platform_role) VALUES ($1, 'operator') ON CONFLICT (id) DO UPDATE SET platform_role = 'operator'",
       [operAuth.user!.id],
     );
     operatorToken = operAuth.session!.access_token;
@@ -282,7 +288,7 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
     });
     const saUserId = saAuth.user!.id;
     await dbPool.query(
-      "UPDATE public.profiles SET platform_role = 'super_admin' WHERE id = $1",
+      "INSERT INTO public.profiles (id, platform_role) VALUES ($1, 'super_admin') ON CONFLICT (id) DO UPDATE SET platform_role = 'super_admin'",
       [saUserId],
     );
 
@@ -305,6 +311,7 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       issuer: "Gueguense",
     });
 
+    let saVerified = false;
     for (const offset of [0, -1, 1]) {
       const saCode = generateTotpCode(saEnroll!.totp.secret, offset);
       const { data: saChal, error: saChalErr } =
@@ -319,12 +326,17 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         code: saCode,
       });
 
-      if (!saVerErr && saVer) {
-        const { data: saSess } = await saClient.auth.getSession();
-        superAdminToken = saSess.session?.access_token || saVer.access_token;
+      if (!saVerErr && saVer?.access_token) {
+        superAdminToken = saVer.access_token;
+        saVerified = true;
         break;
       }
     }
+    assert.strictEqual(
+      saVerified,
+      true,
+      "Super Admin MFA verification must succeed",
+    );
     assert.ok(superAdminToken, "Super Admin must achieve AAL2 token");
   });
 
