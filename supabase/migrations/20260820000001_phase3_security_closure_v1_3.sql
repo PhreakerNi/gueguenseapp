@@ -763,8 +763,8 @@ GRANT EXECUTE ON FUNCTION public.create_business(UUID, TEXT, TEXT, TEXT) TO serv
 REVOKE EXECUTE ON FUNCTION public.create_business_location(UUID, UUID, TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_business_location(UUID, UUID, TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT) TO service_role;
 
-REVOKE EXECUTE ON FUNCTION public.create_business_member(UUID, UUID, UUID, TEXT, UUID[]) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.create_business_member(UUID, UUID, UUID, TEXT, UUID[]) TO service_role;
+REVOKE EXECUTE ON FUNCTION public.add_business_member(UUID, UUID, UUID, TEXT, UUID[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.add_business_member(UUID, UUID, UUID, TEXT, UUID[]) TO service_role;
 
 REVOKE EXECUTE ON FUNCTION public.register_driver(UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.register_driver(UUID, TEXT, TEXT) TO service_role;

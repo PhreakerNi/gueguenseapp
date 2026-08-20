@@ -1549,7 +1549,10 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         "admin_verify_driver",
         "execute_idempotent_operation",
         "create_business",
+        "create_business_location",
+        "add_business_member",
         "register_driver",
+        "register_vehicle",
       ];
 
       for (const ep of endpoints) {
@@ -1581,6 +1584,11 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         "commit_driver_document",
         "admin_verify_driver",
         "execute_idempotent_operation",
+        "create_business",
+        "create_business_location",
+        "add_business_member",
+        "register_driver",
+        "register_vehicle",
       ];
 
       for (const ep of endpoints) {
