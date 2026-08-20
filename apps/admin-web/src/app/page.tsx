@@ -1,6 +1,7 @@
 import React from "react";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import Link from "next/link";
 import { createClient } from "../lib/supabase/server";
 import type { PlatformRole } from "@gueguense/types";
 
@@ -255,6 +256,13 @@ export default async function AdminDashboardPage() {
 
                     {canVerify ? (
                       <div className="flex items-center space-x-3">
+                        <Link
+                          href={`/verifications/${drv.id}`}
+                          className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold rounded-lg transition"
+                        >
+                          Ver Expediente &rarr;
+                        </Link>
+
                         <form action={handleVerifyDriver}>
                           <input type="hidden" name="driverId" value={drv.id} />
                           <input

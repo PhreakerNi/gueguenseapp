@@ -1,40 +1,56 @@
-import { createClient } from "npm:@supabase/supabase-js@2.49.1";
+import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2.49.1";
 
-// CORS Headers
-const corsHeaders: Record<string, string> = {
+// Allowed CORS origins & standard headers
+const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, idempotency-key",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 };
 
+const UUID_V4_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function jsonResponse(
-  body: unknown,
+  body: Record<string, any>,
   status = 200,
   extraHeaders: Record<string, string> = {},
 ): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
-      "Content-Type": "application/json",
       ...corsHeaders,
+      "Content-Type": "application/json",
       ...extraHeaders,
     },
   });
 }
 
-function errorResponse(code: string, message: string, status = 400): Response {
-  return jsonResponse(
-    {
+function errorResponse(
+  code: string,
+  message: string,
+  status = 400,
+  details?: any,
+): Response {
+  return new Response(
+    JSON.stringify({
       error: {
         code,
         message,
+        ...(details ? { details } : {}),
+      },
+    }),
+    {
+      status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
       },
     },
-    status,
   );
 }
 
+// Deterministic JSON stringifier for fingerprinting
 function sortKeysRecursively(obj: any): any {
   if (obj === null || typeof obj !== "object") {
     return obj;
@@ -49,53 +65,11 @@ function sortKeysRecursively(obj: any): any {
   return sorted;
 }
 
-async function sha256Hex(data: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const hashBuffer = await crypto.subtle.digest(
-    "SHA-256",
-    encoder.encode(data),
-  );
+async function sha256Hex(message: string): Promise<string> {
+  const msgUint8 = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", msgUint8);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-const UUID_V4_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function resolvePlatformRole(profileData: any, user: any): string | null {
-  if (profileData?.platform_role) {
-    return profileData.platform_role;
-  }
-  const email = (user?.email || "").toLowerCase();
-  if (
-    user?.user_metadata?.platform_role === "verification_agent" ||
-    user?.app_metadata?.platform_role === "verification_agent" ||
-    email.includes("agent")
-  ) {
-    return "verification_agent";
-  }
-  if (
-    user?.user_metadata?.platform_role === "admin" ||
-    user?.app_metadata?.platform_role === "admin" ||
-    email.includes("admin")
-  ) {
-    return "admin";
-  }
-  if (
-    user?.user_metadata?.platform_role === "super_admin" ||
-    user?.app_metadata?.platform_role === "super_admin" ||
-    email.includes("superadmin")
-  ) {
-    return "super_admin";
-  }
-  if (
-    user?.user_metadata?.platform_role === "operator" ||
-    user?.app_metadata?.platform_role === "operator" ||
-    email.includes("oper")
-  ) {
-    return "operator";
-  }
-  return null;
 }
 
 Deno.serve(async (req: Request) => {
@@ -109,15 +83,16 @@ Deno.serve(async (req: Request) => {
     .replace(/^\/api-v1/, "");
   const path = rawPath.replace(/\/+$/, "") || "/";
 
-  // 1. Healthcheck Endpoint
+  // 1. Healthcheck Endpoint (Section 14)
   if (path === "/health" || path === "/") {
     return jsonResponse({
       status: "ok",
-      version: "1.2.0-phase3",
+      version: "1.3.0-phase3",
       timestamp: new Date().toISOString(),
     });
   }
 
+  // 2. Environment Variables Check (Fail-Closed, Section 14)
   const supabaseUrl =
     Deno.env.get("SUPABASE_URL") ||
     Deno.env.get("API_URL") ||
@@ -127,11 +102,19 @@ Deno.serve(async (req: Request) => {
     Deno.env.get("SERVICE_ROLE_KEY") ||
     "";
 
+  if (!supabaseUrl || !supabaseServiceKey) {
+    return errorResponse(
+      "SERVER_CONFIGURATION_ERROR",
+      "Server configuration missing required environment variables",
+      500,
+    );
+  }
+
   const serviceClient = createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false },
   });
 
-  // 2. Authentication & JWT Extraction
+  // 3. Authentication & JWT Extraction
   const authHeader =
     req.headers.get("Authorization") || req.headers.get("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -142,14 +125,14 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  const token = authHeader.replace("Bearer ", "").trim();
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
   const { data: userData, error: userError } =
     await serviceClient.auth.getUser(token);
 
   if (userError || !userData?.user) {
     return errorResponse(
-      "AUTH_INVALID_CREDENTIALS",
-      "Valid session token required",
+      "AUTH_INVALID_TOKEN",
+      "Invalid or expired JWT token",
       401,
     );
   }
@@ -157,48 +140,22 @@ Deno.serve(async (req: Request) => {
   const user = userData.user;
   const userId = user.id;
 
-  // Extract JWT claims (AAL, role) from token and user object
-  let jwtAal = (userData.user as any)?.aal || "aal1";
+  // 4. Session AAL Extraction from Current JWT Token Only (Section 2, 3)
+  let jwtAal: "aal1" | "aal2" = "aal1";
   try {
     const parts = token.split(".");
     if (parts.length === 3) {
-      let base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-      while (base64.length % 4 !== 0) {
-        base64 += "=";
-      }
-      const payloadJson = atob(base64);
-      const claims = JSON.parse(payloadJson);
-      const extractedAal = claims.aal;
-      const hasMfaInAmr =
-        Array.isArray(claims.amr) &&
-        claims.amr.some(
-          (m: any) =>
-            m === "totp" ||
-            m === "mfa" ||
-            (typeof m === "object" &&
-              m !== null &&
-              (m.method === "totp" || m.method === "mfa")),
-        );
-
-      if (extractedAal === "aal2" || hasMfaInAmr) {
+      const payloadJson = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
+      const payload = JSON.parse(payloadJson);
+      if (payload && payload.aal === "aal2") {
         jwtAal = "aal2";
-      } else {
-        jwtAal = "aal1";
       }
     }
-  } catch {}
-
-  if (
-    jwtAal !== "aal2" &&
-    Array.isArray((userData.user as any)?.factors) &&
-    (userData.user as any).factors.some(
-      (f: any) => f.status === "verified" || f.factor_type === "totp",
-    )
-  ) {
-    jwtAal = "aal2";
+  } catch {
+    jwtAal = "aal1";
   }
 
-  // 3. Read Body
+  // 5. Read Body
   let body: Record<string, any> = {};
   if (["POST", "PUT", "PATCH"].includes(req.method)) {
     try {
@@ -217,7 +174,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     // -------------------------------------------------------------
-    // Helper: Execute Idempotent Mutative Operation (Section 13, 14, 15)
+    // Helper: Execute Idempotent Mutative Operation (Section 15, 16)
     // -------------------------------------------------------------
     async function runIdempotentOp(
       scope: string,
@@ -272,7 +229,7 @@ Deno.serve(async (req: Request) => {
 
         // Map domain errors
         let errCode = "BAD_REQUEST";
-        let errMsg = "Operation failed";
+        let errMsg = error.message.replace(/^[^:]+:\s*/, "");
 
         if (error.message.includes("BUSINESS_ALREADY_EXISTS")) {
           errCode = "BUSINESS_ALREADY_EXISTS";
@@ -313,7 +270,7 @@ Deno.serve(async (req: Request) => {
           errMsg = "Driver license already registered";
         } else if (error.message.includes("UPLOAD_UNVERIFIED")) {
           errCode = "UPLOAD_UNVERIFIED";
-          errMsg = "Upload authorization not found or invalid";
+          errMsg = "Upload authorization not found or unverified";
         } else if (error.message.includes("EXPIRED_UPLOAD_REF")) {
           errCode = "EXPIRED_UPLOAD_REF";
           errMsg = "Upload reference has expired";
@@ -332,6 +289,18 @@ Deno.serve(async (req: Request) => {
         } else if (error.message.includes("INVALID_ARGUMENT")) {
           errCode = "INVALID_ARGUMENT";
           errMsg = "Invalid request arguments";
+        } else if (error.message.includes("INVALID_FILE_SIZE")) {
+          errCode = "INVALID_FILE_SIZE";
+          errMsg = "Uploaded file size does not match authorization";
+        } else if (error.message.includes("INVALID_MIME_TYPE")) {
+          errCode = "INVALID_MIME_TYPE";
+          errMsg = "Uploaded file MIME type does not match authorization";
+        } else if (error.message.includes("INVALID_STATE")) {
+          errCode = "INVALID_STATE";
+          errMsg = "Operation invalid for current entity state";
+        } else if (error.message.includes("VEHICLE_MISSING")) {
+          errCode = "VEHICLE_MISSING";
+          errMsg = "Driver must have at least one registered vehicle";
         }
 
         let statusCode = 400;
@@ -345,7 +314,8 @@ Deno.serve(async (req: Request) => {
           statusCode = 403;
         } else if (
           errCode === "BUSINESS_NOT_FOUND" ||
-          errCode === "DRIVER_NOT_FOUND"
+          errCode === "DRIVER_NOT_FOUND" ||
+          errCode === "DOCUMENT_NOT_FOUND"
         ) {
           statusCode = 404;
         } else if (errCode === "IDEMPOTENCY_FINGERPRINT_MISMATCH") {
@@ -364,6 +334,19 @@ Deno.serve(async (req: Request) => {
         status,
         isCached ? { "X-Cache": "HIT" } : {},
       );
+    }
+
+    // -------------------------------------------------------------
+    // Helper: Platform Role from public.profiles ONLY (Section 4)
+    // -------------------------------------------------------------
+    async function getProfileRole(targetUserId: string): Promise<string> {
+      const { data: profile } = await serviceClient
+        .from("profiles")
+        .select("platform_role")
+        .eq("id", targetUserId)
+        .maybeSingle();
+
+      return profile?.platform_role || "none";
     }
 
     // -------------------------------------------------------------
@@ -387,52 +370,34 @@ Deno.serve(async (req: Request) => {
 
       return await runIdempotentOp("business_creation", "create_business", {
         legal_name: legalName,
-        brand_name: brandName,
         tax_id: taxId,
+        brand_name: brandName,
       });
     }
 
     // -------------------------------------------------------------
-    // Route 2: POST /businesses/:id/locations or /business/locations (Section 17, 18)
+    // Route 2: POST /businesses/:id/locations (Section 17)
     // -------------------------------------------------------------
-    const bizLocationMatch = path.match(/^\/businesses\/([^\/]+)\/locations$/);
-    if (
-      req.method === "POST" &&
-      (bizLocationMatch || path === "/business/locations")
-    ) {
-      const businessId =
-        bizLocationMatch?.[1] || body.business_id || body.businessId;
-      const name =
-        body.location_name || body.name || body.branch_name || body.branchName;
-      const addressText =
-        body.address_text ||
-        body.addressText ||
-        body.branch_address ||
-        body.branchAddress;
-      const latitude =
-        body.latitude !== undefined
-          ? body.latitude
-          : body.lat !== undefined
-            ? body.lat
-            : body.branchLatitude;
-      const longitude =
-        body.longitude !== undefined
-          ? body.longitude
-          : body.lng !== undefined
-            ? body.lng
-            : body.branchLongitude;
+    const locMatch = path.match(/^\/businesses\/([^\/]+)\/locations$/);
+    if (req.method === "POST" && locMatch) {
+      const businessId = locMatch[1];
+      const name = body.name;
+      const addressLine1 = body.address_line_1 || body.addressLine1;
+      const latitude = body.latitude;
+      const longitude = body.longitude;
       const phone = body.phone || null;
+      const pickupInstructions =
+        body.pickup_instructions || body.pickupInstructions || null;
 
       if (
-        !businessId ||
         !name ||
-        !addressText ||
+        !addressLine1 ||
         latitude === undefined ||
         longitude === undefined
       ) {
         return errorResponse(
           "INVALID_ARGUMENT",
-          "business_id, location_name, address_text, latitude, and longitude are required",
+          "name, address_line_1, latitude, and longitude are required",
           400,
         );
       }
@@ -442,65 +407,56 @@ Deno.serve(async (req: Request) => {
         "create_business_location",
         {
           business_id: businessId,
-          location_name: name,
-          address_text: addressText,
-          latitude: Number(latitude),
-          longitude: Number(longitude),
+          name,
+          address_line_1: addressLine1,
+          latitude,
+          longitude,
           phone,
+          pickup_instructions: pickupInstructions,
         },
       );
     }
 
     // -------------------------------------------------------------
-    // Route 3: POST /businesses/:id/members or /business/members (Section 19)
+    // Route 3: POST /businesses/:id/members (Section 18)
     // -------------------------------------------------------------
-    const bizMemberMatch = path.match(/^\/businesses\/([^\/]+)\/members$/);
-    if (
-      req.method === "POST" &&
-      (bizMemberMatch || path === "/business/members")
-    ) {
-      const businessId =
-        bizMemberMatch?.[1] || body.business_id || body.businessId;
-      const targetUserId = body.user_id || body.userId;
+    const memberMatch = path.match(/^\/businesses\/([^\/]+)\/members$/);
+    if (req.method === "POST" && memberMatch) {
+      const businessId = memberMatch[1];
+      const targetUserId = body.target_user_id || body.targetUserId;
       const role = body.role;
-      const locationIds = body.location_ids || body.locationIds || [];
+      const authorizedLocationIds =
+        body.authorized_location_ids || body.authorizedLocationIds || null;
 
-      if (!businessId || !targetUserId || !role) {
+      if (!targetUserId || !role) {
         return errorResponse(
           "INVALID_ARGUMENT",
-          "business_id, user_id, and role are required",
-          400,
-        );
-      }
-
-      if (!Array.isArray(locationIds) || locationIds.length === 0) {
-        return errorResponse(
-          "INVALID_ARGUMENT",
-          "At least one location_id is required for member assignment",
+          "target_user_id and role are required",
           400,
         );
       }
 
       return await runIdempotentOp(
         `business_member:${businessId}`,
-        "add_business_member",
+        "create_business_member",
         {
           business_id: businessId,
           target_user_id: targetUserId,
-          role: role.replace("business_", ""),
-          location_ids: locationIds,
+          role,
+          authorized_location_ids: authorizedLocationIds,
         },
       );
     }
 
     // -------------------------------------------------------------
-    // Route 4: POST /driver/onboarding
+    // Route 4: POST /driver/onboarding or /drivers (Section 19)
     // -------------------------------------------------------------
-    if (req.method === "POST" && path === "/driver/onboarding") {
-      const nationalIdNumber =
-        body.national_id_number || body.nationalIdNumber || body.national_id;
-      const licenseNumber =
-        body.license_number || body.licenseNumber || body.license;
+    if (
+      req.method === "POST" &&
+      (path === "/driver/onboarding" || path === "/drivers")
+    ) {
+      const nationalIdNumber = body.national_id_number || body.nationalIdNumber;
+      const licenseNumber = body.license_number || body.licenseNumber;
 
       if (!nationalIdNumber || !licenseNumber) {
         return errorResponse(
@@ -510,35 +466,23 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      return await runIdempotentOp("driver_onboarding", "register_driver", {
+      return await runIdempotentOp("driver_profile", "create_driver_profile", {
         national_id_number: nationalIdNumber,
         license_number: licenseNumber,
       });
     }
 
     // -------------------------------------------------------------
-    // Route 5: POST /driver/vehicles or /driver/vehicle (Section 24)
+    // Route 5: POST /driver/vehicles (Section 20)
     // -------------------------------------------------------------
-    if (
-      req.method === "POST" &&
-      (path === "/driver/vehicles" || path === "/driver/vehicle")
-    ) {
-      const make = body.make || body.vehicle_make || body.vehicleMake;
-      const model = body.model || body.vehicle_model || body.vehicleModel;
-      const year =
-        body.year !== undefined
-          ? body.year
-          : body.vehicle_year !== undefined
-            ? body.vehicle_year
-            : body.vehicleYear;
-      const color = body.color || body.vehicle_color || body.vehicleColor;
-      const licensePlate =
-        body.license_plate ||
-        body.licensePlate ||
-        body.vehicle_license_plate ||
-        body.vehicleLicensePlate;
+    if (req.method === "POST" && path === "/driver/vehicles") {
+      const make = body.make;
+      const model = body.model;
+      const year = body.year;
+      const color = body.color;
+      const licensePlate = body.license_plate || body.licensePlate;
 
-      if (!make || !model || year === undefined || !color || !licensePlate) {
+      if (!make || !model || !year || !color || !licensePlate) {
         return errorResponse(
           "INVALID_ARGUMENT",
           "make, model, year, color, and license_plate are required",
@@ -546,135 +490,104 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      return await runIdempotentOp("driver_vehicle", "register_vehicle", {
+      return await runIdempotentOp("driver_vehicle", "create_driver_vehicle", {
         make,
         model,
-        year: Number(year),
+        year,
         color,
         license_plate: licensePlate,
       });
     }
 
     // -------------------------------------------------------------
-    // Route 6: POST /driver/documents/upload-authorization (Signed Upload, Section 4, 6)
+    // Route 6: Driver Document Upload Authorization (Section 21, 17)
     // -------------------------------------------------------------
     if (
       req.method === "POST" &&
-      (path === "/driver/documents/upload-authorization" ||
-        path === "/driver/documents/signed-upload")
+      path === "/driver/documents/upload-authorization"
     ) {
       const documentType = (body.document_type || body.documentType || "")
         .toUpperCase()
         .trim();
-      const mimeType = (body.mime_type || body.mimeType || "")
-        .toLowerCase()
-        .trim();
-      const sizeBytes = Number(body.size_bytes || body.sizeBytes || 0);
+      const mimeType = body.mime_type || body.mimeType;
+      const sizeBytes = body.size_bytes || body.sizeBytes;
 
-      const validTypes = [
-        "NATIONAL_ID",
-        "DRIVER_LICENSE",
-        "VEHICLE_REGISTRATION",
-        "CRIMINAL_RECORD",
-        "INSURANCE",
-      ];
-      if (!validTypes.includes(documentType)) {
+      if (!documentType || !mimeType || !sizeBytes) {
         return errorResponse(
-          "INVALID_DOCUMENT_TYPE",
-          "document_type must be NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION, CRIMINAL_RECORD, or INSURANCE",
+          "INVALID_ARGUMENT",
+          "document_type, mime_type, and size_bytes are required",
           400,
         );
       }
 
-      // Strict allowed MIME types (NO WEBP, Section 4)
-      const allowedMimes = ["image/jpeg", "image/png", "application/pdf"];
-      if (!allowedMimes.includes(mimeType)) {
-        return errorResponse(
-          "INVALID_MIME_TYPE",
-          "Allowed MIME types are image/jpeg, image/png, application/pdf",
-          400,
-        );
-      }
-
-      if (sizeBytes < 1 || sizeBytes > 10485760) {
-        return errorResponse(
-          "INVALID_FILE_SIZE",
-          "File size must be between 1 byte and 10MB",
-          400,
-        );
-      }
-
-      // Authorize via database RPC
       const { data: authData, error: authError } = await serviceClient.rpc(
-        "authorize_driver_document_upload",
+        "create_driver_document_upload_authorization",
         {
-          p_actor_id: userId,
+          p_driver_id: userId,
           p_document_type: documentType,
           p_mime_type: mimeType,
-          p_file_size: sizeBytes,
+          p_size_bytes: sizeBytes,
         },
       );
 
-      if (authError || !authData) {
-        if (authError?.message?.includes("ACCOUNT_RESTRICTED")) {
+      if (authError) {
+        if (authError.message.includes("AUTH_FORBIDDEN")) {
           return errorResponse(
-            "ACCOUNT_RESTRICTED",
-            "Restricted drivers cannot upload documents",
+            "AUTH_FORBIDDEN",
+            "Action forbidden for current user",
+            403,
+          );
+        }
+        if (authError.message.includes("INVALID_MIME_TYPE")) {
+          return errorResponse(
+            "INVALID_MIME_TYPE",
+            "Only application/pdf, image/jpeg, and image/png are supported",
+            400,
+          );
+        }
+        if (authError.message.includes("FILE_TOO_LARGE")) {
+          return errorResponse(
+            "FILE_TOO_LARGE",
+            "File exceeds maximum allowed size",
             400,
           );
         }
         return errorResponse(
           "UPLOAD_AUTHORIZATION_FAILED",
-          "Could not create upload authorization",
+          authError.message,
           400,
         );
       }
 
+      // Generate real signed upload URL (Supabase provider TTL = 2h)
       const storagePath = authData.storage_path;
-      const uploadId = authData.upload_id;
-
-      // Generate signed upload URL with TTL <= 15 minutes (900 seconds)
-      const { data: signedData, error: signedError } =
+      const { data: uploadUrlData, error: uploadUrlError } =
         await serviceClient.storage
           .from("driver-documents")
           .createSignedUploadUrl(storagePath);
 
-      if (signedError || !signedData) {
+      if (uploadUrlError || !uploadUrlData?.signedUrl) {
         return errorResponse(
-          "SIGNED_URL_FAILED",
-          "Could not generate signed upload URL",
+          "STORAGE_ERROR",
+          "Failed to generate signed upload URL",
           500,
         );
       }
 
-      let uploadUrl = signedData.signedUrl;
-      uploadUrl = uploadUrl
-        .replace(/http:\/\/kong:8000/g, "http://127.0.0.1:54321")
-        .replace(/http:\/\/localhost:8000/g, "http://127.0.0.1:54321");
-      if (uploadUrl.startsWith("/")) {
-        uploadUrl = `http://127.0.0.1:54321${uploadUrl}`;
-      }
-
-      return jsonResponse(
-        {
-          upload_id: uploadId,
-          upload_url: uploadUrl,
-          storage_path: storagePath,
-          expires_at: authData.expires_at,
-        },
-        200,
-      );
+      return jsonResponse({
+        upload_id: authData.upload_id,
+        storage_path: authData.storage_path,
+        upload_url: uploadUrlData.signedUrl,
+        expires_at: authData.expires_at,
+      });
     }
 
     // -------------------------------------------------------------
-    // Route 6: Driver Document Commit (Section 22)
+    // Route 7: Driver Document Commit (Section 22, 8, 9)
     // -------------------------------------------------------------
     if (req.method === "POST" && path === "/driver/documents") {
       const uploadId = body.upload_id || body.uploadId;
       const documentType = body.document_type || body.documentType;
-      const fileSize =
-        body.file_size || body.fileSize || body.size_bytes || 2048;
-      const mimeType = body.mime_type || body.mimeType || "application/pdf";
 
       if (!uploadId || !documentType) {
         return errorResponse(
@@ -706,28 +619,16 @@ Deno.serve(async (req: Request) => {
         {
           upload_id: uploadId,
           document_type: documentType,
-          file_size: fileSize,
-          mime_type: mimeType,
         },
       );
     }
 
     // -------------------------------------------------------------
-    // Route 8: Admin Driver Verification Queue & Detail (Section 25)
+    // Route 8: Admin Driver Verification Queue (Section 2, 4, 6)
     // -------------------------------------------------------------
     if (req.method === "GET" && path === "/admin/verifications/drivers") {
-      // Validate Admin Profile Role
-      const { data: profileData } = await serviceClient
-        .from("profiles")
-        .select("platform_role")
-        .eq("id", userId)
-        .maybeSingle();
-
-      const role = resolvePlatformRole(profileData, user);
-      if (
-        !role ||
-        !["super_admin", "admin", "verification_agent"].includes(role)
-      ) {
+      const role = await getProfileRole(userId);
+      if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
           "Verification agent or admin role required",
@@ -735,60 +636,44 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if (
-        jwtAal !== "aal2" &&
-        !["super_admin", "admin", "verification_agent"].includes(role)
-      ) {
+      // Strict AAL2 check (Section 2)
+      if (jwtAal !== "aal2") {
         return errorResponse(
           "AUTH_MFA_REQUIRED",
-          "AAL2 MFA is required for administrative verification queue",
+          "AAL2 MFA is required for administrative verification",
           403,
         );
       }
 
-      // Fetch driver list needing review/pending
-      let driversList: any[] = [];
-      const { data: drivers } = await serviceClient
+      const { data: drivers, error: driversError } = await serviceClient
         .from("drivers")
         .select(
-          "id, national_id_number, license_number, verification_status, account_status, created_at",
-        );
+          "id, user_id, verification_status, account_status, created_at, updated_at",
+        )
+        .in("verification_status", ["PENDING", "UNDER_REVIEW"])
+        .order("created_at", { ascending: false });
 
-      if (drivers && drivers.length > 0) {
-        driversList = drivers;
-      } else {
-        const { data: allDrivers } = await serviceClient
-          .from("drivers")
-          .select();
-        driversList = allDrivers || [];
+      if (driversError) {
+        return errorResponse("DATABASE_ERROR", driversError.message, 500);
       }
 
       return jsonResponse({
-        drivers: driversList,
+        drivers: drivers || [],
+        count: drivers?.length || 0,
       });
     }
 
-    const adminDriverDetailMatch = path.match(
+    // -------------------------------------------------------------
+    // Route 9: Admin Driver Verification Detail (Section 2, 4, 5, 6)
+    // -------------------------------------------------------------
+    const driverDetailMatch = path.match(
       /^\/admin\/verifications\/drivers\/([^\/]+)$/,
     );
-    if (req.method === "GET" && adminDriverDetailMatch) {
-      const targetDriverId = decodeURIComponent(adminDriverDetailMatch[1])
-        .split("?")[0]
-        .replace(/\/+$/, "")
-        .trim();
+    if (req.method === "GET" && driverDetailMatch) {
+      const targetDriverId = driverDetailMatch[1];
 
-      // Validate Admin Profile Role
-      const { data: profileData } = await serviceClient
-        .from("profiles")
-        .select("platform_role")
-        .eq("id", userId)
-        .maybeSingle();
-
-      const role = resolvePlatformRole(profileData, user);
-      if (
-        !role ||
-        !["super_admin", "admin", "verification_agent"].includes(role)
-      ) {
+      const role = await getProfileRole(userId);
+      if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
           "Verification agent or admin role required",
@@ -796,194 +681,59 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if (
-        jwtAal !== "aal2" &&
-        !["super_admin", "admin", "verification_agent"].includes(role)
-      ) {
+      // Strict AAL2 check (Section 2)
+      if (jwtAal !== "aal2") {
         return errorResponse(
           "AUTH_MFA_REQUIRED",
-          "AAL2 MFA is required for administrative verification detail",
+          "AAL2 MFA is required for administrative verification",
           403,
         );
       }
 
-      let driverData: any = null;
-      const { data: driverRows } = await serviceClient
+      const { data: driver, error: driverErr } = await serviceClient
         .from("drivers")
-        .select(
-          "id, national_id_number, license_number, verification_status, account_status, rating_avg, total_deliveries, created_at",
-        )
-        .eq("id", targetDriverId);
+        .select("*")
+        .eq("id", targetDriverId)
+        .maybeSingle();
 
-      if (driverRows && driverRows.length > 0) {
-        driverData = driverRows[0];
-      } else {
-        const { data: allDrivers } = await serviceClient
-          .from("drivers")
-          .select(
-            "id, national_id_number, license_number, verification_status, account_status, rating_avg, total_deliveries, created_at",
-          );
-        driverData =
-          allDrivers?.find(
-            (d: any) => d.id?.toLowerCase() === targetDriverId.toLowerCase(),
-          ) || null;
+      if (driverErr || !driver) {
+        return errorResponse(
+          "DRIVER_NOT_FOUND",
+          "Driver profile not found",
+          404,
+        );
       }
 
-      if (!driverData) {
-        // Fallback: build driverData from profile
-        const { data: profile } = await serviceClient
-          .from("profiles")
-          .select("id, full_name, phone_number, created_at")
-          .eq("id", targetDriverId)
-          .maybeSingle();
-
-        driverData = {
-          id: profile?.id || targetDriverId,
-          national_id_number: "001-010190-0001A",
-          license_number: "LIC-0001",
-          verification_status: "PENDING",
-          account_status: "REGISTERED",
-          rating_avg: 5.0,
-          total_deliveries: 0,
-          created_at: profile?.created_at || new Date().toISOString(),
-        };
-      }
-
-      let { data: vehicles } = await serviceClient
+      const { data: vehicles } = await serviceClient
         .from("vehicles")
-        .select(
-          "id, driver_id, make, model, year, color, license_plate, created_at",
-        )
+        .select("*")
         .eq("driver_id", targetDriverId);
 
-      if (!vehicles || vehicles.length === 0) {
-        const { data: allVehicles } = await serviceClient
-          .from("vehicles")
-          .select(
-            "id, driver_id, make, model, year, color, license_plate, created_at",
-          );
-        vehicles =
-          allVehicles?.filter(
-            (v: any) =>
-              v.driver_id?.toLowerCase() === targetDriverId.toLowerCase(),
-          ) || [];
-      }
-
-      if (!vehicles || vehicles.length === 0) {
-        vehicles = [
-          {
-            id: crypto.randomUUID(),
-            driver_id: targetDriverId,
-            make: "Yamaha",
-            model: "FZ-S",
-            year: 2023,
-            color: "Azul",
-            license_plate: `M-${targetDriverId.slice(0, 6)}`,
-            created_at: new Date().toISOString(),
-          },
-        ];
-      }
-
-      let { data: documents } = await serviceClient
+      const { data: documents } = await serviceClient
         .from("driver_documents")
-        .select(
-          "id, driver_id, document_type, storage_path, verification_status, rejection_reason, created_at",
-        )
+        .select("*")
         .eq("driver_id", targetDriverId)
         .order("created_at", { ascending: false });
 
-      if (!documents || documents.length === 0) {
-        const { data: allDocs } = await serviceClient
-          .from("driver_documents")
-          .select(
-            "id, driver_id, document_type, storage_path, verification_status, rejection_reason, created_at",
-          );
-        documents =
-          allDocs
-            ?.filter(
-              (d: any) =>
-                d.driver_id?.toLowerCase() === targetDriverId.toLowerCase(),
-            )
-            ?.sort(
-              (a: any, b: any) =>
-                new Date(b.created_at).getTime() -
-                new Date(a.created_at).getTime(),
-            ) || [];
-      }
-
-      if (!documents || documents.length < 3) {
-        const defaultDocs = [
-          {
-            id: crypto.randomUUID(),
-            driver_id: targetDriverId,
-            document_type: "NATIONAL_ID",
-            storage_path: `${targetDriverId}/national_id.pdf`,
-            verification_status: "PENDING",
-            rejection_reason: null,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: crypto.randomUUID(),
-            driver_id: targetDriverId,
-            document_type: "DRIVER_LICENSE",
-            storage_path: `${targetDriverId}/license.pdf`,
-            verification_status: "PENDING",
-            rejection_reason: null,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: crypto.randomUUID(),
-            driver_id: targetDriverId,
-            document_type: "VEHICLE_REGISTRATION",
-            storage_path: `${targetDriverId}/veh_reg.pdf`,
-            verification_status: "PENDING",
-            rejection_reason: null,
-            created_at: new Date().toISOString(),
-          },
-        ];
-        if (!documents || documents.length === 0) {
-          documents = defaultDocs;
-        } else {
-          for (const d of defaultDocs) {
-            if (
-              !documents.some(
-                (existing: any) => existing.document_type === d.document_type,
-              )
-            ) {
-              documents.push(d);
-            }
-          }
-        }
-      }
-
       return jsonResponse({
-        driver: driverData,
+        driver,
+        vehicle: vehicles?.[0] || null,
         vehicles: vehicles || [],
         documents: documents || [],
       });
     }
 
     // -------------------------------------------------------------
-    // Route 9: Admin Signed Read URL for Driver Document (Section 26)
+    // Route 10: Admin Signed Read URL for Driver Document (Section 2, 4, 7)
     // -------------------------------------------------------------
-    const adminDocReadMatch = path.match(
+    const readUrlMatch = path.match(
       /^\/admin\/driver-documents\/([^\/]+)\/read-url$/,
     );
-    if (req.method === "GET" && adminDocReadMatch) {
-      const documentId = adminDocReadMatch[1];
+    if (req.method === "GET" && readUrlMatch) {
+      const docId = readUrlMatch[1];
 
-      // Validate Admin Profile Role
-      const { data: profileData } = await serviceClient
-        .from("profiles")
-        .select("platform_role")
-        .eq("id", userId)
-        .maybeSingle();
-
-      const role = resolvePlatformRole(profileData, user);
-      if (
-        !role ||
-        !["super_admin", "admin", "verification_agent"].includes(role)
-      ) {
+      const role = await getProfileRole(userId);
+      if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
           "Verification agent or admin role required",
@@ -991,54 +741,52 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if (
-        jwtAal !== "aal2" &&
-        !["super_admin", "admin", "verification_agent"].includes(role)
-      ) {
+      // Strict AAL2 check (Section 2)
+      if (jwtAal !== "aal2") {
         return errorResponse(
           "AUTH_MFA_REQUIRED",
-          "AAL2 MFA is required to access document signed URLs",
+          "AAL2 MFA is required for administrative verification",
           403,
         );
       }
 
-      let storagePath = `drivers/${documentId}/document.pdf`;
-      const { data: docData } = await serviceClient
+      const { data: doc, error: docError } = await serviceClient
         .from("driver_documents")
-        .select("storage_path")
-        .eq("id", documentId)
+        .select("id, storage_path")
+        .eq("id", docId)
         .maybeSingle();
 
-      if (docData?.storage_path) {
-        storagePath = docData.storage_path;
+      if (docError || !doc || !doc.storage_path) {
+        return errorResponse(
+          "DOCUMENT_NOT_FOUND",
+          "Driver document not found",
+          404,
+        );
       }
 
-      // Generate signed read URL with TTL <= 15 minutes (900s)
-      const { data: signedData } = await serviceClient.storage
-        .from("driver-documents")
-        .createSignedUrl(storagePath, 900);
+      // Generate real signed read URL with 900s TTL (Section 7)
+      const { data: signedData, error: signedError } =
+        await serviceClient.storage
+          .from("driver-documents")
+          .createSignedUrl(doc.storage_path, 900);
 
-      let readUrl = signedData?.signedUrl;
-      if (!readUrl) {
-        readUrl = `http://127.0.0.1:54321/storage/v1/object/sign/driver-documents/${storagePath}?token=mock_signed_token_${documentId}`;
-      } else {
-        readUrl = readUrl
-          .replace(/http:\/\/kong:8000/g, "http://127.0.0.1:54321")
-          .replace(/http:\/\/localhost:8000/g, "http://127.0.0.1:54321");
-        if (readUrl.startsWith("/")) {
-          readUrl = `http://127.0.0.1:54321${readUrl}`;
-        }
+      if (signedError || !signedData?.signedUrl) {
+        return errorResponse(
+          "STORAGE_ERROR",
+          "Failed to generate signed read URL",
+          500,
+        );
       }
 
       return jsonResponse({
-        document_id: documentId,
-        read_url: readUrl,
-        expires_at: new Date(Date.now() + 900 * 1000).toISOString(),
+        document_id: doc.id,
+        read_url: signedData.signedUrl,
+        expires_in_seconds: 900,
       });
     }
 
     // -------------------------------------------------------------
-    // Route 10: Admin Approve / Reject Driver (Section 11, 27)
+    // Route 11: Admin Approve / Reject Driver (Section 2, 4, 10)
     // -------------------------------------------------------------
     const adminApproveMatch = path.match(
       /^\/admin\/drivers\/([^\/]+)\/approve$/,
@@ -1053,18 +801,8 @@ Deno.serve(async (req: Request) => {
       const rejectionReason =
         body.rejection_reason || body.rejectionReason || body.reason || null;
 
-      // Validate Admin Profile Role
-      const { data: profileData } = await serviceClient
-        .from("profiles")
-        .select("platform_role")
-        .eq("id", userId)
-        .maybeSingle();
-
-      const role = resolvePlatformRole(profileData, user);
-      if (
-        !role ||
-        !["super_admin", "admin", "verification_agent"].includes(role)
-      ) {
+      const role = await getProfileRole(userId);
+      if (!["super_admin", "admin", "verification_agent"].includes(role)) {
         return errorResponse(
           "AUTH_ADMIN_ROLE_REQUIRED",
           "Verification agent or admin role required",
@@ -1072,10 +810,8 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if (
-        jwtAal !== "aal2" &&
-        !["super_admin", "admin", "verification_agent"].includes(role)
-      ) {
+      // Strict AAL2 check (Section 2)
+      if (jwtAal !== "aal2") {
         return errorResponse(
           "AUTH_MFA_REQUIRED",
           "AAL2 MFA is required for administrative verification",
@@ -1085,11 +821,11 @@ Deno.serve(async (req: Request) => {
 
       if (
         decision === "REJECT" &&
-        (!rejectionReason || rejectionReason.length < 3)
+        (!rejectionReason || !rejectionReason.trim())
       ) {
         return errorResponse(
           "INVALID_ARGUMENT",
-          "Rejection reason is required and must be at least 3 characters",
+          "rejection_reason is required when rejecting driver",
           400,
         );
       }
@@ -1106,6 +842,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // 404 Route Not Found
     return errorResponse(
       "NOT_FOUND",
       `Endpoint ${req.method} ${path} not found`,
@@ -1114,7 +851,7 @@ Deno.serve(async (req: Request) => {
   } catch (err: any) {
     return errorResponse(
       "INTERNAL_SERVER_ERROR",
-      "An unexpected server error occurred",
+      err?.message || "An unexpected error occurred",
       500,
     );
   }

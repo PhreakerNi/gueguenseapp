@@ -77,15 +77,25 @@ export default function DriverOnboardingRequiredScreen() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         if (asset) {
-          let mime = asset.mimeType || "application/pdf";
+          let mime = asset.mimeType;
+          if (!mime || !asset.size || asset.size <= 0) {
+            setErrorMsg(
+              "Archivo inválido: no se pudo obtener tamaño o tipo MIME.",
+            );
+            return;
+          }
           if (mime === "image/jpg") mime = "image/jpeg";
+          if (!["image/jpeg", "image/png", "application/pdf"].includes(mime)) {
+            setErrorMsg("Tipo de archivo no permitido. Solo JPG, PNG o PDF.");
+            return;
+          }
 
           setDocuments((prev) => ({
             ...prev,
             [docType]: {
               uri: asset.uri,
               name: asset.name,
-              size: asset.size ?? 1024,
+              size: asset.size,
               mimeType: mime,
               status: "LISTO",
             },
@@ -115,7 +125,7 @@ export default function DriverOnboardingRequiredScreen() {
         body: JSON.stringify({
           document_type: docType,
           mime_type: docInfo.mimeType,
-          size_bytes: docInfo.size || 1024,
+          size_bytes: docInfo.size,
         }),
       },
     );

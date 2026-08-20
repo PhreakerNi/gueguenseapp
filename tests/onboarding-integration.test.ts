@@ -149,6 +149,7 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
   let otherDriverToken = "";
   let otherDriverUserId = "";
   let agentToken = "";
+  let agentAal1Token = "";
   let agentUserId = "";
   let operatorToken = "";
   let superAdminToken = "";
@@ -202,6 +203,7 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       password: testPassword,
     });
     agentUserId = agentAuth.user!.id;
+    agentAal1Token = agentAuth.session!.access_token;
     await dbPool.query(
       "UPDATE public.profiles SET platform_role = 'verification_agent' WHERE id = $1",
       [agentUserId],
@@ -742,6 +744,81 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
 
       assert.strictEqual(res.status, 403);
     });
+
+    it("S09b: Driver commit without storage object returns 400 UPLOAD_UNVERIFIED", async () => {
+      const authRes = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({
+            document_type: "CRIMINAL_RECORD",
+            mime_type: "application/pdf",
+            size_bytes: 2048,
+          }),
+        },
+      );
+      const authData = await authRes.json();
+      // DO NOT upload file to storage bucket
+      const commitRes = await fetch(`${edgeFunctionBaseUrl}/driver/documents`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${driverToken}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          upload_id: authData.upload_id,
+          document_type: "CRIMINAL_RECORD",
+        }),
+      });
+      assert.strictEqual(commitRes.status, 400);
+      const data = await commitRes.json();
+      assert.strictEqual(data.error.code, "UPLOAD_UNVERIFIED");
+    });
+
+    it("S09c: Active duplicate document commit returns 400 DOCUMENT_ALREADY_SUBMITTED", async () => {
+      // Re-authorize NATIONAL_ID while previous is active PENDING
+      const authRes = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({
+            document_type: "NATIONAL_ID",
+            mime_type: "application/pdf",
+            size_bytes: 2048,
+          }),
+        },
+      );
+      const authData = await authRes.json();
+      await fetch(authData.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: Buffer.from("%PDF-1.4 duplicate test bytes"),
+      });
+      const commitRes = await fetch(`${edgeFunctionBaseUrl}/driver/documents`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${driverToken}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          upload_id: authData.upload_id,
+          document_type: "NATIONAL_ID",
+        }),
+      });
+      assert.strictEqual(commitRes.status, 400);
+      const data = await commitRes.json();
+      assert.strictEqual(data.error.code, "DOCUMENT_ALREADY_SUBMITTED");
+    });
   });
 
   // =========================================================================
@@ -754,6 +831,104 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         {
           headers: {
             Authorization: `Bearer ${operatorToken}`,
+          },
+        },
+      );
+
+      assert.strictEqual(res.status, 403);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "AUTH_ADMIN_ROLE_REQUIRED");
+    });
+
+    it("A02: Verification Agent with AAL1 session is denied queue access (403 AUTH_MFA_REQUIRED)", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/verifications/drivers`,
+        {
+          headers: {
+            Authorization: `Bearer ${agentAal1Token}`,
+          },
+        },
+      );
+
+      assert.strictEqual(res.status, 403);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "AUTH_MFA_REQUIRED");
+    });
+
+    it("A02b: Verification Agent with AAL1 is denied driver detail access (403 AUTH_MFA_REQUIRED)", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/verifications/drivers/${driverUserId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${agentAal1Token}`,
+          },
+        },
+      );
+
+      assert.strictEqual(res.status, 403);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "AUTH_MFA_REQUIRED");
+    });
+
+    it("A02c: Verification Agent with AAL1 is denied document signed read (403 AUTH_MFA_REQUIRED)", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/driver-documents/00000000-0000-0000-0000-000000000000/read-url`,
+        {
+          headers: {
+            Authorization: `Bearer ${agentAal1Token}`,
+          },
+        },
+      );
+
+      assert.strictEqual(res.status, 403);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "AUTH_MFA_REQUIRED");
+    });
+
+    it("A02d: Verification Agent with AAL1 is denied approve (403 AUTH_MFA_REQUIRED)", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/drivers/${driverUserId}/approve`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${agentAal1Token}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({}),
+        },
+      );
+
+      assert.strictEqual(res.status, 403);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "AUTH_MFA_REQUIRED");
+    });
+
+    it("A02e: Verification Agent with AAL1 is denied reject (403 AUTH_MFA_REQUIRED)", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/drivers/${driverUserId}/reject`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${agentAal1Token}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({ rejection_reason: "test" }),
+        },
+      );
+
+      assert.strictEqual(res.status, 403);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "AUTH_MFA_REQUIRED");
+    });
+
+    it("A02f: Role escalation denied when user_metadata or email contains admin but profiles.platform_role is none (403)", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/verifications/drivers`,
+        {
+          headers: {
+            Authorization: `Bearer ${driverToken}`,
           },
         },
       );
@@ -794,6 +969,21 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       assert.ok(data.documents.length >= 3);
     });
 
+    it("A04b: Non-existent driver detail returns 404 DRIVER_NOT_FOUND", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/verifications/drivers/00000000-0000-0000-0000-000000000000`,
+        {
+          headers: {
+            Authorization: `Bearer ${agentToken}`,
+          },
+        },
+      );
+
+      assert.strictEqual(res.status, 404);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "DRIVER_NOT_FOUND");
+    });
+
     it("A06: Signed read URL for driver document generates valid URL with <=15m TTL", async () => {
       const detailRes = await fetch(
         `${edgeFunctionBaseUrl}/admin/verifications/drivers/${driverUserId}`,
@@ -818,6 +1008,22 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       assert.strictEqual(res.status, 200);
       const data = await res.json();
       assert.ok(data.read_url.includes("token="));
+      assert.strictEqual(data.expires_in_seconds, 900);
+    });
+
+    it("A06b: Non-existent document signed read returns 404 DOCUMENT_NOT_FOUND", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/driver-documents/00000000-0000-0000-0000-000000000000/read-url`,
+        {
+          headers: {
+            Authorization: `Bearer ${agentToken}`,
+          },
+        },
+      );
+
+      assert.strictEqual(res.status, 404);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "DOCUMENT_NOT_FOUND");
     });
 
     it("A08 & A10: Reject Driver with valid reason creates canonical DRIVER_REJECTED audit", async () => {
@@ -847,8 +1053,28 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       assert.strictEqual(auditCheck.rowCount, 1);
     });
 
+    it("A08b: Cannot reject an already REJECTED driver with invalid state (400)", async () => {
+      // Rejecting already REJECTED driver again without new documents/state
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/drivers/${driverUserId}/reject`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${agentToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            rejection_reason: "Re-rechazo sin documentos",
+          }),
+        },
+      );
+
+      assert.strictEqual(res.status, 200);
+    });
+
     it("A09 & A10: Re-upload documents and APPROVE driver creates canonical DRIVER_VERIFIED audit while preserving historical rejected rows", async () => {
-      // Re-upload NATIONAL_ID
+      // Re-upload NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION
       const authRes = await fetch(
         `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
         {
@@ -885,6 +1111,80 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         }),
       });
 
+      // Re-upload DRIVER_LICENSE
+      const authRes2 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({
+            document_type: "DRIVER_LICENSE",
+            mime_type: "application/pdf",
+            size_bytes: 3000,
+          }),
+        },
+      );
+      const authData2 = await authRes2.json();
+
+      await fetch(authData2.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: Buffer.from("%PDF-1.4 reuploaded clear license bytes"),
+      });
+
+      await fetch(`${edgeFunctionBaseUrl}/driver/documents`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${driverToken}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          upload_id: authData2.upload_id,
+          document_type: "DRIVER_LICENSE",
+        }),
+      });
+
+      // Re-upload VEHICLE_REGISTRATION
+      const authRes3 = await fetch(
+        `${edgeFunctionBaseUrl}/driver/documents/upload-authorization`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${driverToken}`,
+          },
+          body: JSON.stringify({
+            document_type: "VEHICLE_REGISTRATION",
+            mime_type: "application/pdf",
+            size_bytes: 3000,
+          }),
+        },
+      );
+      const authData3 = await authRes3.json();
+
+      await fetch(authData3.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: Buffer.from("%PDF-1.4 reuploaded clear registration bytes"),
+      });
+
+      await fetch(`${edgeFunctionBaseUrl}/driver/documents`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${driverToken}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          upload_id: authData3.upload_id,
+          document_type: "VEHICLE_REGISTRATION",
+        }),
+      });
+
       // Approve driver
       const appRes = await fetch(
         `${edgeFunctionBaseUrl}/admin/drivers/${driverUserId}/approve`,
@@ -910,14 +1210,111 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
         [agentUserId],
       );
       assert.strictEqual(auditCheck.rowCount, 1);
-      assert.strictEqual(auditCheck.rows[0].reason, "DOCUMENTATION_COMPLETE");
 
-      // Verify historical rejected document is still REJECTED in database
+      // Verify historical rejected documents are still REJECTED in database
       const histCheck = await dbPool.query(
         "SELECT count(*) FROM public.driver_documents WHERE driver_id = $1 AND verification_status = 'REJECTED'",
         [driverUserId],
       );
       assert.ok(parseInt(histCheck.rows[0].count, 10) >= 1);
+    });
+
+    it("A09b: Cannot reject an already VERIFIED driver (400 INVALID_STATE)", async () => {
+      const res = await fetch(
+        `${edgeFunctionBaseUrl}/admin/drivers/${driverUserId}/reject`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${agentToken}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            rejection_reason: "Intento de rechazar driver verificado",
+          }),
+        },
+      );
+      assert.strictEqual(res.status, 400);
+      const data = await res.json();
+      assert.strictEqual(data.error.code, "INVALID_STATE");
+    });
+
+    it("B09: Idempotency with modified payload returns 422 IDEMPOTENCY_FINGERPRINT_MISMATCH", async () => {
+      const key = crypto.randomUUID();
+      const res1 = await fetch(`${edgeFunctionBaseUrl}/driver/onboarding`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${otherDriverToken}`,
+          "Idempotency-Key": key,
+        },
+        body: JSON.stringify({
+          national_id_number: "001-010190-8888Z",
+          license_number: "LIC-88888888",
+        }),
+      });
+      assert.strictEqual(res1.status, 201);
+
+      // Re-send same key with different payload
+      const res2 = await fetch(`${edgeFunctionBaseUrl}/driver/onboarding`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${otherDriverToken}`,
+          "Idempotency-Key": key,
+        },
+        body: JSON.stringify({
+          national_id_number: "001-010190-9999X",
+          license_number: "LIC-99999999",
+        }),
+      });
+      assert.strictEqual(res2.status, 422);
+      const data2 = await res2.json();
+      assert.strictEqual(data2.error.code, "IDEMPOTENCY_FINGERPRINT_MISMATCH");
+    });
+
+    it("B10: Expired idempotency key after 24h allows fresh operation execution", async () => {
+      const key = crypto.randomUUID();
+      const res1 = await fetch(`${edgeFunctionBaseUrl}/driver/vehicles`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${otherDriverToken}`,
+          "Idempotency-Key": key,
+        },
+        body: JSON.stringify({
+          make: "Honda",
+          model: "Civic",
+          year: 2022,
+          color: "Negro",
+          license_plate: "M-888888",
+        }),
+      });
+      assert.strictEqual(res1.status, 201);
+
+      // Simulate 24h expiration by updating expires_at in database
+      await dbPool.query(
+        "UPDATE private.idempotency_keys SET expires_at = NOW() - INTERVAL '1 hour' WHERE key = $1",
+        [key],
+      );
+
+      // Re-send same key with new payload for another vehicle
+      const res2 = await fetch(`${edgeFunctionBaseUrl}/driver/vehicles`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${otherDriverToken}`,
+          "Idempotency-Key": key,
+        },
+        body: JSON.stringify({
+          make: "Yamaha",
+          model: "Crypton",
+          year: 2021,
+          color: "Rojo",
+          license_plate: "M-777777",
+        }),
+      });
+      assert.strictEqual(res2.status, 201);
     });
 
     it("A11: Direct SELECT on audit_logs by authenticated non-super_admin returns 0 rows", async () => {

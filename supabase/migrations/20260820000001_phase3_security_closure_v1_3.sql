@@ -1,0 +1,512 @@
+-- ============================================================================
+-- Migration: 20260820000001_phase3_security_closure_v1_3.sql
+-- Description: Phase 3 Security & Real Evidence Closure v1.3
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. Idempotency Engine with Enforced 24h Expiry & Atomic Handling
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.execute_idempotent_operation(
+    p_actor_user_id UUID,
+    p_scope TEXT,
+    p_key TEXT,
+    p_request_fingerprint TEXT,
+    p_operation_fn TEXT,
+    p_operation_params JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_lock_key BIGINT;
+    v_record private.idempotency_keys%ROWTYPE;
+    v_result JSONB;
+    v_status INT := 200;
+    v_ttl_interval INTERVAL := INTERVAL '24 hours';
+BEGIN
+    IF p_actor_user_id IS NULL THEN
+        RAISE EXCEPTION 'AUTH_REQUIRED: Actor user ID is required';
+    END IF;
+
+    IF p_key IS NULL OR p_key !~* '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: Idempotency key must be a valid UUID v4';
+    END IF;
+
+    -- Generate consistent 64-bit advisory lock key from scope + key
+    v_lock_key := ('x' || substr(md5(p_scope || ':' || p_key), 1, 16))::bit(64)::bigint;
+    PERFORM pg_advisory_xact_lock(v_lock_key);
+
+    -- Check if record exists
+    SELECT * INTO v_record
+    FROM private.idempotency_keys
+    WHERE scope = p_scope AND key = p_key;
+
+    IF v_record.id IS NOT NULL THEN
+        -- If expired (expires_at <= now()), purge expired record and proceed as fresh operation (Section 15)
+        IF v_record.expires_at <= pg_catalog.clock_timestamp() THEN
+            DELETE FROM private.idempotency_keys WHERE id = v_record.id;
+            v_record := NULL;
+        ELSE
+            -- Validate fingerprint
+            IF v_record.request_fingerprint <> p_request_fingerprint THEN
+                RAISE EXCEPTION 'IDEMPOTENCY_FINGERPRINT_MISMATCH: Request payload fingerprint does not match original request';
+            END IF;
+
+            RETURN jsonb_build_object(
+                'cached', true,
+                'status', v_record.response_status,
+                'body', v_record.response_body
+            );
+        END IF;
+    END IF;
+
+    -- Execute target operation dynamically
+    IF p_operation_fn = 'create_business' THEN
+        v_result := public.create_business(
+            p_actor_user_id,
+            p_operation_params->>'legal_name',
+            p_operation_params->>'tax_id',
+            p_operation_params->>'brand_name'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn = 'create_business_location' THEN
+        v_result := public.create_business_location(
+            p_actor_user_id,
+            (p_operation_params->>'business_id')::uuid,
+            p_operation_params->>'name',
+            p_operation_params->>'address_line_1',
+            (p_operation_params->>'latitude')::numeric,
+            (p_operation_params->>'longitude')::numeric,
+            p_operation_params->>'phone',
+            p_operation_params->>'pickup_instructions'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn = 'create_business_member' THEN
+        v_result := public.create_business_member(
+            p_actor_user_id,
+            (p_operation_params->>'business_id')::uuid,
+            (p_operation_params->>'target_user_id')::uuid,
+            p_operation_params->>'role',
+            CASE 
+                WHEN p_operation_params->'authorized_location_ids' IS NOT NULL AND jsonb_typeof(p_operation_params->'authorized_location_ids') = 'array' 
+                THEN ARRAY(SELECT jsonb_array_elements_text(p_operation_params->'authorized_location_ids')::uuid)
+                ELSE NULL
+            END
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn = 'create_driver_profile' THEN
+        v_result := public.create_driver_profile(
+            p_actor_user_id,
+            p_operation_params->>'national_id_number',
+            p_operation_params->>'license_number'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn = 'create_driver_vehicle' THEN
+        v_result := public.create_driver_vehicle(
+            p_actor_user_id,
+            p_operation_params->>'make',
+            p_operation_params->>'model',
+            (p_operation_params->>'year')::int,
+            p_operation_params->>'color',
+            p_operation_params->>'license_plate'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn = 'commit_driver_document' THEN
+        v_result := public.commit_driver_document(
+            p_actor_user_id,
+            (p_operation_params->>'upload_id')::uuid,
+            p_operation_params->>'document_type'
+        );
+        v_status := 200;
+
+    ELSIF p_operation_fn = 'admin_verify_driver' THEN
+        v_result := public.admin_verify_driver(
+            p_actor_user_id,
+            (p_operation_params->>'driver_id')::uuid,
+            p_operation_params->>'decision',
+            p_operation_params->>'rejection_reason',
+            p_operation_params->>'actor_aal'
+        );
+        v_status := 200;
+
+    ELSE
+        RAISE EXCEPTION 'INVALID_ARGUMENT: Unknown operation function %', p_operation_fn;
+    END IF;
+
+    -- Store idempotent response with 24h TTL
+    INSERT INTO private.idempotency_keys (
+        scope,
+        key,
+        actor_user_id,
+        actor_type,
+        request_fingerprint,
+        response_status,
+        response_body,
+        expires_at
+    ) VALUES (
+        p_scope,
+        p_key,
+        p_actor_user_id,
+        'USER',
+        p_request_fingerprint,
+        v_status,
+        v_result,
+        pg_catalog.clock_timestamp() + v_ttl_interval
+    );
+
+    RETURN jsonb_build_object(
+        'cached', false,
+        'status', v_status,
+        'body', v_result
+    );
+END;
+$$;
+
+
+-- ----------------------------------------------------------------------------
+-- 2. Driver Document Commit with Real Storage Verification
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.commit_driver_document(
+    p_actor_id UUID,
+    p_upload_id UUID,
+    p_document_type TEXT,
+    p_file_size BIGINT DEFAULT NULL,
+    p_mime_type TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_auth_record private.driver_document_upload_authorizations%ROWTYPE;
+    v_clean_type TEXT;
+    v_storage_obj RECORD;
+    v_obj_size BIGINT;
+    v_obj_mime TEXT;
+    v_doc_id UUID;
+    v_active_exists BOOLEAN;
+BEGIN
+    v_clean_type := pg_catalog.upper(pg_catalog.btrim(p_document_type));
+    IF v_clean_type NOT IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION', 'CRIMINAL_RECORD', 'INSURANCE') THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: Invalid document_type %', p_document_type;
+    END IF;
+
+    -- 1. Query upload authorization in private schema
+    SELECT * INTO v_auth_record
+    FROM private.driver_document_upload_authorizations
+    WHERE upload_id = p_upload_id;
+
+    IF v_auth_record.id IS NULL THEN
+        RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Upload authorization not found';
+    END IF;
+
+    -- 2. Validate actor ownership
+    IF v_auth_record.driver_id <> p_actor_id THEN
+        RAISE EXCEPTION 'AUTH_FORBIDDEN: Upload authorization belongs to another driver';
+    END IF;
+
+    -- 3. Validate document type matches authorization
+    IF v_auth_record.document_type <> v_clean_type THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: Document type does not match authorization';
+    END IF;
+
+    -- 4. Check Güegüense 15m authorization window expiration
+    IF v_auth_record.expires_at < pg_catalog.clock_timestamp() THEN
+        RAISE EXCEPTION 'EXPIRED_UPLOAD_REF: Upload authorization window has expired';
+    END IF;
+
+    -- 5. Check if already committed
+    IF v_auth_record.committed_at IS NOT NULL THEN
+        RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Upload authorization has already been committed';
+    END IF;
+
+    -- 6. Verify real object existence and metadata in storage.objects
+    SELECT name, bucket_id, metadata
+    INTO v_storage_obj
+    FROM storage.objects
+    WHERE bucket_id = 'driver-documents'
+      AND name = v_auth_record.storage_path;
+
+    IF v_storage_obj.name IS NULL THEN
+        RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Uploaded file not found in storage bucket';
+    END IF;
+
+    -- Extract size and mimetype from storage.objects.metadata
+    v_obj_size := COALESCE(
+        (v_storage_obj.metadata->>'size')::bigint,
+        (v_storage_obj.metadata->>'content-length')::bigint
+    );
+    v_obj_mime := COALESCE(
+        v_storage_obj.metadata->>'mimetype',
+        v_storage_obj.metadata->>'contentType',
+        v_storage_obj.metadata->>'content-type'
+    );
+
+    IF v_obj_size IS NULL OR v_obj_mime IS NULL THEN
+        RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Cannot verify uploaded file metadata';
+    END IF;
+
+    -- Validate actual size: 1 <= size <= max_size <= 10MB
+    IF v_obj_size < 1 OR v_obj_size > v_auth_record.max_size_bytes OR v_obj_size > 10485760 THEN
+        RAISE EXCEPTION 'INVALID_FILE_SIZE: Actual file size % does not match authorization', v_obj_size;
+    END IF;
+
+    -- Validate actual MIME: matches authorized MIME exactly
+    IF pg_catalog.lower(v_obj_mime) <> pg_catalog.lower(v_auth_record.mime_type) THEN
+        RAISE EXCEPTION 'INVALID_MIME_TYPE: Actual file MIME type % does not match authorization %', v_obj_mime, v_auth_record.mime_type;
+    END IF;
+
+    -- 7. Check if an active document of the same type already exists (PENDING, UNDER_REVIEW, VERIFIED)
+    SELECT EXISTS (
+        SELECT 1 FROM public.driver_documents
+        WHERE driver_id = p_actor_id
+          AND document_type = v_clean_type
+          AND verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED')
+    ) INTO v_active_exists;
+
+    IF v_active_exists THEN
+        RAISE EXCEPTION 'DOCUMENT_ALREADY_SUBMITTED: Active document already submitted for type %', v_clean_type;
+    END IF;
+
+    -- 8. Mark authorization committed
+    UPDATE private.driver_document_upload_authorizations
+    SET committed_at = pg_catalog.clock_timestamp()
+    WHERE id = v_auth_record.id;
+
+    -- 9. Insert new driver document (historical rejected/expired rows remain untouched!)
+    INSERT INTO public.driver_documents (
+        driver_id,
+        document_type,
+        storage_path,
+        file_size_bytes,
+        mime_type,
+        verification_status,
+        rejection_reason
+    ) VALUES (
+        p_actor_id,
+        v_clean_type,
+        v_auth_record.storage_path,
+        v_obj_size,
+        v_obj_mime,
+        'PENDING',
+        NULL
+    )
+    RETURNING id INTO v_doc_id;
+
+    RETURN jsonb_build_object(
+        'document_id', v_doc_id,
+        'driver_id', p_actor_id,
+        'document_type', v_clean_type,
+        'storage_path', v_auth_record.storage_path,
+        'file_size_bytes', v_obj_size,
+        'mime_type', v_obj_mime,
+        'verification_status', 'PENDING'
+    );
+END;
+$$;
+
+
+-- ----------------------------------------------------------------------------
+-- 3. Strict Admin Driver Verification (Approve / Reject)
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.admin_verify_driver(
+    p_actor_id UUID,
+    p_driver_id UUID,
+    p_decision TEXT,
+    p_rejection_reason TEXT DEFAULT NULL,
+    p_actor_aal TEXT DEFAULT 'aal1'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_actor_role TEXT;
+    v_current_ver_status TEXT;
+    v_current_acc_status TEXT;
+    v_clean_decision TEXT;
+    v_vehicle_count INT;
+    v_mandatory_doc_count INT;
+BEGIN
+    -- 1. Validate actor role from public.profiles ONLY (Section 4)
+    SELECT platform_role INTO v_actor_role
+    FROM public.profiles
+    WHERE id = p_actor_id;
+
+    IF v_actor_role IS NULL OR v_actor_role NOT IN ('super_admin', 'admin', 'verification_agent') THEN
+        RAISE EXCEPTION 'AUTH_ADMIN_ROLE_REQUIRED: Only verification_agent, admin or super_admin can verify drivers';
+    END IF;
+
+    -- 2. Validate actor AAL2 strictly (Section 2)
+    IF p_actor_aal IS NULL OR p_actor_aal <> 'aal2' THEN
+        RAISE EXCEPTION 'AUTH_MFA_REQUIRED: AAL2 MFA is required for administrative verification';
+    END IF;
+
+    -- 3. Check Driver existence
+    SELECT verification_status, account_status
+    INTO v_current_ver_status, v_current_acc_status
+    FROM public.drivers
+    WHERE id = p_driver_id;
+
+    IF v_current_ver_status IS NULL THEN
+        RAISE EXCEPTION 'DRIVER_NOT_FOUND: Driver % not found', p_driver_id;
+    END IF;
+
+    v_clean_decision := pg_catalog.upper(pg_catalog.btrim(p_decision));
+    IF v_clean_decision NOT IN ('APPROVE', 'REJECT') THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: Decision must be APPROVE or REJECT';
+    END IF;
+
+    IF v_clean_decision = 'APPROVE' THEN
+        -- Driver must be in PENDING or UNDER_REVIEW
+        IF v_current_ver_status NOT IN ('PENDING', 'UNDER_REVIEW') THEN
+            RAISE EXCEPTION 'INVALID_STATE: Driver verification status is %', v_current_ver_status;
+        END IF;
+
+        -- Account status must be REGISTERED
+        IF v_current_acc_status <> 'REGISTERED' THEN
+            RAISE EXCEPTION 'INVALID_STATE: Driver account status must be REGISTERED, currently %', v_current_acc_status;
+        END IF;
+
+        -- Check vehicle exists
+        SELECT count(*) INTO v_vehicle_count
+        FROM public.vehicles
+        WHERE driver_id = p_driver_id;
+
+        IF v_vehicle_count = 0 THEN
+            RAISE EXCEPTION 'VEHICLE_MISSING: Driver must have at least one registered vehicle to be approved';
+        END IF;
+
+        -- Check all 3 mandatory documents exist with status PENDING or UNDER_REVIEW (REJECTED and EXPIRED DO NOT COUNT!)
+        SELECT count(DISTINCT document_type) INTO v_mandatory_doc_count
+        FROM public.driver_documents
+        WHERE driver_id = p_driver_id
+          AND document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION')
+          AND verification_status IN ('PENDING', 'UNDER_REVIEW');
+
+        IF v_mandatory_doc_count < 3 THEN
+            RAISE EXCEPTION 'DOCUMENTATION_INCOMPLETE: Driver must have current PENDING/UNDER_REVIEW documents for NATIONAL_ID, DRIVER_LICENSE, and VEHICLE_REGISTRATION';
+        END IF;
+
+        -- Update ONLY current pending/under_review documents to VERIFIED (historical rejected rows remain untouched!)
+        UPDATE public.driver_documents
+        SET verification_status = 'VERIFIED',
+            rejection_reason = NULL,
+            verified_at = pg_catalog.clock_timestamp()
+        WHERE driver_id = p_driver_id
+          AND verification_status IN ('PENDING', 'UNDER_REVIEW');
+
+        -- Update driver status
+        UPDATE public.drivers
+        SET verification_status = 'VERIFIED',
+            account_status = 'ACTIVE',
+            verified_at = pg_catalog.clock_timestamp(),
+            rejection_reason = NULL,
+            updated_at = pg_catalog.clock_timestamp()
+        WHERE id = p_driver_id;
+
+        -- Upsert driver presence to OFFLINE
+        INSERT INTO public.driver_presence (
+            driver_id,
+            status,
+            updated_at
+        ) VALUES (
+            p_driver_id,
+            'OFFLINE',
+            pg_catalog.clock_timestamp()
+        )
+        ON CONFLICT (driver_id) DO UPDATE
+        SET status = 'OFFLINE',
+            updated_at = pg_catalog.clock_timestamp();
+
+        -- Insert audit log
+        INSERT INTO public.audit_logs (
+            admin_user_id,
+            action,
+            target_type,
+            target_id,
+            payload
+        ) VALUES (
+            p_actor_id,
+            'DRIVER_VERIFIED',
+            'driver',
+            p_driver_id,
+            jsonb_build_object(
+                'decision', 'APPROVE',
+                'verified_at', pg_catalog.clock_timestamp()
+            )
+        );
+
+        RETURN jsonb_build_object(
+            'driver_id', p_driver_id,
+            'verification_status', 'VERIFIED',
+            'account_status', 'ACTIVE',
+            'presence_status', 'OFFLINE'
+        );
+
+    ELSE -- REJECT
+        IF p_rejection_reason IS NULL OR pg_catalog.btrim(p_rejection_reason) = '' THEN
+            RAISE EXCEPTION 'INVALID_ARGUMENT: rejection_reason is required when rejecting driver';
+        END IF;
+
+        -- Rejecting already VERIFIED driver is denied
+        IF v_current_ver_status = 'VERIFIED' THEN
+            RAISE EXCEPTION 'INVALID_STATE: Cannot reject already verified driver';
+        END IF;
+
+        -- Update current pending/under_review documents to REJECTED (historical rows remain untouched!)
+        UPDATE public.driver_documents
+        SET verification_status = 'REJECTED',
+            rejection_reason = p_rejection_reason,
+            verified_at = pg_catalog.clock_timestamp()
+        WHERE driver_id = p_driver_id
+          AND verification_status IN ('PENDING', 'UNDER_REVIEW');
+
+        -- Update driver status
+        UPDATE public.drivers
+        SET verification_status = 'REJECTED',
+            account_status = 'REGISTERED',
+            rejection_reason = p_rejection_reason,
+            updated_at = pg_catalog.clock_timestamp()
+        WHERE id = p_driver_id;
+
+        -- Insert audit log
+        INSERT INTO public.audit_logs (
+            admin_user_id,
+            action,
+            target_type,
+            target_id,
+            payload
+        ) VALUES (
+            p_actor_id,
+            'DRIVER_REJECTED',
+            'driver',
+            p_driver_id,
+            jsonb_build_object(
+                'decision', 'REJECT',
+                'rejection_reason', p_rejection_reason,
+                'rejected_at', pg_catalog.clock_timestamp()
+            )
+        );
+
+        RETURN jsonb_build_object(
+            'driver_id', p_driver_id,
+            'verification_status', 'REJECTED',
+            'account_status', 'REGISTERED',
+            'rejection_reason', p_rejection_reason
+        );
+    END IF;
+END;
+$$;

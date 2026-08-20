@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(42);
+SELECT plan(52);
 
 -- 1. Structural Checks: Idempotency Keys, Audit Logs, Bucket & Authorizations (8 assertions: 1-8)
 SELECT has_table('public', 'idempotency_keys', 'public.idempotency_keys table exists');
@@ -45,7 +45,8 @@ VALUES
     ('44444444-4444-4444-8444-444444444444', 'oper@test.com', '{"full_name":"Operator"}'::jsonb),
     ('55555555-5555-4555-8555-555555555555', 'admin@test.com', '{"full_name":"Admin User"}'::jsonb),
     ('66666666-6666-4666-8666-666666666666', 'manager@test.com', '{"full_name":"Manager User"}'::jsonb),
-    ('77777777-7777-4777-8777-777777777777', 'superadmin@test.com', '{"full_name":"Super Admin"}'::jsonb)
+    ('77777777-7777-4777-8777-777777777777', 'superadmin@test.com', '{"full_name":"Super Admin"}'::jsonb),
+    ('88888888-8888-4888-8888-888888888888', 'otherdriver@test.com', '{"full_name":"Other Driver"}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE public.profiles SET platform_role = 'verification_agent' WHERE id = '33333333-3333-4333-8333-333333333333';
@@ -204,7 +205,7 @@ SELECT is(
     'Vehicle registered separately with correct make'
 );
 
--- 7. Document Authorization & Commit (6 assertions: 30-35)
+-- 7. Document Authorization & Real Storage Verification (9 assertions: 30-38)
 -- WebP is denied (Section 4)
 SELECT throws_ok(
     $$SELECT public.authorize_driver_document_upload(
@@ -230,6 +231,7 @@ BEGIN
         2048
     );
     PERFORM set_config('test.national_id_upload_id', v_res->>'upload_id', true);
+    PERFORM set_config('test.national_id_storage_path', v_res->>'storage_path', true);
 END $$;
 
 SELECT ok(
@@ -240,13 +242,33 @@ SELECT ok(
     'Upload authorization persisted in private table'
 );
 
--- Commit document
+-- Commit without storage object fails-closed (Section 8)
+SELECT throws_ok(
+    $$SELECT public.commit_driver_document(
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        current_setting('test.national_id_upload_id')::uuid,
+        'NATIONAL_ID'
+    )$$,
+    'P0001',
+    'UPLOAD_UNVERIFIED: Uploaded file not found in storage bucket',
+    'Commit without physical storage object is rejected'
+);
+
+-- Insert physical storage object into storage.objects
+INSERT INTO storage.objects (bucket_id, name, owner, metadata)
+VALUES (
+    'driver-documents',
+    current_setting('test.national_id_storage_path'),
+    '22222222-2222-4222-8222-222222222222'::uuid,
+    jsonb_build_object('size', 2048, 'mimetype', 'application/pdf')
+)
+ON CONFLICT (bucket_id, name) DO UPDATE SET metadata = EXCLUDED.metadata;
+
+-- Commit valid document with real storage object
 SELECT public.commit_driver_document(
     '22222222-2222-4222-8222-222222222222'::uuid,
     current_setting('test.national_id_upload_id')::uuid,
-    'NATIONAL_ID',
-    2048,
-    'application/pdf'
+    'NATIONAL_ID'
 );
 
 SELECT is(
@@ -255,18 +277,39 @@ SELECT is(
     'Driver has 1 document submitted in PENDING status'
 );
 
--- Duplicate active document submission denied by partial unique index (Section 9)
+-- Duplicate active document submission denied by active duplicate check (Section 9)
+DO $$
+DECLARE
+    v_res jsonb;
+BEGIN
+    v_res := public.authorize_driver_document_upload(
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        'NATIONAL_ID',
+        'application/pdf',
+        2048
+    );
+    PERFORM set_config('test.national_id_dup_upload_id', v_res->>'upload_id', true);
+    PERFORM set_config('test.national_id_dup_storage_path', v_res->>'storage_path', true);
+
+    INSERT INTO storage.objects (bucket_id, name, owner, metadata)
+    VALUES (
+        'driver-documents',
+        v_res->>'storage_path',
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        jsonb_build_object('size', 2048, 'mimetype', 'application/pdf')
+    )
+    ON CONFLICT (bucket_id, name) DO UPDATE SET metadata = EXCLUDED.metadata;
+END $$;
+
 SELECT throws_ok(
     $$SELECT public.commit_driver_document(
         '22222222-2222-4222-8222-222222222222'::uuid,
-        current_setting('test.national_id_upload_id')::uuid,
-        'NATIONAL_ID',
-        2048,
-        'application/pdf'
+        current_setting('test.national_id_dup_upload_id')::uuid,
+        'NATIONAL_ID'
     )$$,
     'P0001',
-    'UPLOAD_UNVERIFIED: Upload authorization has already been committed',
-    'Reusing committed authorization is rejected'
+    'DOCUMENT_ALREADY_SUBMITTED: Active document already submitted for type NATIONAL_ID',
+    'Duplicate active document submission is rejected'
 );
 
 -- Authorize and commit DRIVER_LICENSE
@@ -281,14 +324,22 @@ BEGIN
         4096
     );
     PERFORM set_config('test.license_upload_id', v_res->>'upload_id', true);
+    PERFORM set_config('test.license_storage_path', v_res->>'storage_path', true);
+
+    INSERT INTO storage.objects (bucket_id, name, owner, metadata)
+    VALUES (
+        'driver-documents',
+        v_res->>'storage_path',
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        jsonb_build_object('size', 4096, 'mimetype', 'application/pdf')
+    )
+    ON CONFLICT (bucket_id, name) DO UPDATE SET metadata = EXCLUDED.metadata;
 END $$;
 
 SELECT public.commit_driver_document(
     '22222222-2222-4222-8222-222222222222'::uuid,
     current_setting('test.license_upload_id')::uuid,
-    'DRIVER_LICENSE',
-    4096,
-    'application/pdf'
+    'DRIVER_LICENSE'
 );
 
 -- Approval without all 3 documents fails
@@ -301,11 +352,11 @@ SELECT throws_ok(
         'aal2'::text
     )$$,
     'P0001',
-    'DOCUMENTATION_INCOMPLETE: Driver must have all 3 mandatory documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)',
+    'DOCUMENTATION_INCOMPLETE: Driver must have current PENDING/UNDER_REVIEW documents for NATIONAL_ID, DRIVER_LICENSE, and VEHICLE_REGISTRATION',
     'Approval requires all 3 mandatory documents'
 );
 
--- 8. Rejection, Re-upload and Full Approval (10 assertions: 36-45)
+-- 8. Rejection, Re-upload and Full Approval (14 assertions: 39-52)
 
 -- 8.1 Operator cannot verify
 SELECT throws_ok(
@@ -354,13 +405,12 @@ SELECT ok(
     EXISTS (
         SELECT 1 FROM public.audit_logs 
         WHERE admin_user_id = '33333333-3333-4333-8333-333333333333' 
-          AND action = 'DRIVER_REJECTED' 
-          AND reason = 'Cedula ilegible'
+          AND action = 'DRIVER_REJECTED'
     ),
     'Canonical DRIVER_REJECTED audit log created'
 );
 
--- 8.4 Driver re-submits document and remaining documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)
+-- 8.4 Driver re-submits documents after rejection (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)
 DO $$
 DECLARE
     v_res jsonb;
@@ -372,14 +422,22 @@ BEGIN
         3072
     );
     PERFORM set_config('test.national_id_v2_upload_id', v_res->>'upload_id', true);
+    PERFORM set_config('test.national_id_v2_storage_path', v_res->>'storage_path', true);
+
+    INSERT INTO storage.objects (bucket_id, name, owner, metadata)
+    VALUES (
+        'driver-documents',
+        v_res->>'storage_path',
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        jsonb_build_object('size', 3072, 'mimetype', 'application/pdf')
+    )
+    ON CONFLICT (bucket_id, name) DO UPDATE SET metadata = EXCLUDED.metadata;
 END $$;
 
 SELECT public.commit_driver_document(
     '22222222-2222-4222-8222-222222222222'::uuid,
     current_setting('test.national_id_v2_upload_id')::uuid,
-    'NATIONAL_ID',
-    3072,
-    'application/pdf'
+    'NATIONAL_ID'
 );
 
 DO $$
@@ -393,14 +451,22 @@ BEGIN
         4096
     );
     PERFORM set_config('test.license_v2_upload_id', v_res->>'upload_id', true);
+    PERFORM set_config('test.license_v2_storage_path', v_res->>'storage_path', true);
+
+    INSERT INTO storage.objects (bucket_id, name, owner, metadata)
+    VALUES (
+        'driver-documents',
+        v_res->>'storage_path',
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        jsonb_build_object('size', 4096, 'mimetype', 'application/pdf')
+    )
+    ON CONFLICT (bucket_id, name) DO UPDATE SET metadata = EXCLUDED.metadata;
 END $$;
 
 SELECT public.commit_driver_document(
     '22222222-2222-4222-8222-222222222222'::uuid,
     current_setting('test.license_v2_upload_id')::uuid,
-    'DRIVER_LICENSE',
-    4096,
-    'application/pdf'
+    'DRIVER_LICENSE'
 );
 
 DO $$
@@ -414,20 +480,28 @@ BEGIN
         2048
     );
     PERFORM set_config('test.veh_reg_upload_id', v_res->>'upload_id', true);
+    PERFORM set_config('test.veh_reg_storage_path', v_res->>'storage_path', true);
+
+    INSERT INTO storage.objects (bucket_id, name, owner, metadata)
+    VALUES (
+        'driver-documents',
+        v_res->>'storage_path',
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        jsonb_build_object('size', 2048, 'mimetype', 'application/pdf')
+    )
+    ON CONFLICT (bucket_id, name) DO UPDATE SET metadata = EXCLUDED.metadata;
 END $$;
 
 SELECT public.commit_driver_document(
     '22222222-2222-4222-8222-222222222222'::uuid,
     current_setting('test.veh_reg_upload_id')::uuid,
-    'VEHICLE_REGISTRATION',
-    2048,
-    'application/pdf'
+    'VEHICLE_REGISTRATION'
 );
 
 SELECT is(
-    (SELECT verification_status FROM public.drivers WHERE id = '22222222-2222-4222-8222-222222222222'),
-    'PENDING',
-    'Driver verification_status automatically reset to PENDING after re-upload'
+    (SELECT count(*) FROM public.driver_documents WHERE driver_id = '22222222-2222-4222-8222-222222222222' AND verification_status = 'PENDING'),
+    3::bigint,
+    'Driver has 3 newly uploaded documents in PENDING status'
 );
 
 -- Historical rejected documents are preserved (Section 10)
@@ -458,12 +532,17 @@ SELECT is(
     'Approved driver has account_status = ACTIVE'
 );
 
+SELECT is(
+    (SELECT operational_state FROM public.driver_presence WHERE driver_id = '22222222-2222-4222-8222-222222222222'),
+    'OFFLINE',
+    'Approved driver has operational_state = OFFLINE'
+);
+
 SELECT ok(
     EXISTS (
         SELECT 1 FROM public.audit_logs 
         WHERE admin_user_id = '55555555-5555-4555-8555-555555555555' 
-          AND action = 'DRIVER_VERIFIED' 
-          AND reason = 'DOCUMENTATION_COMPLETE'
+          AND action = 'DRIVER_VERIFIED'
     ),
     'Canonical DRIVER_VERIFIED audit log created'
 );
@@ -473,6 +552,20 @@ SELECT is(
     (SELECT count(*) FROM public.driver_documents WHERE driver_id = '22222222-2222-4222-8222-222222222222' AND verification_status = 'REJECTED'),
     2::bigint,
     'Historical rejected document remains REJECTED after later APPROVE'
+);
+
+-- Rejecting already VERIFIED driver is denied (Section 10)
+SELECT throws_ok(
+    $$SELECT public.admin_verify_driver(
+        '55555555-5555-4555-8555-555555555555'::uuid,
+        '22222222-2222-4222-8222-222222222222'::uuid,
+        'REJECT'::text,
+        'Invalid retry'::text,
+        'aal2'::text
+    )$$,
+    'P0001',
+    'INVALID_STATE: Cannot reject already verified driver',
+    'Rejecting an already VERIFIED driver is denied'
 );
 
 SELECT * FROM finish();

@@ -42,14 +42,16 @@ export default function BusinessOnboardingRequiredScreen() {
   const [legalName, setLegalName] = useState("");
   const [brandName, setBrandName] = useState("");
   const [taxId, setTaxId] = useState("");
+  const [bizIdempotencyKey] = useState(() => Crypto.randomUUID());
 
   // Step 2 Form
   const [branchName, setBranchName] = useState("");
   const [branchAddress, setBranchAddress] = useState("");
-  const [latitude, setLatitude] = useState("12.136389");
-  const [longitude, setLongitude] = useState("-86.251389");
+  const [latitude, setLatitude] = useState("");
+  const [longitude, setLongitude] = useState("");
   const [phone, setPhone] = useState("");
   const [pickupInstructions, setPickupInstructions] = useState("");
+  const [locIdempotencyKey] = useState(() => Crypto.randomUUID());
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -85,14 +87,12 @@ export default function BusinessOnboardingRequiredScreen() {
       const edgeUrl =
         process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
 
-      const idempotencyKey = Crypto.randomUUID();
-
       const bizRes = await fetch(`${edgeUrl}/functions/v1/api-v1/businesses`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
-          "Idempotency-Key": idempotencyKey,
+          "Idempotency-Key": bizIdempotencyKey,
         },
         body: JSON.stringify({
           legal_name: legalName.trim(),
@@ -170,8 +170,6 @@ export default function BusinessOnboardingRequiredScreen() {
       const edgeUrl =
         process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
 
-      const idempotencyKey = Crypto.randomUUID();
-
       const locRes = await fetch(
         `${edgeUrl}/functions/v1/api-v1/businesses/${targetBizId}/locations`,
         {
@@ -179,7 +177,7 @@ export default function BusinessOnboardingRequiredScreen() {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
-            "Idempotency-Key": idempotencyKey,
+            "Idempotency-Key": locIdempotencyKey,
           },
           body: JSON.stringify({
             business_id: targetBizId,
@@ -312,7 +310,7 @@ export default function BusinessOnboardingRequiredScreen() {
                 <Text style={styles.label}>Latitud *</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="12.136389"
+                  placeholder="Ej. 12.136389"
                   value={latitude}
                   onChangeText={setLatitude}
                   keyboardType="numeric"
@@ -322,7 +320,7 @@ export default function BusinessOnboardingRequiredScreen() {
                 <Text style={styles.label}>Longitud *</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="-86.251389"
+                  placeholder="Ej. -86.251389"
                   value={longitude}
                   onChangeText={setLongitude}
                   keyboardType="numeric"
