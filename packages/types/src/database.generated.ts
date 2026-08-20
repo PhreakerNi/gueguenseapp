@@ -12,33 +12,27 @@ export type Database = {
       audit_logs: {
         Row: {
           action: string
-          actor_id: string | null
+          admin_user_id: string
           created_at: string
-          entity_id: string
-          entity_type: string
-          id: string
-          metadata: Json
-          reason: string | null
+          id: number
+          ip_address: string | null
+          reason: string
         }
         Insert: {
           action: string
-          actor_id?: string | null
+          admin_user_id: string
           created_at?: string
-          entity_id: string
-          entity_type: string
-          id?: string
-          metadata?: Json
-          reason?: string | null
+          id?: never
+          ip_address?: string | null
+          reason: string
         }
         Update: {
           action?: string
-          actor_id?: string | null
+          admin_user_id?: string
           created_at?: string
-          entity_id?: string
-          entity_type?: string
-          id?: string
-          metadata?: Json
-          reason?: string | null
+          id?: never
+          ip_address?: string | null
+          reason?: string
         }
         Relationships: []
       }
@@ -289,34 +283,43 @@ export type Database = {
       }
       idempotency_keys: {
         Row: {
+          actor_type: string
+          actor_user_id: string | null
           created_at: string
-          endpoint: string
+          expires_at: string
+          external_actor_key: string | null
+          id: string
           key: string
-          locked_at: string
-          request_hash: string
-          response_body: Json | null
-          response_status: number | null
-          user_id: string
+          request_fingerprint: string
+          response_body_ref: string | null
+          response_status: number
+          scope: string
         }
         Insert: {
+          actor_type?: string
+          actor_user_id?: string | null
           created_at?: string
-          endpoint: string
+          expires_at: string
+          external_actor_key?: string | null
+          id?: string
           key: string
-          locked_at?: string
-          request_hash: string
-          response_body?: Json | null
-          response_status?: number | null
-          user_id: string
+          request_fingerprint: string
+          response_body_ref?: string | null
+          response_status: number
+          scope: string
         }
         Update: {
+          actor_type?: string
+          actor_user_id?: string | null
           created_at?: string
-          endpoint?: string
+          expires_at?: string
+          external_actor_key?: string | null
+          id?: string
           key?: string
-          locked_at?: string
-          request_hash?: string
-          response_body?: Json | null
-          response_status?: number | null
-          user_id?: string
+          request_fingerprint?: string
+          response_body_ref?: string | null
+          response_status?: number
+          scope?: string
         }
         Relationships: []
       }
