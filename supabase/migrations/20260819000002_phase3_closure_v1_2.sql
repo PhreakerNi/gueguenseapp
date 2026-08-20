@@ -896,21 +896,11 @@ BEGIN
         SELECT count(DISTINCT document_type) INTO v_mandatory_doc_count
         FROM public.driver_documents
         WHERE driver_id = p_driver_id
-          AND document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION');
+          AND document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION')
+          AND verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED');
 
         IF v_mandatory_doc_count < 3 THEN
-            IF NOT EXISTS (SELECT 1 FROM public.driver_documents WHERE driver_id = p_driver_id AND document_type = 'NATIONAL_ID') THEN
-                INSERT INTO public.driver_documents (driver_id, document_type, storage_path, verification_status)
-                VALUES (p_driver_id, 'NATIONAL_ID', p_driver_id::text || '/national_id.pdf', 'PENDING');
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM public.driver_documents WHERE driver_id = p_driver_id AND document_type = 'DRIVER_LICENSE') THEN
-                INSERT INTO public.driver_documents (driver_id, document_type, storage_path, verification_status)
-                VALUES (p_driver_id, 'DRIVER_LICENSE', p_driver_id::text || '/license.pdf', 'PENDING');
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM public.driver_documents WHERE driver_id = p_driver_id AND document_type = 'VEHICLE_REGISTRATION') THEN
-                INSERT INTO public.driver_documents (driver_id, document_type, storage_path, verification_status)
-                VALUES (p_driver_id, 'VEHICLE_REGISTRATION', p_driver_id::text || '/veh_reg.pdf', 'PENDING');
-            END IF;
+            RAISE EXCEPTION 'DOCUMENTATION_INCOMPLETE: Driver must have all 3 mandatory documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)';
         END IF;
 
         -- Check vehicle exists (Section 14)
@@ -919,49 +909,15 @@ BEGIN
         WHERE driver_id = p_driver_id;
 
         IF v_vehicle_count = 0 THEN
-            INSERT INTO public.vehicles (
-                driver_id,
-                make,
-                model,
-                year,
-                color,
-                license_plate
-            )
-            VALUES (
-                p_driver_id,
-                'Yamaha',
-                'FZ-S',
-                2023,
-                'Azul',
-                'M-' || pg_catalog.substr(p_driver_id::text, 1, 6)
-            )
-            ON CONFLICT DO NOTHING;
+            RAISE EXCEPTION 'VEHICLE_MISSING: Driver must have at least one registered vehicle to be approved';
         END IF;
 
-        -- 1. Update active pending/under_review documents to VERIFIED
+        -- 1. Update active pending/under_review documents to VERIFIED (leaving REJECTED historical records untouched)
         UPDATE public.driver_documents
         SET verification_status = 'VERIFIED',
             rejection_reason = NULL
         WHERE driver_id = p_driver_id
           AND verification_status IN ('PENDING', 'UNDER_REVIEW');
-
-        -- 2. For document types with no active VERIFIED document, update the latest document to VERIFIED
-        UPDATE public.driver_documents d
-        SET verification_status = 'VERIFIED',
-            rejection_reason = NULL
-        WHERE d.id IN (
-            SELECT DISTINCT ON (document_type) id
-            FROM public.driver_documents
-            WHERE driver_id = p_driver_id
-            ORDER BY document_type, created_at DESC, id DESC
-        )
-        AND NOT EXISTS (
-            SELECT 1 FROM public.driver_documents active_doc
-            WHERE active_doc.driver_id = p_driver_id
-              AND active_doc.document_type = d.document_type
-              AND active_doc.verification_status = 'VERIFIED'
-              AND active_doc.id <> d.id
-        );
 
         -- Update driver record
         UPDATE public.drivers
