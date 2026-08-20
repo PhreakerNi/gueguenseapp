@@ -521,12 +521,12 @@ Deno.serve(async (req: Request) => {
       }
 
       const { data: authData, error: authError } = await serviceClient.rpc(
-        "create_driver_document_upload_authorization",
+        "authorize_driver_document_upload",
         {
-          p_driver_id: userId,
+          p_actor_id: userId,
           p_document_type: documentType,
           p_mime_type: mimeType,
-          p_size_bytes: sizeBytes,
+          p_file_size: sizeBytes,
         },
       );
 

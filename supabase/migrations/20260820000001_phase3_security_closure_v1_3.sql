@@ -18,47 +18,52 @@ CREATE OR REPLACE FUNCTION public.execute_idempotent_operation(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = ''
 AS $$
 DECLARE
     v_lock_key BIGINT;
-    v_record private.idempotency_keys%ROWTYPE;
+    v_cached RECORD;
     v_result JSONB;
-    v_status INT := 200;
-    v_ttl_interval INTERVAL := INTERVAL '24 hours';
+    v_status INTEGER := 200;
+    v_expires_at TIMESTAMPTZ;
 BEGIN
     IF p_actor_user_id IS NULL THEN
         RAISE EXCEPTION 'AUTH_REQUIRED: Actor user ID is required';
     END IF;
 
-    IF p_key IS NULL OR p_key !~* '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
+    IF p_key IS NULL OR p_scope IS NULL THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: key and scope are required';
+    END IF;
+
+    IF p_key !~* '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: Idempotency key must be a valid UUID v4';
     END IF;
 
     -- Generate consistent 64-bit advisory lock key from scope + key
-    v_lock_key := ('x' || substr(md5(p_scope || ':' || p_key), 1, 16))::bit(64)::bigint;
-    PERFORM pg_advisory_xact_lock(v_lock_key);
+    v_lock_key := ('x' || pg_catalog.substr(pg_catalog.md5(p_scope || ':' || p_key), 1, 16))::bit(64)::bigint;
+    PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
 
-    -- Check if record exists
-    SELECT * INTO v_record
-    FROM private.idempotency_keys
+    -- Check if record exists in private.idempotency_responses
+    SELECT * INTO v_cached
+    FROM private.idempotency_responses
     WHERE scope = p_scope AND key = p_key;
 
-    IF v_record.id IS NOT NULL THEN
+    IF v_cached.id IS NOT NULL THEN
         -- If expired (expires_at <= now()), purge expired record and proceed as fresh operation (Section 15)
-        IF v_record.expires_at <= pg_catalog.clock_timestamp() THEN
-            DELETE FROM private.idempotency_keys WHERE id = v_record.id;
-            v_record := NULL;
+        IF v_cached.expires_at <= pg_catalog.clock_timestamp() THEN
+            DELETE FROM private.idempotency_responses WHERE id = v_cached.id;
+            DELETE FROM public.idempotency_keys WHERE scope = p_scope AND key = p_key;
+            v_cached := NULL;
         ELSE
             -- Validate fingerprint
-            IF v_record.request_fingerprint <> p_request_fingerprint THEN
+            IF v_cached.request_fingerprint <> p_request_fingerprint THEN
                 RAISE EXCEPTION 'IDEMPOTENCY_FINGERPRINT_MISMATCH: Request payload fingerprint does not match original request';
             END IF;
 
             RETURN jsonb_build_object(
                 'cached', true,
-                'status', v_record.response_status,
-                'body', v_record.response_body
+                'status', v_cached.response_status,
+                'body', v_cached.response_body
             );
         END IF;
     END IF;
@@ -68,8 +73,8 @@ BEGIN
         v_result := public.create_business(
             p_actor_user_id,
             p_operation_params->>'legal_name',
-            p_operation_params->>'tax_id',
-            p_operation_params->>'brand_name'
+            p_operation_params->>'brand_name',
+            p_operation_params->>'tax_id'
         );
         v_status := 201;
 
@@ -78,42 +83,41 @@ BEGIN
             p_actor_user_id,
             (p_operation_params->>'business_id')::uuid,
             p_operation_params->>'name',
-            p_operation_params->>'address_line_1',
-            (p_operation_params->>'latitude')::numeric,
-            (p_operation_params->>'longitude')::numeric,
-            p_operation_params->>'phone',
+            p_operation_params->>'address_text',
+            (p_operation_params->>'latitude')::double precision,
+            (p_operation_params->>'longitude')::double precision,
             p_operation_params->>'pickup_instructions'
         );
         v_status := 201;
 
-    ELSIF p_operation_fn = 'create_business_member' THEN
-        v_result := public.create_business_member(
+    ELSIF p_operation_fn = 'add_business_member' THEN
+        v_result := public.add_business_member(
             p_actor_user_id,
             (p_operation_params->>'business_id')::uuid,
             (p_operation_params->>'target_user_id')::uuid,
             p_operation_params->>'role',
             CASE 
-                WHEN p_operation_params->'authorized_location_ids' IS NOT NULL AND jsonb_typeof(p_operation_params->'authorized_location_ids') = 'array' 
-                THEN ARRAY(SELECT jsonb_array_elements_text(p_operation_params->'authorized_location_ids')::uuid)
-                ELSE NULL
+                WHEN p_operation_params->'location_ids' IS NOT NULL AND jsonb_typeof(p_operation_params->'location_ids') = 'array' 
+                THEN ARRAY(SELECT jsonb_array_elements_text(p_operation_params->'location_ids')::uuid)
+                ELSE ARRAY[]::uuid[]
             END
         );
         v_status := 201;
 
-    ELSIF p_operation_fn = 'create_driver_profile' THEN
-        v_result := public.create_driver_profile(
+    ELSIF p_operation_fn = 'register_driver' THEN
+        v_result := public.register_driver(
             p_actor_user_id,
             p_operation_params->>'national_id_number',
             p_operation_params->>'license_number'
         );
         v_status := 201;
 
-    ELSIF p_operation_fn = 'create_driver_vehicle' THEN
-        v_result := public.create_driver_vehicle(
+    ELSIF p_operation_fn = 'register_vehicle' THEN
+        v_result := public.register_vehicle(
             p_actor_user_id,
             p_operation_params->>'make',
             p_operation_params->>'model',
-            (p_operation_params->>'year')::int,
+            (p_operation_params->>'year')::integer,
             p_operation_params->>'color',
             p_operation_params->>'license_plate'
         );
@@ -141,26 +145,52 @@ BEGIN
         RAISE EXCEPTION 'INVALID_ARGUMENT: Unknown operation function %', p_operation_fn;
     END IF;
 
-    -- Store idempotent response with 24h TTL
-    INSERT INTO private.idempotency_keys (
+    v_expires_at := pg_catalog.clock_timestamp() + INTERVAL '24 hours';
+
+    -- Store idempotent response with 24h TTL in private schema
+    INSERT INTO private.idempotency_responses (
+        actor_user_id,
         scope,
         key,
-        actor_user_id,
-        actor_type,
         request_fingerprint,
         response_status,
         response_body,
         expires_at
     ) VALUES (
+        p_actor_user_id,
         p_scope,
         p_key,
-        p_actor_user_id,
-        'USER',
         p_request_fingerprint,
         v_status,
         v_result,
-        pg_catalog.clock_timestamp() + v_ttl_interval
+        v_expires_at
     );
+
+    -- Also record in public.idempotency_keys for tracking and public RLS compliance
+    INSERT INTO public.idempotency_keys (
+        actor_type,
+        actor_user_id,
+        scope,
+        key,
+        request_fingerprint,
+        response_status,
+        response_body_ref,
+        expires_at
+    ) VALUES (
+        'user',
+        p_actor_user_id,
+        p_scope,
+        p_key,
+        p_request_fingerprint,
+        v_status,
+        p_scope || ':' || p_key,
+        v_expires_at
+    )
+    ON CONFLICT (scope, key) DO UPDATE SET
+        request_fingerprint = EXCLUDED.request_fingerprint,
+        response_status = EXCLUDED.response_status,
+        response_body_ref = EXCLUDED.response_body_ref,
+        expires_at = EXCLUDED.expires_at;
 
     RETURN jsonb_build_object(
         'cached', false,
@@ -185,10 +215,10 @@ CREATE OR REPLACE FUNCTION public.commit_driver_document(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = ''
 AS $$
 DECLARE
-    v_auth_record private.driver_document_upload_authorizations%ROWTYPE;
+    v_auth_record RECORD;
     v_clean_type TEXT;
     v_storage_obj RECORD;
     v_obj_size BIGINT;
@@ -196,6 +226,14 @@ DECLARE
     v_doc_id UUID;
     v_active_exists BOOLEAN;
 BEGIN
+    IF p_actor_id IS NULL THEN
+        RAISE EXCEPTION 'AUTH_REQUIRED: Valid actor user ID is required';
+    END IF;
+
+    IF p_upload_id IS NULL THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: upload_id is required';
+    END IF;
+
     v_clean_type := pg_catalog.upper(pg_catalog.btrim(p_document_type));
     IF v_clean_type NOT IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION', 'CRIMINAL_RECORD', 'INSURANCE') THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: Invalid document_type %', p_document_type;
@@ -288,20 +326,19 @@ BEGIN
         driver_id,
         document_type,
         storage_path,
-        file_size_bytes,
-        mime_type,
-        verification_status,
-        rejection_reason
+        verification_status
     ) VALUES (
         p_actor_id,
         v_clean_type,
         v_auth_record.storage_path,
-        v_obj_size,
-        v_obj_mime,
-        'PENDING',
-        NULL
+        'PENDING'
     )
     RETURNING id INTO v_doc_id;
+
+    -- Automatically reset driver verification_status to PENDING if previously REJECTED
+    UPDATE public.drivers
+    SET verification_status = 'PENDING'
+    WHERE id = p_actor_id AND verification_status = 'REJECTED';
 
     RETURN jsonb_build_object(
         'document_id', v_doc_id,
@@ -330,7 +367,7 @@ CREATE OR REPLACE FUNCTION public.admin_verify_driver(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = ''
 AS $$
 DECLARE
     v_actor_role TEXT;
@@ -339,7 +376,12 @@ DECLARE
     v_clean_decision TEXT;
     v_vehicle_count INT;
     v_mandatory_doc_count INT;
+    v_clean_reason TEXT;
 BEGIN
+    IF p_actor_id IS NULL THEN
+        RAISE EXCEPTION 'AUTH_REQUIRED: Actor user ID is required';
+    END IF;
+
     -- 1. Validate actor role from public.profiles ONLY (Section 4)
     SELECT platform_role INTO v_actor_role
     FROM public.profiles
@@ -403,61 +445,51 @@ BEGIN
         -- Update ONLY current pending/under_review documents to VERIFIED (historical rejected rows remain untouched!)
         UPDATE public.driver_documents
         SET verification_status = 'VERIFIED',
-            rejection_reason = NULL,
-            verified_at = pg_catalog.clock_timestamp()
+            rejection_reason = NULL
         WHERE driver_id = p_driver_id
           AND verification_status IN ('PENDING', 'UNDER_REVIEW');
 
         -- Update driver status
         UPDATE public.drivers
         SET verification_status = 'VERIFIED',
-            account_status = 'ACTIVE',
-            verified_at = pg_catalog.clock_timestamp(),
-            rejection_reason = NULL,
-            updated_at = pg_catalog.clock_timestamp()
+            account_status = 'ACTIVE'
         WHERE id = p_driver_id;
 
         -- Upsert driver presence to OFFLINE
         INSERT INTO public.driver_presence (
             driver_id,
-            status,
-            updated_at
+            operational_state,
+            location_updated_at
         ) VALUES (
             p_driver_id,
             'OFFLINE',
             pg_catalog.clock_timestamp()
         )
         ON CONFLICT (driver_id) DO UPDATE
-        SET status = 'OFFLINE',
-            updated_at = pg_catalog.clock_timestamp();
+        SET operational_state = 'OFFLINE',
+            location_updated_at = pg_catalog.clock_timestamp();
 
         -- Insert audit log
         INSERT INTO public.audit_logs (
             admin_user_id,
             action,
-            target_type,
-            target_id,
-            payload
+            reason
         ) VALUES (
             p_actor_id,
             'DRIVER_VERIFIED',
-            'driver',
-            p_driver_id,
-            jsonb_build_object(
-                'decision', 'APPROVE',
-                'verified_at', pg_catalog.clock_timestamp()
-            )
+            'DOCUMENTATION_COMPLETE'
         );
 
         RETURN jsonb_build_object(
             'driver_id', p_driver_id,
             'verification_status', 'VERIFIED',
             'account_status', 'ACTIVE',
-            'presence_status', 'OFFLINE'
+            'operational_state', 'OFFLINE'
         );
 
     ELSE -- REJECT
-        IF p_rejection_reason IS NULL OR pg_catalog.btrim(p_rejection_reason) = '' THEN
+        v_clean_reason := NULLIF(pg_catalog.btrim(p_rejection_reason), '');
+        IF v_clean_reason IS NULL THEN
             RAISE EXCEPTION 'INVALID_ARGUMENT: rejection_reason is required when rejecting driver';
         END IF;
 
@@ -469,43 +501,32 @@ BEGIN
         -- Update current pending/under_review documents to REJECTED (historical rows remain untouched!)
         UPDATE public.driver_documents
         SET verification_status = 'REJECTED',
-            rejection_reason = p_rejection_reason,
-            verified_at = pg_catalog.clock_timestamp()
+            rejection_reason = v_clean_reason
         WHERE driver_id = p_driver_id
           AND verification_status IN ('PENDING', 'UNDER_REVIEW');
 
         -- Update driver status
         UPDATE public.drivers
         SET verification_status = 'REJECTED',
-            account_status = 'REGISTERED',
-            rejection_reason = p_rejection_reason,
-            updated_at = pg_catalog.clock_timestamp()
+            account_status = 'REGISTERED'
         WHERE id = p_driver_id;
 
         -- Insert audit log
         INSERT INTO public.audit_logs (
             admin_user_id,
             action,
-            target_type,
-            target_id,
-            payload
+            reason
         ) VALUES (
             p_actor_id,
             'DRIVER_REJECTED',
-            'driver',
-            p_driver_id,
-            jsonb_build_object(
-                'decision', 'REJECT',
-                'rejection_reason', p_rejection_reason,
-                'rejected_at', pg_catalog.clock_timestamp()
-            )
+            v_clean_reason
         );
 
         RETURN jsonb_build_object(
             'driver_id', p_driver_id,
             'verification_status', 'REJECTED',
             'account_status', 'REGISTERED',
-            'rejection_reason', p_rejection_reason
+            'rejection_reason', v_clean_reason
         );
     END IF;
 END;
