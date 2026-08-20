@@ -874,12 +874,11 @@ BEGIN
     END IF;
 
     IF v_clean_decision = 'APPROVE' THEN
-        -- Check all 3 mandatory documents exist with status PENDING/UNDER_REVIEW/VERIFIED (Section 14)
+        -- Check all 3 mandatory documents exist (Section 14)
         SELECT count(DISTINCT document_type) INTO v_mandatory_doc_count
         FROM public.driver_documents
         WHERE driver_id = p_driver_id
-          AND document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION')
-          AND verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED');
+          AND document_type IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION');
 
         IF v_mandatory_doc_count < 3 THEN
             RAISE EXCEPTION 'DOCUMENTATION_INCOMPLETE: Driver must have all 3 mandatory documents (NATIONAL_ID, DRIVER_LICENSE, VEHICLE_REGISTRATION)';
@@ -894,12 +893,16 @@ BEGIN
             RAISE EXCEPTION 'VEHICLE_MISSING: Driver must have at least one registered vehicle to be approved';
         END IF;
 
-        -- Update driver documents to VERIFIED (only active ones)
+        -- Update driver documents to VERIFIED (updating the latest document per type, preserving historical rejected rows)
         UPDATE public.driver_documents
         SET verification_status = 'VERIFIED',
             rejection_reason = NULL
-        WHERE driver_id = p_driver_id
-          AND verification_status IN ('PENDING', 'UNDER_REVIEW');
+        WHERE id IN (
+            SELECT DISTINCT ON (document_type) id
+            FROM public.driver_documents
+            WHERE driver_id = p_driver_id
+            ORDER BY document_type, created_at DESC
+        );
 
         -- Update driver record
         UPDATE public.drivers

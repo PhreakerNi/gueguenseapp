@@ -422,7 +422,6 @@ export type Database = {
         Args: {
           p_actor_aal?: string
           p_actor_id: string
-          p_actor_role?: string
           p_decision: string
           p_driver_id: string
           p_rejection_reason?: string
@@ -435,25 +434,16 @@ export type Database = {
           p_document_type: string
           p_file_size: number
           p_mime_type: string
-          p_storage_path: string
+          p_upload_id: string
         }
         Returns: Json
-      }
-      commit_idempotency_response: {
-        Args: {
-          p_key: string
-          p_response_body: Json
-          p_response_status: number
-          p_user_id: string
-        }
-        Returns: undefined
       }
       create_business: {
         Args: {
           p_actor_id: string
-          p_brand_name: string
+          p_brand_name?: string
           p_legal_name: string
-          p_tax_id: string
+          p_tax_id?: string
         }
         Returns: Json
       }
@@ -463,9 +453,20 @@ export type Database = {
           p_address_text: string
           p_business_id: string
           p_latitude: number
+          p_location_name: string
           p_longitude: number
-          p_name: string
           p_pickup_instructions?: string
+        }
+        Returns: Json
+      }
+      execute_idempotent_operation: {
+        Args: {
+          p_actor_user_id: string
+          p_key: string
+          p_operation_fn: string
+          p_operation_params: Json
+          p_request_fingerprint: string
+          p_scope: string
         }
         Returns: Json
       }
