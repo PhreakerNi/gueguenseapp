@@ -11,7 +11,8 @@ ALTER TABLE public.driver_documents
 ADD COLUMN IF NOT EXISTS file_size BIGINT,
 ADD COLUMN IF NOT EXISTS mime_type TEXT,
 ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
-ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES auth.users(id);
+ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES auth.users(id),
+ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 -- 1. Storage Bucket and RLS Hardening (Section 1 & 4)
 UPDATE storage.buckets

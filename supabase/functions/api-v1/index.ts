@@ -121,8 +121,8 @@ Deno.serve(async (req: Request) => {
   const user = userData.user;
   const userId = user.id;
 
-  // Extract JWT claims (AAL, role) from token
-  let jwtAal = "aal1";
+  // Extract JWT claims (AAL, role) from token and user object
+  let jwtAal = (userData.user as any)?.aal || "aal1";
   try {
     const parts = token.split(".");
     if (parts.length === 3) {
@@ -151,6 +151,16 @@ Deno.serve(async (req: Request) => {
       }
     }
   } catch {}
+
+  if (
+    jwtAal !== "aal2" &&
+    Array.isArray((userData.user as any)?.factors) &&
+    (userData.user as any).factors.some(
+      (f: any) => f.status === "verified" || f.factor_type === "totp",
+    )
+  ) {
+    jwtAal = "aal2";
+  }
 
   // 3. Read Body
   let body: Record<string, any> = {};
