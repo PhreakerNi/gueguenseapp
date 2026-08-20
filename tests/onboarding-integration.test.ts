@@ -126,6 +126,19 @@ function generateTotpCode(secretBase32: string, timeStepOffset = 0): string {
   return (code % 1000000).toString().padStart(6, "0");
 }
 
+class MemoryStorage {
+  private store = new Map<string, string>();
+  async getItem(key: string): Promise<string | null> {
+    return this.store.get(key) ?? null;
+  }
+  async setItem(key: string, value: string): Promise<void> {
+    this.store.set(key, value);
+  }
+  async removeItem(key: string): Promise<void> {
+    this.store.delete(key);
+  }
+}
+
 describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2 (HTTP api-v1)", () => {
   after(async () => {
     await dbPool.end();
@@ -203,34 +216,49 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       password: testPassword,
     });
     agentUserId = agentAuth.user!.id;
-    agentAal1Token = agentAuth.session!.access_token;
     await dbPool.query(
       "UPDATE public.profiles SET platform_role = 'verification_agent' WHERE id = $1",
       [agentUserId],
     );
 
-    const agentClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    await agentClient.auth.setSession({
-      access_token: agentAuth.session!.access_token,
-      refresh_token: agentAuth.session!.refresh_token,
+    const agentStorage = new MemoryStorage();
+    const agentClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        storage: agentStorage,
+        autoRefreshToken: false,
+        persistSession: true,
+      },
     });
-    const enrollRes = await agentClient.auth.mfa.enroll({
+
+    const { data: agentLogin } = await agentClient.auth.signInWithPassword({
+      email: agentEmail,
+      password: testPassword,
+    });
+    agentAal1Token = agentLogin!.session!.access_token;
+
+    const { data: enrollRes } = await agentClient.auth.mfa.enroll({
       factorType: "totp",
       issuer: "Gueguense",
     });
+
     for (const offset of [0, -1, 1]) {
-      const totpCode = generateTotpCode(enrollRes.data!.totp.secret, offset);
-      const challengeRes = await agentClient.auth.mfa.challenge({
-        factorId: enrollRes.data!.id,
-      });
-      if (challengeRes.error) continue;
-      const verifyRes = await agentClient.auth.mfa.verify({
-        factorId: enrollRes.data!.id,
-        challengeId: challengeRes.data!.id,
-        code: totpCode,
-      });
-      if (verifyRes.data?.access_token) {
-        agentToken = verifyRes.data.access_token;
+      const totpCode = generateTotpCode(enrollRes!.totp.secret, offset);
+      const { data: challengeRes, error: chalErr } =
+        await agentClient.auth.mfa.challenge({
+          factorId: enrollRes!.id,
+        });
+      if (chalErr) continue;
+
+      const { data: verifyRes, error: verErr } =
+        await agentClient.auth.mfa.verify({
+          factorId: enrollRes!.id,
+          challengeId: challengeRes!.id,
+          code: totpCode,
+        });
+
+      if (!verErr && verifyRes) {
+        const { data: sessData } = await agentClient.auth.getSession();
+        agentToken = sessData.session?.access_token || verifyRes.access_token;
         break;
       }
     }
@@ -252,32 +280,48 @@ describe("Phase 3 Onboarding, B2B, Storage & Verification Integration Suite v1.2
       email: superAdminEmail,
       password: testPassword,
     });
+    const saUserId = saAuth.user!.id;
     await dbPool.query(
       "UPDATE public.profiles SET platform_role = 'super_admin' WHERE id = $1",
-      [saAuth.user!.id],
+      [saUserId],
     );
-    const saClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    await saClient.auth.setSession({
-      access_token: saAuth.session!.access_token,
-      refresh_token: saAuth.session!.refresh_token,
+
+    const saStorage = new MemoryStorage();
+    const saClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        storage: saStorage,
+        autoRefreshToken: false,
+        persistSession: true,
+      },
     });
-    const saEnroll = await saClient.auth.mfa.enroll({
+
+    await saClient.auth.signInWithPassword({
+      email: superAdminEmail,
+      password: testPassword,
+    });
+
+    const { data: saEnroll } = await saClient.auth.mfa.enroll({
       factorType: "totp",
       issuer: "Gueguense",
     });
+
     for (const offset of [0, -1, 1]) {
-      const saCode = generateTotpCode(saEnroll.data!.totp.secret, offset);
-      const saChal = await saClient.auth.mfa.challenge({
-        factorId: saEnroll.data!.id,
-      });
-      if (saChal.error) continue;
-      const saVer = await saClient.auth.mfa.verify({
-        factorId: saEnroll.data!.id,
-        challengeId: saChal.data!.id,
+      const saCode = generateTotpCode(saEnroll!.totp.secret, offset);
+      const { data: saChal, error: saChalErr } =
+        await saClient.auth.mfa.challenge({
+          factorId: saEnroll!.id,
+        });
+      if (saChalErr) continue;
+
+      const { data: saVer, error: saVerErr } = await saClient.auth.mfa.verify({
+        factorId: saEnroll!.id,
+        challengeId: saChal!.id,
         code: saCode,
       });
-      if (saVer.data?.access_token) {
-        superAdminToken = saVer.data.access_token;
+
+      if (!saVerErr && saVer) {
+        const { data: saSess } = await saClient.auth.getSession();
+        superAdminToken = saSess.session?.access_token || saVer.access_token;
         break;
       }
     }
