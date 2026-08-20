@@ -5,11 +5,11 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  expo: ~57.0.14
+  expo: ~57.0.15
   expo-asset: ~57.0.12
-  expo-constants: ~57.0.12
-  expo-linking: ~57.0.6
-  expo-router: ~57.0.14
+  expo-constants: ~57.0.13
+  expo-linking: ~57.0.7
+  expo-router: ~57.0.15
   expo-secure-store: ~57.0.1
   expo-status-bar: ~57.0.1
 
@@ -1114,8 +1114,8 @@ packages:
     resolution: {integrity: sha512-PQc7if117dNh2qe+CHdlmSWpgwhFiP9CJ7XbwNF0w4KSKxFpJ2qUjDPoAcCMW1VZg1x30mEJ907bT8G1iDIZBQ==}
     hasBin: true
     peerDependencies:
-      expo: ~57.0.14
-      expo-router: ~57.0.14
+      expo: ~57.0.15
+      expo-router: ~57.0.15
       react-native: '*'
     peerDependenciesMeta:
       expo-router:
@@ -1152,7 +1152,7 @@ packages:
   '@expo/dom-webview@57.0.1':
     resolution: {integrity: sha512-lAKsME4SAq+8sf56oN0DX5TBYyruupoRxbWbD2xf9RnKY8y6x8eb9LCE5pxSN0qyWdqnp+0wmyWzDkKboThKAw==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
       react: '*'
       react-native: '*'
 
@@ -1183,14 +1183,14 @@ packages:
     resolution: {integrity: sha512-qv/cMliNax6es07Un/4IGJIcs4PUuhTKKTrJZX/0X2YRcOT5cqm/QicibZwTIbiZWi1i8P4YBRQTfFT2B17giw==}
     peerDependencies:
       '@expo/dom-webview': ^57.0.1
-      expo: ~57.0.14
+      expo: ~57.0.15
       react: '*'
       react-native: '*'
 
   '@expo/metro-config@57.0.9':
     resolution: {integrity: sha512-+lalXZdoMaKTG1uKXsi2KWO0f7H3KiWrhZzAla4EmNSkcUMRx6K1rhZuBYoaJaKIp9BHZ333KbqRPron7slKQA==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
     peerDependenciesMeta:
       expo:
         optional: true
@@ -1202,7 +1202,7 @@ packages:
     resolution: {integrity: sha512-WpgjfRFh88B5tKJrbsypvyxx0MKuXMo+ru9Gbjq4Qwj7OboJmrQ+g555YCgiQD3uk3J1ThzgEU06yZOV43suGA==}
     peerDependencies:
       '@expo/log-box': ^57.0.3
-      expo: ~57.0.14
+      expo: ~57.0.15
       react: '*'
       react-dom: '*'
       react-native: '*'
@@ -1238,10 +1238,10 @@ packages:
     resolution: {integrity: sha512-QFHwt6V7UovmYA7+8BoMeKj3fh6WtkM9zksKjNAlZdcEI/hUhcW4uged6So5yc4tq+eA60kA7gIVZPKgBIZdrQ==}
     peerDependencies:
       '@expo/metro-runtime': ^57.0.12
-      expo: ~57.0.14
-      expo-constants: ~57.0.12
+      expo: ~57.0.15
+      expo-constants: ~57.0.13
       expo-font: ^57.0.1
-      expo-router: ~57.0.14
+      expo-router: ~57.0.15
       expo-server: ^57.0.3
       react: '*'
       react-dom: '*'
@@ -1273,7 +1273,7 @@ packages:
     resolution: {integrity: sha512-ZkrECV6xZe0+Drq6C0hrBKvz1534/VyARNp9ziKihC6Db69W29+jBDZm8k9cyRyS1Hh23q6LP8J+2wDyUM8eAA==}
     peerDependencies:
       '@babel/core': '*'
-      expo: ~57.0.14
+      expo: ~57.0.15
       react: '*'
       react-dom: '*'
       react-native: '*'
@@ -2504,7 +2504,7 @@ packages:
     resolution: {integrity: sha512-/1RLnZTJVoTNo6nCdSv27BSA2LBzM/qEkNLznwWvztg64DhsAz7ByZIiAqdbau9FK3YqF+IV5a2ZsPXFclwq4A==}
     peerDependencies:
       '@babel/runtime': ^7.20.0
-      expo: ~57.0.14
+      expo: ~57.0.15
       expo-widgets: ^57.0.10
       react-refresh: '>=0.14.0 <1.0.0'
     peerDependenciesMeta:
@@ -3037,20 +3037,20 @@ packages:
   expo-asset@57.0.12:
     resolution: {integrity: sha512-DbNxGsmqCaE2LWyabXEkDqV/8/mrZ2ikmVzi1V1Dp4MaQO9Kde6VcvQk7h6NVsklmo4xPT1J2Lnrs8Vd18sXOg==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
       react: '*'
       react-native: '*'
 
   expo-constants@57.0.13:
     resolution: {integrity: sha512-eB5AHp7kKxsVIBjTetUgj5WQSw8joI2ekzgTlcUv+Hc0x2t0jZU6IiL4DpyOT2yZQ71n0WJZCkmOKLgxlajIzg==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
       react-native: '*'
 
   expo-crypto@57.0.1:
     resolution: {integrity: sha512-xwegXQw3ATgeL1ZuqbSNrGzOeG+zNeh6Z6DSJk825Qpa3TEQQ1kG3ioE1p3g/SNF373BAVz2iBKUTSytlIbBRA==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
 
   expo-doctor@1.20.1:
     resolution: {integrity: sha512-u0QYTm3hTZbuMuNdnvscA1X6Xm31ilQ6uxrf8FfzO0ddpOEBrgVEYp8jXgFOBwrRf6DqJoD2j3eKUTWTqvKVzg==}
@@ -3060,32 +3060,32 @@ packages:
   expo-document-picker@57.0.1:
     resolution: {integrity: sha512-qBwM5oxDZ3I9kwFD3pUE1oK/WNv9artoEKO6UpqhQgNRr0XA1ALRVWYjkF4+ge9lUNDRehjTm/jenINkzqg84g==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
 
   expo-file-system@57.0.5:
     resolution: {integrity: sha512-XjGrCClF0935y5wLB9qNQQUVptNEy+0OloBstXlCd+IeNXLo3uNOod6cX4N0hofIhNIrN1Al8fwfay7R0Z1a2A==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
       react-native: '*'
 
   expo-font@57.0.1:
     resolution: {integrity: sha512-QyS9L1Kh9sKJg4gfU6rdbpxpmH+DyzBX8z6jVvXMUDoqLr1GqmkO/Wu379KCXjL///kWbhpNlbi7AgBuj4VdIQ==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
       react: '*'
       react-native: '*'
 
   expo-glass-effect@57.0.1:
     resolution: {integrity: sha512-m/n8maxqNcHk6ZDhuqXBfD5Kt1Iz3M8xykVgdB0iSCIXvF70IqWXmQhX8Psswhrp8eZ+3r0mAD0Jh/2gFA3QaA==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
       react: '*'
       react-native: '*'
 
   expo-keep-awake@57.0.1:
     resolution: {integrity: sha512-28lkFImeXTS+bhAjuCFV7w7tW5bXg27BJVrxv+nC/nyYa86qEa0oFeHwqol6ha5k4pdVDQgBF09GM4A1k76Ssg==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
       react: '*'
 
   expo-linking@57.0.7:
@@ -3119,9 +3119,9 @@ packages:
       '@expo/log-box': ^57.0.3
       '@expo/metro-runtime': ^57.0.12
       '@testing-library/react-native': '>= 13.2.0'
-      expo: ~57.0.14
-      expo-constants: ~57.0.12
-      expo-linking: ~57.0.6
+      expo: ~57.0.15
+      expo-constants: ~57.0.13
+      expo-linking: ~57.0.7
       react: '*'
       react-dom: '*'
       react-native: '*'
@@ -3148,7 +3148,7 @@ packages:
   expo-secure-store@57.0.1:
     resolution: {integrity: sha512-tLa1VmSadOq19mA/dwkl99RbHyjLE0T1qqBYMY3/OsguZTI+rlrDy/DDJjupqlVtmr95hD7o1pYqx5aL+B4YMA==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
 
   expo-server@57.0.3:
     resolution: {integrity: sha512-aK+LdKzauHSGmsOStZtyxdzv0zWssCkxTw3m4QuOhfDSJsZaMRTd9O41d8ixU/QfELTbaJ0oRNcF7JFV/7O9YQ==}
@@ -3157,14 +3157,14 @@ packages:
   expo-status-bar@57.0.1:
     resolution: {integrity: sha512-Xwaq1gAoVRWx5dPG5VhT5RSbnI9OilhZnO5qoPBnUaBAa5VzRzfdS8q0/bsPt0jR2DKLtGuP0bQ6efMJ4RIMDg==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
       react: '*'
       react-native: '*'
 
   expo-symbols@57.0.2:
     resolution: {integrity: sha512-qZ0iqOflm5lZGwRsQ5Y8sDksw3GAUKwHSX1bJBoocXf7gu14vafIXXYWte+JT9VfXAUGyKodJhLHP/GoOrcNWg==}
     peerDependencies:
-      expo: ~57.0.14
+      expo: ~57.0.15
       expo-font: '*'
       react: '*'
       react-native: '*'
