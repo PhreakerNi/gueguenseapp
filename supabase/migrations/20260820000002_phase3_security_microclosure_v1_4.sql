@@ -7,7 +7,7 @@
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- 1. Commit Driver Document (Robust type validation)
+-- 1. Commit Driver Document (Robust type validation & storage verification)
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.commit_driver_document(
     p_actor_id UUID,
@@ -22,12 +22,16 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-    v_clean_type TEXT;
     v_auth_record RECORD;
-    v_new_doc_id UUID;
+    v_clean_type TEXT;
+    v_storage_obj RECORD;
+    v_obj_size BIGINT;
+    v_obj_mime TEXT;
+    v_doc_id UUID;
+    v_active_exists BOOLEAN;
 BEGIN
     IF p_actor_id IS NULL THEN
-        RAISE EXCEPTION 'AUTH_REQUIRED: Actor user ID is required';
+        RAISE EXCEPTION 'AUTH_REQUIRED: Valid actor user ID is required';
     END IF;
 
     IF p_upload_id IS NULL THEN
@@ -35,23 +39,22 @@ BEGIN
     END IF;
 
     v_clean_type := pg_catalog.upper(pg_catalog.btrim(p_document_type));
-    IF v_clean_type IS NULL OR v_clean_type NOT IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION') THEN
+    IF v_clean_type NOT IN ('NATIONAL_ID', 'DRIVER_LICENSE', 'VEHICLE_REGISTRATION', 'CRIMINAL_RECORD', 'INSURANCE') THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: Invalid document_type %', p_document_type;
     END IF;
 
-    -- 1. Fetch and validate authorization
-    SELECT id, driver_id, document_type, storage_path, expires_at, status
-    INTO v_auth_record
-    FROM public.driver_document_upload_authorizations
-    WHERE id = p_upload_id;
+    -- 1. Query upload authorization in private schema
+    SELECT * INTO v_auth_record
+    FROM private.driver_document_upload_authorizations
+    WHERE upload_id = p_upload_id;
 
     IF v_auth_record.id IS NULL THEN
-        RAISE EXCEPTION 'AUTHORIZATION_NOT_FOUND: Upload authorization % not found', p_upload_id;
+        RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Upload authorization not found';
     END IF;
 
-    -- 2. Validate driver ownership
+    -- 2. Validate actor ownership
     IF v_auth_record.driver_id <> p_actor_id THEN
-        RAISE EXCEPTION 'FORBIDDEN: Driver does not own this upload authorization';
+        RAISE EXCEPTION 'AUTH_FORBIDDEN: Upload authorization belongs to another driver';
     END IF;
 
     -- 3. Validate document type matches authorization
@@ -59,49 +62,95 @@ BEGIN
         RAISE EXCEPTION 'INVALID_ARGUMENT: Document type does not match authorization';
     END IF;
 
-    -- 4. Validate not expired
+    -- 4. Check Güegüense 15m authorization window expiration
     IF v_auth_record.expires_at < pg_catalog.clock_timestamp() THEN
-        -- Mark as expired if not already
-        UPDATE public.driver_document_upload_authorizations
-        SET status = 'EXPIRED'
-        WHERE id = p_upload_id AND status = 'PENDING';
-
-        RAISE EXCEPTION 'AUTHORIZATION_EXPIRED: Upload authorization has expired';
+        RAISE EXCEPTION 'EXPIRED_UPLOAD_REF: Upload authorization window has expired';
     END IF;
 
-    -- 5. Validate status is PENDING
-    IF v_auth_record.status <> 'PENDING' THEN
-        RAISE EXCEPTION 'AUTHORIZATION_ALREADY_USED: Upload authorization is already %', v_auth_record.status;
+    -- 5. Check if already committed
+    IF v_auth_record.committed_at IS NOT NULL THEN
+        RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Upload authorization has already been committed';
     END IF;
 
-    -- 6. Insert new driver document (PENDING verification)
+    -- 6. Verify real object existence and metadata in storage.objects
+    SELECT name, bucket_id, metadata
+    INTO v_storage_obj
+    FROM storage.objects
+    WHERE bucket_id = 'driver-documents'
+      AND name = v_auth_record.storage_path;
+
+    IF v_storage_obj.name IS NULL THEN
+        RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Uploaded file not found in storage bucket';
+    END IF;
+
+    -- Extract size and mimetype from storage.objects.metadata
+    v_obj_size := COALESCE(
+        (v_storage_obj.metadata->>'size')::bigint,
+        (v_storage_obj.metadata->>'content-length')::bigint
+    );
+    v_obj_mime := COALESCE(
+        v_storage_obj.metadata->>'mimetype',
+        v_storage_obj.metadata->>'contentType',
+        v_storage_obj.metadata->>'content-type'
+    );
+
+    IF v_obj_size IS NULL OR v_obj_mime IS NULL THEN
+        RAISE EXCEPTION 'UPLOAD_UNVERIFIED: Cannot verify uploaded file metadata';
+    END IF;
+
+    -- Validate actual size: 1 <= size <= max_size <= 10MB
+    IF v_obj_size < 1 OR v_obj_size > v_auth_record.max_size_bytes OR v_obj_size > 10485760 THEN
+        RAISE EXCEPTION 'INVALID_FILE_SIZE: Actual file size % does not match authorization', v_obj_size;
+    END IF;
+
+    -- Validate actual MIME: matches authorized MIME exactly
+    IF pg_catalog.lower(v_obj_mime) <> pg_catalog.lower(v_auth_record.mime_type) THEN
+        RAISE EXCEPTION 'INVALID_MIME_TYPE: Actual file MIME type % does not match authorization %', v_obj_mime, v_auth_record.mime_type;
+    END IF;
+
+    -- 7. Check if an active document of the same type already exists (PENDING, UNDER_REVIEW, VERIFIED)
+    SELECT EXISTS (
+        SELECT 1 FROM public.driver_documents
+        WHERE driver_id = p_actor_id
+          AND document_type = v_clean_type
+          AND verification_status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED')
+    ) INTO v_active_exists;
+
+    IF v_active_exists THEN
+        RAISE EXCEPTION 'DOCUMENT_ALREADY_SUBMITTED: Active document already submitted for type %', v_clean_type;
+    END IF;
+
+    -- 8. Mark authorization committed
+    UPDATE private.driver_document_upload_authorizations
+    SET committed_at = pg_catalog.clock_timestamp()
+    WHERE id = v_auth_record.id;
+
+    -- 9. Insert new driver document (historical rejected/expired rows remain untouched!)
     INSERT INTO public.driver_documents (
         driver_id,
         document_type,
         storage_path,
-        file_size_bytes,
-        mime_type,
         verification_status
     ) VALUES (
         p_actor_id,
         v_clean_type,
         v_auth_record.storage_path,
-        p_file_size,
-        p_mime_type,
         'PENDING'
     )
-    RETURNING id INTO v_new_doc_id;
+    RETURNING id INTO v_doc_id;
 
-    -- 7. Consume authorization (mark USED)
-    UPDATE public.driver_document_upload_authorizations
-    SET status = 'USED'
-    WHERE id = p_upload_id;
+    -- Automatically reset driver verification_status to PENDING if previously REJECTED
+    UPDATE public.drivers
+    SET verification_status = 'PENDING'
+    WHERE id = p_actor_id AND verification_status = 'REJECTED';
 
     RETURN jsonb_build_object(
-        'document_id', v_new_doc_id,
+        'document_id', v_doc_id,
         'driver_id', p_actor_id,
         'document_type', v_clean_type,
         'storage_path', v_auth_record.storage_path,
+        'file_size_bytes', v_obj_size,
+        'mime_type', v_obj_mime,
         'verification_status', 'PENDING'
     );
 END;
