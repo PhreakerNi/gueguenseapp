@@ -64,8 +64,8 @@ export default function DriverOnboardingRequiredScreen() {
     Record<
       DocTypes,
       {
-        uploadId?: string;
-        uploadUrl?: string;
+        uploadId?: string | undefined;
+        uploadUrl?: string | undefined;
         commitIdempotencyKey: string;
         uploaded: boolean;
       }

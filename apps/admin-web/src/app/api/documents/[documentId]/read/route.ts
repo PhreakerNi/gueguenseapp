@@ -31,7 +31,11 @@ export async function GET(
     .eq("id", user.id)
     .single();
 
-  const platformRole = (rawProfile?.platform_role as PlatformRole) ?? "none";
+  const profile = rawProfile as {
+    platform_role: PlatformRole;
+  } | null;
+
+  const platformRole = profile?.platform_role ?? "none";
   if (!CAN_VERIFY_ROLES.includes(platformRole)) {
     return NextResponse.json(
       { error: "Forbidden: Admin role required" },
