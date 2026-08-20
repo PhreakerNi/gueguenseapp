@@ -824,7 +824,10 @@ Deno.serve(async (req: Request) => {
       /^\/admin\/verifications\/drivers\/([^\/]+)$/,
     );
     if (req.method === "GET" && adminDriverDetailMatch) {
-      const targetDriverId = adminDriverDetailMatch[1].trim();
+      const targetDriverId = decodeURIComponent(adminDriverDetailMatch[1])
+        .split("?")[0]
+        .replace(/\/+$/, "")
+        .trim();
 
       // Validate Admin Profile Role
       const { data: profileData } = await serviceClient
@@ -856,39 +859,62 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      let { data: driverData, error: driverError } = await serviceClient
+      let driverData: any = null;
+      const { data: driverRows } = await serviceClient
         .from("drivers")
-        .select("*")
-        .eq("id", targetDriverId)
-        .maybeSingle();
+        .select()
+        .eq("id", targetDriverId);
 
-      if (!driverData) {
-        const { data: fallbackDriver } = await serviceClient
+      if (driverRows && driverRows.length > 0) {
+        driverData = driverRows[0];
+      } else {
+        const { data: allDrivers } = await serviceClient
           .from("drivers")
-          .select(
-            "id, verification_status, account_status, national_id_number, license_number, rating_avg, total_deliveries, created_at",
-          )
-          .eq("id", targetDriverId)
-          .maybeSingle();
-        driverData = fallbackDriver;
+          .select();
+        driverData =
+          allDrivers?.find((d: any) => d.id === targetDriverId) || null;
       }
 
       if (!driverData) {
         return errorResponse("DRIVER_NOT_FOUND", "Driver not found", 404);
       }
 
-      const { data: vehicles } = await serviceClient
+      let { data: vehicles } = await serviceClient
         .from("vehicles")
-        .select("*")
+        .select()
         .eq("driver_id", targetDriverId);
 
-      const { data: documents } = await serviceClient
+      if (!vehicles || vehicles.length === 0) {
+        const { data: allVehicles } = await serviceClient
+          .from("vehicles")
+          .select();
+        vehicles =
+          allVehicles?.filter((v: any) => v.driver_id === targetDriverId) || [];
+      }
+
+      let { data: documents } = await serviceClient
         .from("driver_documents")
         .select(
           "id, driver_id, document_type, storage_path, verification_status, rejection_reason, created_at",
         )
         .eq("driver_id", targetDriverId)
         .order("created_at", { ascending: false });
+
+      if (!documents || documents.length === 0) {
+        const { data: allDocs } = await serviceClient
+          .from("driver_documents")
+          .select(
+            "id, driver_id, document_type, storage_path, verification_status, rejection_reason, created_at",
+          );
+        documents =
+          allDocs
+            ?.filter((d: any) => d.driver_id === targetDriverId)
+            ?.sort(
+              (a: any, b: any) =>
+                new Date(b.created_at).getTime() -
+                new Date(a.created_at).getTime(),
+            ) || [];
+      }
 
       return jsonResponse({
         driver: driverData,

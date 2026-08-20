@@ -399,15 +399,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      acquire_idempotency_lock: {
-        Args: {
-          p_endpoint: string
-          p_key: string
-          p_request_hash: string
-          p_user_id: string
-        }
-        Returns: Json
-      }
       add_business_member: {
         Args: {
           p_actor_id: string
@@ -425,6 +416,15 @@ export type Database = {
           p_decision: string
           p_driver_id: string
           p_rejection_reason?: string
+        }
+        Returns: Json
+      }
+      authorize_driver_document_upload: {
+        Args: {
+          p_actor_id: string
+          p_document_type: string
+          p_file_size: number
+          p_mime_type: string
         }
         Returns: Json
       }
