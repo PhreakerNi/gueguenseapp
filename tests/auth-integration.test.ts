@@ -477,12 +477,14 @@ describe("Phase 2 — Auth & Session Integration Gates", () => {
           status: memberCheck[0].status as BusinessMemberStatus,
           businessAccountStatus: bizCheck[0]
             .account_status as BusinessAccountStatus,
+          authorizedLocationIds: ["loc-1"],
         },
       ],
     };
 
     assert.deepStrictEqual(evaluateBusinessAccess(activeIdentity), {
       allowed: true,
+      authorizedLocationIds: ["loc-1"],
     });
 
     // 11c. Update membership status to SUSPENDED in DB

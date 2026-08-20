@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@gueguense/config": "workspace:*",
+    "@gueguense/schemas": "workspace:*",
     "@types/node": "^22.13.4",
     "tsx": "^4.19.3"
   }

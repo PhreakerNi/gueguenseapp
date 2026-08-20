@@ -9,6 +9,33 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      audit_logs: {
+        Row: {
+          action: string
+          admin_user_id: string
+          created_at: string
+          id: number
+          ip_address: string | null
+          reason: string
+        }
+        Insert: {
+          action: string
+          admin_user_id: string
+          created_at?: string
+          id?: never
+          ip_address?: string | null
+          reason: string
+        }
+        Update: {
+          action?: string
+          admin_user_id?: string
+          created_at?: string
+          id?: never
+          ip_address?: string | null
+          reason?: string
+        }
+        Relationships: []
+      }
       business_locations: {
         Row: {
           address_text: string
@@ -254,6 +281,48 @@ export type Database = {
         }
         Relationships: []
       }
+      idempotency_keys: {
+        Row: {
+          actor_type: string
+          actor_user_id: string | null
+          created_at: string
+          expires_at: string
+          external_actor_key: string | null
+          id: string
+          key: string
+          request_fingerprint: string
+          response_body_ref: string | null
+          response_status: number
+          scope: string
+        }
+        Insert: {
+          actor_type?: string
+          actor_user_id?: string | null
+          created_at?: string
+          expires_at: string
+          external_actor_key?: string | null
+          id?: string
+          key: string
+          request_fingerprint: string
+          response_body_ref?: string | null
+          response_status: number
+          scope: string
+        }
+        Update: {
+          actor_type?: string
+          actor_user_id?: string | null
+          created_at?: string
+          expires_at?: string
+          external_actor_key?: string | null
+          id?: string
+          key?: string
+          request_fingerprint?: string
+          response_body_ref?: string | null
+          response_status?: number
+          scope?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -330,7 +399,106 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      add_business_member: {
+        Args: {
+          p_actor_id: string
+          p_business_id: string
+          p_location_ids?: string[]
+          p_role: string
+          p_target_user_id: string
+        }
+        Returns: Json
+      }
+      admin_verify_driver: {
+        Args: {
+          p_actor_aal?: string
+          p_actor_id: string
+          p_decision: string
+          p_driver_id: string
+          p_rejection_reason?: string
+        }
+        Returns: Json
+      }
+      authorize_driver_document_upload: {
+        Args: {
+          p_actor_id: string
+          p_document_type: string
+          p_file_size: number
+          p_mime_type: string
+        }
+        Returns: Json
+      }
+      commit_driver_document: {
+        Args: {
+          p_actor_id: string
+          p_document_type: string
+          p_file_size?: number
+          p_mime_type?: string
+          p_upload_id: string
+        }
+        Returns: Json
+      }
+      create_business: {
+        Args: {
+          p_actor_id: string
+          p_brand_name?: string
+          p_legal_name: string
+          p_tax_id?: string
+        }
+        Returns: Json
+      }
+      create_business_location: {
+        Args: {
+          p_actor_id: string
+          p_address_text: string
+          p_business_id: string
+          p_latitude: number
+          p_location_name: string
+          p_longitude: number
+          p_pickup_instructions?: string
+        }
+        Returns: Json
+      }
+      execute_idempotent_operation: {
+        Args: {
+          p_actor_user_id: string
+          p_key: string
+          p_operation_fn: string
+          p_operation_params: Json
+          p_request_fingerprint: string
+          p_scope: string
+        }
+        Returns: Json
+      }
+      get_admin_driver_verification_detail: {
+        Args: { p_driver_id: string }
+        Returns: Json
+      }
+      get_admin_driver_verification_queue: { Args: never; Returns: Json }
+      get_driver_document_storage_path: {
+        Args: { p_document_id: string }
+        Returns: Json
+      }
+      get_user_platform_role: { Args: { p_user_id: string }; Returns: string }
+      register_driver: {
+        Args: {
+          p_actor_id: string
+          p_license_number: string
+          p_national_id_number: string
+        }
+        Returns: Json
+      }
+      register_vehicle: {
+        Args: {
+          p_actor_id: string
+          p_color: string
+          p_license_plate: string
+          p_make: string
+          p_model: string
+          p_year: number
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

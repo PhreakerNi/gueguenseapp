@@ -64,6 +64,7 @@ export type IdentityContext = {
     role: BusinessMemberRole;
     status: BusinessMemberStatus;
     businessAccountStatus?: BusinessAccountStatus | undefined;
+    authorizedLocationIds: string[];
   }>;
   driver: null | {
     verificationStatus: DriverVerificationStatus;
@@ -80,10 +81,12 @@ export type AccessEvaluationReason =
 export type AccessEvaluation = {
   allowed: boolean;
   reason?: AccessEvaluationReason | undefined;
+  authorizedLocationIds?: string[] | undefined;
 };
 
 export function evaluateBusinessAccess(
   identity: IdentityContext | null,
+  targetLocationId?: string,
 ): AccessEvaluation {
   if (!identity) {
     return { allowed: false, reason: "ONBOARDING_REQUIRED" };
@@ -102,7 +105,33 @@ export function evaluateBusinessAccess(
   if (!activeMembership) {
     return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
   }
-  return { allowed: true };
+
+  const authorizedLocations = activeMembership.authorizedLocationIds || [];
+
+  // Owner without locations requires first location creation onboarding (Section 21)
+  if (activeMembership.role === "business_owner") {
+    if (authorizedLocations.length === 0) {
+      return { allowed: false, reason: "ONBOARDING_REQUIRED" };
+    }
+    return {
+      allowed: true,
+      authorizedLocationIds: authorizedLocations,
+    };
+  }
+
+  // Manager and Employee require scoped branch authorization (Section 21)
+  if (authorizedLocations.length === 0) {
+    return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
+  }
+
+  if (targetLocationId && !authorizedLocations.includes(targetLocationId)) {
+    return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
+  }
+
+  return {
+    allowed: true,
+    authorizedLocationIds: authorizedLocations,
+  };
 }
 
 export function evaluateDriverAccess(
@@ -111,12 +140,25 @@ export function evaluateDriverAccess(
   if (!identity || !identity.driver) {
     return { allowed: false, reason: "ONBOARDING_REQUIRED" };
   }
-  if (identity.driver.accountStatus === "REGISTERED") {
-    return { allowed: false, reason: "ONBOARDING_REQUIRED" };
-  }
-  if (identity.driver.accountStatus === "ACTIVE") {
+  const { verificationStatus, accountStatus } = identity.driver;
+
+  // Strict requirement: driver must be VERIFIED and ACTIVE (Section 23)
+  if (verificationStatus === "VERIFIED" && accountStatus === "ACTIVE") {
     return { allowed: true };
   }
+
+  // REGISTERED + PENDING/UNDER_REVIEW/REJECTED -> ONBOARDING_REQUIRED (Section 23)
+  if (
+    accountStatus === "REGISTERED" &&
+    (verificationStatus === "PENDING" ||
+      verificationStatus === "UNDER_REVIEW" ||
+      verificationStatus === "REJECTED")
+  ) {
+    return { allowed: false, reason: "ONBOARDING_REQUIRED" };
+  }
+
+  // ACTIVE + (PENDING | UNDER_REVIEW | REJECTED | EXPIRED) -> ACCOUNT_RESTRICTED
+  // SUSPENDED | BLOCKED | CLOSED -> ACCOUNT_RESTRICTED
   return { allowed: false, reason: "ACCOUNT_RESTRICTED" };
 }
 
@@ -298,4 +340,42 @@ export function shouldProcessDeepLink(
   if (processedSet.has(url)) return false;
   processedSet.add(url);
   return true;
+}
+
+// Phase 3: Driver Verification & Onboarding Helpers
+export function canVerifyDrivers(
+  role: PlatformRole | undefined,
+  aal: string | undefined,
+): {
+  allowed: boolean;
+  reason?: "AUTH_ADMIN_ROLE_REQUIRED" | "AUTH_MFA_REQUIRED";
+} {
+  if (!role || !["super_admin", "admin", "verification_agent"].includes(role)) {
+    return { allowed: false, reason: "AUTH_ADMIN_ROLE_REQUIRED" };
+  }
+  if (aal !== "aal2") {
+    return { allowed: false, reason: "AUTH_MFA_REQUIRED" };
+  }
+  return { allowed: true };
+}
+
+export function isDriverApproved(
+  verificationStatus: DriverVerificationStatus | undefined,
+  accountStatus: DriverAccountStatus | undefined,
+): boolean {
+  return verificationStatus === "VERIFIED" && accountStatus === "ACTIVE";
+}
+
+export function isDriverPendingVerification(
+  verificationStatus: DriverVerificationStatus | undefined,
+): boolean {
+  return (
+    verificationStatus === "PENDING" || verificationStatus === "UNDER_REVIEW"
+  );
+}
+
+export function isDriverRejected(
+  verificationStatus: DriverVerificationStatus | undefined,
+): boolean {
+  return verificationStatus === "REJECTED";
 }

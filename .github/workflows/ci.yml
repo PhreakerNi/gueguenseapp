@@ -2,9 +2,21 @@ name: CI Quality & Security Gates
 
 on:
   push:
-    branches: [main, phase/1-foundation, phase/2-auth-identity-sessions]
+    branches:
+      [
+        main,
+        phase/1-foundation,
+        phase/2-auth-identity-sessions,
+        phase/3-onboarding-b2b-drivers,
+      ]
   pull_request:
-    branches: [main, phase/1-foundation, phase/2-auth-identity-sessions]
+    branches:
+      [
+        main,
+        phase/1-foundation,
+        phase/2-auth-identity-sessions,
+        phase/3-onboarding-b2b-drivers,
+      ]
 
 jobs:
   quality-gates:
@@ -124,6 +136,19 @@ jobs:
       - name: Start Supabase Local Stack
         run: pnpm supabase:start
 
+      - name: Verify Migration Immutability (v1.3 against SHA 62e4fda)
+        run: |
+          git fetch --depth=1 origin 62e4fda22e236177160397374904e2f34019f5a9
+          git diff --exit-code 62e4fda22e236177160397374904e2f34019f5a9 -- supabase/migrations/20260820000001_phase3_security_closure_v1_3.sql
+
+      - name: Test Forward Migration Upgrade (v1.3 -> v1.4)
+        run: |
+          mv supabase/migrations/20260820000002_phase3_security_microclosure_v1_4.sql /tmp/
+          pnpm supabase:reset
+          mv /tmp/20260820000002_phase3_security_microclosure_v1_4.sql supabase/migrations/
+          pnpm supabase migration up --local
+          pnpm supabase:reset
+
       - name: Reset Database & Apply Foundation Migrations
         run: pnpm supabase:reset
 
@@ -183,6 +208,76 @@ jobs:
           echo "### Auth Integration Test Suite" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat test.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Stop Supabase Stack
+        if: always()
+        run: pnpm supabase:stop
+
+  onboarding-integration-gates:
+    name: Phase 3 Onboarding B2B & Driver Verification Integration Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24.18.0 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.18.0"
+
+      - name: Setup pnpm 11.17.0
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.17.0"
+
+      - name: Install Monorepo Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Supabase CLI Exact Version
+        run: pnpm supabase --version
+
+      - name: Start Supabase Local Stack
+        run: pnpm supabase:start
+
+      - name: Reset Database & Apply Migrations
+        run: pnpm supabase:reset
+
+      - name: Serve and Healthcheck api-v1 Edge Function
+        run: |
+          set -eo pipefail
+          node -e "const { execSync } = require('node:child_process'); const raw = execSync('pnpm supabase status -o json', { encoding: 'utf8' }); const match = raw.match(/\{[\s\S]*\}/); require('node:fs').writeFileSync('supabase_status.json', match ? match[0] : '{}');"
+          export SUPABASE_URL=$(jq -r '.API_URL // .api_url // "http://127.0.0.1:54321"' supabase_status.json)
+          export SUPABASE_ANON_KEY=$(jq -r '.ANON_KEY // .anon_key // empty' supabase_status.json)
+          export SUPABASE_SERVICE_ROLE_KEY=$(jq -r '.SERVICE_ROLE_KEY // .service_role_key // empty' supabase_status.json)
+          export DB_URL=$(jq -r '.DB_URL // .db_url // "postgresql://postgres:postgres@127.0.0.1:54322/postgres"' supabase_status.json)
+          echo "SUPABASE_URL=$SUPABASE_URL" >> $GITHUB_ENV
+          echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> $GITHUB_ENV
+          echo "SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY" >> $GITHUB_ENV
+          echo "DB_URL=$DB_URL" >> $GITHUB_ENV
+          mkdir -p supabase
+          echo "API_URL=$SUPABASE_URL" > supabase/.env.local
+          echo "SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY" >> supabase/.env.local
+          echo "ANON_KEY=$SUPABASE_ANON_KEY" >> supabase/.env.local
+          rm -f supabase_status.json
+          pnpm supabase functions serve api-v1 --no-verify-jwt --env-file supabase/.env.local &
+          echo "Waiting for api-v1 Edge Function to be ready..."
+          for i in $(seq 1 30); do
+            if curl -s http://127.0.0.1:54321/functions/v1/api-v1/health | grep -q '"status":"ok"'; then
+              echo "api-v1 Edge Function is UP and healthy!"
+              break
+            fi
+            echo "Waiting for api-v1 (attempt $i/30)..."
+            sleep 1
+          done
+
+      - name: Run Phase 3 Onboarding & Verification Integration Test Suite
+        run: |
+          set -eo pipefail
+          pnpm test:onboarding-integration 2>&1 | tee onboarding_test.log
+          echo "### Phase 3 Onboarding Integration Test Suite" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat onboarding_test.log >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Stop Supabase Stack

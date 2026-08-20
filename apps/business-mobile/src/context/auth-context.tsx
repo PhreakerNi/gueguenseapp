@@ -74,15 +74,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const typedMemberships = (rawMemberships ??
           []) as unknown as RawMembership[];
 
-        const businessMemberships = typedMemberships.map((m) => ({
-          membershipId: m.id,
-          businessId: m.business_id,
-          role: m.role as BusinessMemberRole,
-          status: m.status as BusinessMemberStatus,
-          businessAccountStatus: m.businesses?.account_status as
-            | BusinessAccountStatus
-            | undefined,
-        }));
+        const businessMemberships = await Promise.all(
+          typedMemberships.map(async (m) => {
+            let authorizedLocationIds: string[] = [];
+
+            if (m.role === "business_owner") {
+              const { data: locs } = await supabase
+                .from("business_locations")
+                .select("id")
+                .eq("business_id", m.business_id)
+                .eq("is_active", true);
+              authorizedLocationIds = (locs || []).map((l) => l.id);
+            } else {
+              const { data: memberLocs } = await supabase
+                .from("business_member_locations")
+                .select("business_location_id")
+                .eq("business_member_id", m.id);
+              authorizedLocationIds = (memberLocs || []).map(
+                (ml) => ml.business_location_id,
+              );
+            }
+
+            return {
+              membershipId: m.id,
+              businessId: m.business_id,
+              role: m.role as BusinessMemberRole,
+              status: m.status as BusinessMemberStatus,
+              businessAccountStatus: m.businesses?.account_status as
+                | BusinessAccountStatus
+                | undefined,
+              authorizedLocationIds,
+            };
+          }),
+        );
 
         return {
           userId: currentUser.id,
