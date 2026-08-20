@@ -334,7 +334,25 @@ Deno.serve(async (req: Request) => {
           errMsg = "Invalid request arguments";
         }
 
-        return errorResponse(errCode, errMsg, 400);
+        let statusCode = 400;
+        if (
+          errCode === "AUTH_FORBIDDEN" ||
+          errCode === "AUTH_ADMIN_ROLE_REQUIRED" ||
+          errCode === "AUTH_MFA_REQUIRED" ||
+          errCode === "BUSINESS_INACTIVE" ||
+          errCode === "ACCOUNT_RESTRICTED"
+        ) {
+          statusCode = 403;
+        } else if (
+          errCode === "BUSINESS_NOT_FOUND" ||
+          errCode === "DRIVER_NOT_FOUND"
+        ) {
+          statusCode = 404;
+        } else if (errCode === "IDEMPOTENCY_FINGERPRINT_MISMATCH") {
+          statusCode = 422;
+        }
+
+        return errorResponse(errCode, errMsg, statusCode);
       }
 
       const isCached = data?.cached === true;
