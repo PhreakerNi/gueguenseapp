@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS public.delivery_quotes (
     consumed_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT pg_catalog.clock_timestamp(),
     CONSTRAINT chk_quote_consumed_at CHECK (consumed_at IS NULL OR status = 'CONSUMED'),
-    CONSTRAINT chk_quote_expires_at CHECK (status <> 'QUOTED' OR expires_at > created_at)
+    CONSTRAINT chk_quote_expires_at CHECK (expires_at >= route_calculated_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_delivery_quotes_request_id
@@ -226,7 +226,7 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    RETURN jsonb_build_object(
+    RETURN pg_catalog.jsonb_build_object(
         'provider', v_record.provider,
         'origin_lat', v_record.origin_lat,
         'origin_lng', v_record.origin_lng,
@@ -447,7 +447,7 @@ BEGIN
     v_expires_at := v_calc_at + (v_pv.quote_ttl_seconds || ' seconds')::interval;
 
     -- 5. Build snapshots
-    v_pickup_snapshot := jsonb_build_object(
+    v_pickup_snapshot := pg_catalog.jsonb_build_object(
         'location_id', v_loc.id,
         'name', v_loc.name,
         'address_text', v_loc.address_text,
@@ -455,7 +455,7 @@ BEGIN
         'longitude', v_loc.longitude
     );
 
-    v_dropoff_snapshot := jsonb_build_object(
+    v_dropoff_snapshot := pg_catalog.jsonb_build_object(
         'address_text', pg_catalog.btrim(p_dropoff_address_text),
         'latitude', p_dropoff_lat,
         'longitude', p_dropoff_lng
@@ -538,7 +538,7 @@ BEGIN
     SET status = 'QUOTED'
     WHERE id = v_quote_id;
 
-    RETURN jsonb_build_object(
+    RETURN pg_catalog.jsonb_build_object(
         'quote_id', v_quote_id,
         'delivery_request_id', v_request_id,
         'status', 'QUOTED',
@@ -629,7 +629,7 @@ BEGIN
     FROM public.delivery_requests
     WHERE id = v_quote.delivery_request_id;
 
-    RETURN jsonb_build_object(
+    RETURN pg_catalog.jsonb_build_object(
         'quote_id', v_quote.id,
         'delivery_request_id', v_quote.delivery_request_id,
         'status', v_status,
@@ -648,7 +648,7 @@ BEGIN
         'expires_at', v_quote.expires_at,
         'consumed_at', v_quote.consumed_at,
         'created_at', v_quote.created_at,
-        'delivery_request', jsonb_build_object(
+        'delivery_request', pg_catalog.jsonb_build_object(
             'id', v_request.id,
             'business_id', v_request.business_id,
             'location_id', v_request.location_id,
@@ -719,7 +719,7 @@ BEGIN
 
     -- Idempotent cancel replay
     IF v_quote.status = 'CANCELED' THEN
-        RETURN jsonb_build_object(
+        RETURN pg_catalog.jsonb_build_object(
             'quote_id', v_quote.id,
             'status', 'CANCELED',
             'canceled_at', pg_catalog.clock_timestamp()
@@ -734,7 +734,7 @@ BEGIN
     SET status = 'CANCELED'
     WHERE id = p_quote_id;
 
-    RETURN jsonb_build_object(
+    RETURN pg_catalog.jsonb_build_object(
         'quote_id', v_quote.id,
         'status', 'CANCELED',
         'canceled_at', pg_catalog.clock_timestamp()
@@ -920,7 +920,7 @@ BEGIN
     SET status = 'QUOTED'
     WHERE id = v_new_quote_id;
 
-    RETURN jsonb_build_object(
+    RETURN pg_catalog.jsonb_build_object(
         'quote_id', v_new_quote_id,
         'delivery_request_id', v_old_quote.delivery_request_id,
         'status', 'QUOTED',
@@ -996,7 +996,7 @@ BEGIN
                 RAISE EXCEPTION 'IDEMPOTENCY_FINGERPRINT_MISMATCH: Request payload fingerprint does not match original request';
             END IF;
 
-            RETURN jsonb_build_object(
+            RETURN pg_catalog.jsonb_build_object(
                 'cached', true,
                 'status', v_cached.response_status,
                 'body', v_cached.response_body
@@ -1164,7 +1164,7 @@ BEGIN
         response_body_ref = EXCLUDED.response_body_ref,
         expires_at = EXCLUDED.expires_at;
 
-    RETURN jsonb_build_object(
+    RETURN pg_catalog.jsonb_build_object(
         'cached', false,
         'status', v_status,
         'body', v_result
@@ -1202,7 +1202,7 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    RETURN jsonb_build_object(
+    RETURN pg_catalog.jsonb_build_object(
         'id', v_rec.id,
         'business_id', v_rec.business_id,
         'name', v_rec.name,
@@ -1242,7 +1242,7 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    RETURN jsonb_build_object(
+    RETURN pg_catalog.jsonb_build_object(
         'quote_id', v_rec.quote_id,
         'status', v_rec.status,
         'delivery_request_id', v_rec.delivery_request_id,

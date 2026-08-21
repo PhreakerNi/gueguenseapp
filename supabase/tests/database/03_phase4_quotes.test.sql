@@ -389,7 +389,9 @@ SELECT isnt(
 -- ============================================================================
 -- Backdate expires_at on new quote
 UPDATE public.delivery_quotes
-SET expires_at = now() - interval '10 seconds'
+SET route_calculated_at = now() - interval '400 seconds',
+    created_at = now() - interval '400 seconds',
+    expires_at = now() - interval '100 seconds'
 WHERE id = current_setting('test.new_quote_id')::uuid;
 
 -- 40. get_quote_for_actor lazily marks quote as EXPIRED
