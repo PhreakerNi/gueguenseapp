@@ -303,6 +303,9 @@ $$;
 -- 6. Unified create_delivery_quote & create_delivery_requote
 -- ----------------------------------------------------------------------------
 
+DROP FUNCTION IF EXISTS public.create_delivery_quote(UUID, UUID, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT, TEXT, TEXT, NUMERIC, BIGINT, BIGINT, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS public.create_delivery_quote(UUID, UUID, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT, TEXT, TEXT, NUMERIC(10,2), BIGINT, BIGINT, TIMESTAMPTZ);
+
 CREATE OR REPLACE FUNCTION public.create_delivery_quote(
     p_actor_id UUID,
     p_location_id UUID,
@@ -312,10 +315,10 @@ CREATE OR REPLACE FUNCTION public.create_delivery_quote(
     p_recipient_name TEXT,
     p_recipient_phone TEXT,
     p_package_type TEXT,
-    p_cash_to_collect NUMERIC,
+    p_cash_to_collect NUMERIC(10,2),
     p_distance_meters BIGINT,
     p_duration_seconds BIGINT,
-    p_route_calculated_at TIMESTAMPTZ
+    p_route_calculated_at TIMESTAMPTZ DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -568,12 +571,14 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS public.create_delivery_requote(UUID, UUID, BIGINT, BIGINT, TIMESTAMPTZ);
+
 CREATE OR REPLACE FUNCTION public.create_delivery_requote(
     p_actor_id UUID,
     p_quote_id UUID,
     p_distance_meters BIGINT,
     p_duration_seconds BIGINT,
-    p_route_calculated_at TIMESTAMPTZ
+    p_route_calculated_at TIMESTAMPTZ DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -1012,6 +1017,12 @@ GRANT EXECUTE ON FUNCTION public.verify_quote_creation_scope(UUID, UUID) TO serv
 
 REVOKE EXECUTE ON FUNCTION public.verify_requote_scope(UUID, UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.verify_requote_scope(UUID, UUID) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.create_delivery_quote(UUID, UUID, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT, TEXT, TEXT, NUMERIC(10,2), BIGINT, BIGINT, TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_delivery_quote(UUID, UUID, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT, TEXT, TEXT, NUMERIC(10,2), BIGINT, BIGINT, TIMESTAMPTZ) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.create_delivery_requote(UUID, UUID, BIGINT, BIGINT, TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_delivery_requote(UUID, UUID, BIGINT, BIGINT, TIMESTAMPTZ) TO service_role;
 
 REVOKE EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) TO service_role;
