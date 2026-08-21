@@ -245,3 +245,81 @@ export const adminVerifyDriverSchema = z
   );
 
 export type AdminVerifyDriverInput = z.infer<typeof adminVerifyDriverSchema>;
+
+// Phase 4: Quote Engine Schemas
+
+export const packageTypeSchema = z.enum([
+  "PARCEL",
+  "DOCUMENT",
+  "FOOD",
+  "FRAGILE",
+  "BULKY",
+]);
+
+export type PackageTypeInput = z.infer<typeof packageTypeSchema>;
+
+export const quoteStatusSchema = z.enum([
+  "DRAFT",
+  "QUOTED",
+  "CONSUMED",
+  "EXPIRED",
+  "CANCELED",
+]);
+
+export type QuoteStatusInput = z.infer<typeof quoteStatusSchema>;
+
+export const createQuoteSchema = z.object({
+  location_id: z.string().uuid("Invalid location ID"),
+  dropoff_address: z.object({
+    address_text: z
+      .string()
+      .trim()
+      .min(3, "Dropoff address must be at least 3 characters"),
+    latitude: z
+      .number()
+      .min(-90)
+      .max(90, "Latitude must be between -90 and 90"),
+    longitude: z
+      .number()
+      .min(-180)
+      .max(180, "Longitude must be between -180 and 180"),
+  }),
+  recipient_name: z
+    .string()
+    .trim()
+    .min(2, "Recipient name must be at least 2 characters"),
+  recipient_phone: z
+    .string()
+    .trim()
+    .min(8, "Recipient phone must be at least 8 digits")
+    .regex(/^\+?[0-9\s\-()]+$/, "Invalid recipient phone format"),
+  package_type: packageTypeSchema,
+  cash_to_collect: z
+    .number()
+    .min(0, "Cash to collect must be non-negative")
+    .default(0),
+});
+
+export type CreateQuoteInput = z.infer<typeof createQuoteSchema>;
+
+export const quoteResponseSchema = z.object({
+  quote_id: z.string().uuid(),
+  delivery_request_id: z.string().uuid(),
+  status: quoteStatusSchema,
+  currency: z.literal("NIO"),
+  base_amount: z.string(),
+  distance_amount: z.string(),
+  time_amount: z.string(),
+  zone_amount: z.string(),
+  demand_amount: z.string(),
+  discount_amount: z.string(),
+  quoted_total: z.string(),
+  route_distance_meters: z.number().int().positive(),
+  route_duration_seconds: z.number().int().nonnegative(),
+  route_provider: z.literal("GOOGLE_ROUTES"),
+  route_calculated_at: z.string(),
+  expires_at: z.string(),
+  created_at: z.string(),
+});
+
+export type QuoteResponse = z.infer<typeof quoteResponseSchema>;

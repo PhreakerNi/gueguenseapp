@@ -323,6 +323,77 @@ export type Database = {
         }
         Relationships: []
       }
+      pricing_rules: {
+        Row: {
+          base_fee: number
+          created_at: string
+          id: string
+          min_fare: number
+          per_km_rate: number
+          per_minute_rate: number
+          pricing_version_id: string
+        }
+        Insert: {
+          base_fee: number
+          created_at?: string
+          id?: string
+          min_fare: number
+          per_km_rate: number
+          per_minute_rate: number
+          pricing_version_id: string
+        }
+        Update: {
+          base_fee?: number
+          created_at?: string
+          id?: string
+          min_fare?: number
+          per_km_rate?: number
+          per_minute_rate?: number
+          pricing_version_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_rules_pricing_version_id_fkey"
+            columns: ["pricing_version_id"]
+            isOneToOne: true
+            referencedRelation: "pricing_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pricing_versions: {
+        Row: {
+          created_at: string
+          currency: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          is_active: boolean
+          name: string
+          quote_ttl_seconds: number
+        }
+        Insert: {
+          created_at?: string
+          currency?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          quote_ttl_seconds?: number
+        }
+        Update: {
+          created_at?: string
+          currency?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          quote_ttl_seconds?: number
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -428,6 +499,13 @@ export type Database = {
         }
         Returns: Json
       }
+      cancel_delivery_quote: {
+        Args: {
+          p_actor_id: string
+          p_quote_id: string
+        }
+        Returns: Json
+      }
       commit_driver_document: {
         Args: {
           p_actor_id: string
@@ -459,6 +537,33 @@ export type Database = {
         }
         Returns: Json
       }
+      create_delivery_quote: {
+        Args: {
+          p_actor_id: string
+          p_cash_to_collect?: number
+          p_distance_meters: number
+          p_dropoff_address_text: string
+          p_dropoff_lat: number
+          p_dropoff_lng: number
+          p_duration_seconds: number
+          p_location_id: string
+          p_package_type: string
+          p_recipient_name: string
+          p_recipient_phone: string
+          p_route_calculated_at?: string
+        }
+        Returns: Json
+      }
+      create_delivery_requote: {
+        Args: {
+          p_actor_id: string
+          p_distance_meters: number
+          p_duration_seconds: number
+          p_quote_id: string
+          p_route_calculated_at?: string
+        }
+        Returns: Json
+      }
       execute_idempotent_operation: {
         Args: {
           p_actor_user_id: string
@@ -477,6 +582,13 @@ export type Database = {
       get_admin_driver_verification_queue: { Args: never; Returns: Json }
       get_driver_document_storage_path: {
         Args: { p_document_id: string }
+        Returns: Json
+      }
+      get_quote_for_actor: {
+        Args: {
+          p_actor_id: string
+          p_quote_id: string
+        }
         Returns: Json
       }
       get_user_platform_role: { Args: { p_user_id: string }; Returns: string }

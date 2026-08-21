@@ -379,3 +379,135 @@ export function isDriverRejected(
 ): boolean {
   return verificationStatus === "REJECTED";
 }
+
+export interface PricingRuleParams {
+  baseFee: number | string;
+  perKmRate: number | string;
+  perMinuteRate: number | string;
+  minFare: number | string;
+}
+
+export interface QuotePriceCalculation {
+  baseAmount: string;
+  distanceAmount: string;
+  timeAmount: string;
+  zoneAmount: string;
+  demandAmount: string;
+  discountAmount: string;
+  quotedTotal: string;
+}
+
+export function calculateQuotePrice(
+  rule: PricingRuleParams,
+  distanceMeters: number,
+  durationSeconds: number,
+): QuotePriceCalculation {
+  if (distanceMeters <= 0) {
+    throw new Error(
+      "INVALID_ARGUMENT: route_distance_meters must be greater than 0",
+    );
+  }
+  if (durationSeconds < 0) {
+    throw new Error(
+      "INVALID_ARGUMENT: route_duration_seconds must be non-negative",
+    );
+  }
+
+  const baseFee =
+    typeof rule.baseFee === "string" ? parseFloat(rule.baseFee) : rule.baseFee;
+  const perKmRate =
+    typeof rule.perKmRate === "string"
+      ? parseFloat(rule.perKmRate)
+      : rule.perKmRate;
+  const perMinuteRate =
+    typeof rule.perMinuteRate === "string"
+      ? parseFloat(rule.perMinuteRate)
+      : rule.perMinuteRate;
+  const minFare =
+    typeof rule.minFare === "string" ? parseFloat(rule.minFare) : rule.minFare;
+
+  if (
+    isNaN(baseFee) ||
+    isNaN(perKmRate) ||
+    isNaN(perMinuteRate) ||
+    isNaN(minFare)
+  ) {
+    throw new Error("INVALID_ARGUMENT: Invalid pricing rule numeric values");
+  }
+
+  const km = distanceMeters / 1000;
+  const minutes = durationSeconds / 60;
+
+  const baseAmount = baseFee;
+  const distanceAmount = Math.round(km * perKmRate * 100) / 100;
+  const timeAmount = Math.round(minutes * perMinuteRate * 100) / 100;
+
+  const subtotal =
+    Math.round((baseAmount + distanceAmount + timeAmount) * 100) / 100;
+  const quotedTotal = Math.max(minFare, subtotal);
+
+  return {
+    baseAmount: baseAmount.toFixed(2),
+    distanceAmount: distanceAmount.toFixed(2),
+    timeAmount: timeAmount.toFixed(2),
+    zoneAmount: "0.00",
+    demandAmount: "0.00",
+    discountAmount: "0.00",
+    quotedTotal: quotedTotal.toFixed(2),
+  };
+}
+
+export function parseRouteDurationSeconds(duration: string | number): number {
+  if (typeof duration === "number") {
+    if (isNaN(duration) || duration < 0) {
+      throw new Error(
+        "INVALID_ARGUMENT: duration must be a non-negative number",
+      );
+    }
+    return Math.round(duration);
+  }
+  if (typeof duration === "string") {
+    const trimmed = duration.trim();
+    if (trimmed.endsWith("s")) {
+      const parsed = parseFloat(trimmed.slice(0, -1));
+      if (isNaN(parsed) || parsed < 0) {
+        throw new Error(
+          `INVALID_ARGUMENT: Invalid duration string ${duration}`,
+        );
+      }
+      return Math.round(parsed);
+    }
+    const parsed = parseFloat(trimmed);
+    if (isNaN(parsed) || parsed < 0) {
+      throw new Error(`INVALID_ARGUMENT: Invalid duration string ${duration}`);
+    }
+    return Math.round(parsed);
+  }
+  throw new Error("INVALID_ARGUMENT: duration must be string or number");
+}
+
+export function generateRouteCacheKey(
+  originLat: number,
+  originLng: number,
+  destLat: number,
+  destLng: number,
+): string {
+  return `route:google:${originLat.toFixed(5)},${originLng.toFixed(5)}->${destLat.toFixed(5)},${destLng.toFixed(5)}`;
+}
+
+export function isQuoteExpired(
+  expiresAt: string | Date,
+  now: Date = new Date(),
+): boolean {
+  const expiryDate =
+    typeof expiresAt === "string" ? new Date(expiresAt) : expiresAt;
+  return now.getTime() >= expiryDate.getTime();
+}
+
+export function canCancelQuote(status: string): boolean {
+  return status === "QUOTED";
+}
+
+export function canRequote(status: string): boolean {
+  return status === "EXPIRED" || status === "CANCELED";
+}

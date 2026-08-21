@@ -6,6 +6,14 @@ export const QUOTE_STATUSES = [
   "CANCELED",
 ] as const;
 
+export const PACKAGE_TYPES = [
+  "PARCEL",
+  "DOCUMENT",
+  "FOOD",
+  "FRAGILE",
+  "BULKY",
+] as const;
+
 export const DELIVERY_STATUSES = [
   "SEARCHING_DRIVER",
   "DRIVER_ASSIGNED",

@@ -14,6 +14,7 @@
     "test": "turbo test",
     "test:auth-integration": "node --test --import tsx tests/auth-integration.test.ts",
     "test:onboarding-integration": "node --test --import tsx tests/onboarding-integration.test.ts",
+    "test:quote-integration": "node --test --import tsx tests/quote-integration.test.ts",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "supabase:start": "supabase start",

@@ -2,6 +2,7 @@ export * from "./database.generated";
 export type {
   DeliveryStatus,
   QuoteStatus,
+  PackageType,
   DriverVerificationStatus,
   DriverAccountStatus,
   BusinessMemberRole,
@@ -12,4 +13,6 @@ export type {
   AccessEvaluation,
   AccessEvaluationReason,
   AuthErrorCode,
+  PricingRuleParams,
+  QuotePriceCalculation,
 } from "@gueguense/domain";

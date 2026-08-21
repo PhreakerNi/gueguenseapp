@@ -303,6 +303,22 @@ Deno.serve(async (req: Request) => {
         } else if (error.message.includes("VEHICLE_MISSING")) {
           errCode = "VEHICLE_MISSING";
           errMsg = "Driver must have at least one registered vehicle";
+        } else if (error.message.includes("PRICING_UNAVAILABLE")) {
+          errCode = "PRICING_UNAVAILABLE";
+          errMsg =
+            "Pricing version or routing service is currently unavailable";
+        } else if (error.message.includes("QUOTE_NOT_FOUND")) {
+          errCode = "QUOTE_NOT_FOUND";
+          errMsg = "Delivery quote not found";
+        } else if (error.message.includes("QUOTE_INVALID_STATE")) {
+          errCode = "QUOTE_INVALID_STATE";
+          errMsg = "Quote is not in a valid state for this operation";
+        } else if (error.message.includes("VALIDATION_ERROR")) {
+          errCode = "VALIDATION_ERROR";
+          errMsg = error.message.replace(/^[^:]+:\s*/, "");
+        } else if (error.message.includes("INVALID_LOCATIONS")) {
+          errCode = "INVALID_LOCATIONS";
+          errMsg = "Specified business location does not exist";
         }
 
         let statusCode = 400;
@@ -311,17 +327,21 @@ Deno.serve(async (req: Request) => {
           errCode === "AUTH_ADMIN_ROLE_REQUIRED" ||
           errCode === "AUTH_MFA_REQUIRED" ||
           errCode === "BUSINESS_INACTIVE" ||
-          errCode === "ACCOUNT_RESTRICTED"
+          errCode === "ACCOUNT_RESTRICTED" ||
+          errCode === "INVALID_LOCATION_SCOPE"
         ) {
           statusCode = 403;
         } else if (
           errCode === "BUSINESS_NOT_FOUND" ||
           errCode === "DRIVER_NOT_FOUND" ||
-          errCode === "DOCUMENT_NOT_FOUND"
+          errCode === "DOCUMENT_NOT_FOUND" ||
+          errCode === "QUOTE_NOT_FOUND"
         ) {
           statusCode = 404;
         } else if (errCode === "IDEMPOTENCY_FINGERPRINT_MISMATCH") {
           statusCode = 422;
+        } else if (errCode === "PRICING_UNAVAILABLE") {
+          statusCode = 503;
         }
 
         return errorResponse(errCode, errMsg, statusCode);
@@ -935,6 +955,505 @@ Deno.serve(async (req: Request) => {
           actor_aal: "aal2",
         },
       );
+    }
+
+    // =============================================================
+    // Phase 4: Quote Engine Helper & Routes (Solo Delivery)
+    // =============================================================
+
+    async function fetchGoogleRoutes(
+      originLat: number,
+      originLng: number,
+      destLat: number,
+      destLng: number,
+    ): Promise<{
+      distanceMeters: number;
+      durationSeconds: number;
+      provider: string;
+      calculatedAt: string;
+    }> {
+      const cacheKey = `route:google:${originLat.toFixed(5)},${originLng.toFixed(5)}->${destLat.toFixed(5)},${destLng.toFixed(5)}`;
+
+      // 1. Check DB cache
+      const { data: cachedRoute } = await serviceClient.rpc("get_route_cache", {
+        p_cache_key: cacheKey,
+      });
+
+      const routesApiKey = Deno.env.get("GOOGLE_MAPS_ROUTES_API_KEY") || "";
+      const routesApiUrl =
+        Deno.env.get("GOOGLE_ROUTES_API_URL") ||
+        "https://routes.googleapis.com/directions/v2:computeRoutes";
+
+      async function callGoogleApi(): Promise<{
+        distanceMeters: number;
+        durationSeconds: number;
+      } | null> {
+        if (!routesApiKey) {
+          return null;
+        }
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        try {
+          const response = await fetch(routesApiUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Goog-Api-Key": routesApiKey,
+              "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
+            },
+            body: JSON.stringify({
+              origin: {
+                location: {
+                  latLng: {
+                    latitude: originLat,
+                    longitude: originLng,
+                  },
+                },
+              },
+              destination: {
+                location: {
+                  latLng: {
+                    latitude: destLat,
+                    longitude: destLng,
+                  },
+                },
+              },
+              travelMode: "TWO_WHEELER",
+              routingPreference: "TRAFFIC_UNAWARE",
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            return null;
+          }
+
+          const json = await response.json();
+          const route = json.routes?.[0];
+          if (!route || !route.distanceMeters || !route.duration) {
+            return null;
+          }
+
+          const distanceMeters = Number(route.distanceMeters);
+          let durationSeconds = 0;
+          if (
+            typeof route.duration === "string" &&
+            route.duration.endsWith("s")
+          ) {
+            durationSeconds = Math.round(
+              parseFloat(route.duration.slice(0, -1)),
+            );
+          } else {
+            durationSeconds = Math.round(Number(route.duration));
+          }
+
+          if (
+            isNaN(distanceMeters) ||
+            isNaN(durationSeconds) ||
+            distanceMeters <= 0 ||
+            durationSeconds < 0
+          ) {
+            return null;
+          }
+
+          return { distanceMeters, durationSeconds };
+        } catch {
+          clearTimeout(timeoutId);
+          return null;
+        }
+      }
+
+      // Attempt 1
+      let googleResult = await callGoogleApi();
+
+      // 1 controlled retry if attempt 1 failed
+      if (!googleResult) {
+        googleResult = await callGoogleApi();
+      }
+
+      if (googleResult) {
+        // Upsert into cache (86400s = 24h)
+        await serviceClient.rpc("upsert_route_cache", {
+          p_cache_key: cacheKey,
+          p_provider: "GOOGLE_ROUTES",
+          p_origin_lat: originLat,
+          p_origin_lng: originLng,
+          p_dest_lat: destLat,
+          p_dest_lng: destLng,
+          p_distance_meters: googleResult.distanceMeters,
+          p_duration_seconds: googleResult.durationSeconds,
+          p_ttl_seconds: 86400,
+        });
+
+        return {
+          distanceMeters: googleResult.distanceMeters,
+          durationSeconds: googleResult.durationSeconds,
+          provider: "GOOGLE_ROUTES",
+          calculatedAt: new Date().toISOString(),
+        };
+      }
+
+      // If Google failed, check valid cache fallback
+      if (
+        cachedRoute &&
+        cachedRoute.distance_meters &&
+        cachedRoute.duration_seconds
+      ) {
+        return {
+          distanceMeters: Number(cachedRoute.distance_meters),
+          durationSeconds: Number(cachedRoute.duration_seconds),
+          provider: "GOOGLE_ROUTES",
+          calculatedAt: cachedRoute.calculated_at || new Date().toISOString(),
+        };
+      }
+
+      throw new Error(
+        "PRICING_UNAVAILABLE: Routing provider and cache unavailable",
+      );
+    }
+
+    // -------------------------------------------------------------
+    // Route 12: Create Delivery Quote (POST /quotes)
+    // -------------------------------------------------------------
+    if (
+      req.method === "POST" &&
+      (path === "/quotes" || path === "/api/v1/quotes")
+    ) {
+      const locationId = body.location_id || body.locationId;
+      const dropoffAddress = body.dropoff_address || body.dropoffAddress;
+      const recipientName = body.recipient_name || body.recipientName;
+      const recipientPhone = body.recipient_phone || body.recipientPhone;
+      const packageType = body.package_type || body.packageType;
+      const cashToCollect =
+        body.cash_to_collect !== undefined
+          ? body.cash_to_collect
+          : body.cashToCollect !== undefined
+            ? body.cashToCollect
+            : 0;
+
+      if (
+        !locationId ||
+        !dropoffAddress ||
+        !recipientName ||
+        !recipientPhone ||
+        !packageType
+      ) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "location_id, dropoff_address, recipient_name, recipient_phone, and package_type are required",
+          400,
+        );
+      }
+
+      const dropoffAddressText =
+        dropoffAddress.address_text || dropoffAddress.addressText;
+      const dropoffLat = Number(
+        dropoffAddress.latitude !== undefined
+          ? dropoffAddress.latitude
+          : dropoffAddress.lat,
+      );
+      const dropoffLng = Number(
+        dropoffAddress.longitude !== undefined
+          ? dropoffAddress.longitude
+          : dropoffAddress.lng,
+      );
+
+      if (
+        !dropoffAddressText ||
+        isNaN(dropoffLat) ||
+        isNaN(dropoffLng) ||
+        dropoffLat < -90 ||
+        dropoffLat > 90 ||
+        dropoffLng < -180 ||
+        dropoffLng > 180
+      ) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "dropoff_address must contain address_text and valid latitude [-90,90] and longitude [-180,180]",
+          400,
+        );
+      }
+
+      const idempotencyKey =
+        req.headers.get("Idempotency-Key") ||
+        req.headers.get("idempotency-key");
+
+      if (!idempotencyKey) {
+        return errorResponse(
+          "IDEMPOTENCY_KEY_REQUIRED",
+          "Idempotency-Key header is required for this operation",
+          400,
+        );
+      }
+
+      if (!UUID_V4_REGEX.test(idempotencyKey)) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "Idempotency-Key must be a valid UUID v4",
+          400,
+        );
+      }
+
+      const canonicalPayload = JSON.stringify(sortKeysRecursively(body));
+      const fingerprint = await sha256Hex(
+        `${userId}:${req.method}:${path}:${canonicalPayload}`,
+      );
+
+      // Check idempotency cache first so replay NEVER calls Google Routes again
+      const { data: cachedKey } = await serviceClient
+        .from("idempotency_keys")
+        .select("response_status, response_body, request_fingerprint")
+        .eq("user_id", userId)
+        .eq("scope", "create_delivery_quote")
+        .eq("key", idempotencyKey)
+        .maybeSingle();
+
+      if (cachedKey) {
+        if (cachedKey.request_fingerprint !== fingerprint) {
+          return errorResponse(
+            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+            "Request payload fingerprint does not match original request",
+            422,
+          );
+        }
+        return jsonResponse(
+          cachedKey.response_body,
+          cachedKey.response_status || 201,
+          { "X-Cache": "HIT" },
+        );
+      }
+
+      // Fetch pickup location from DB
+      const { data: locData, error: locErr } = await serviceClient
+        .from("business_locations")
+        .select("id, latitude, longitude, is_active, business_id")
+        .eq("id", locationId)
+        .maybeSingle();
+
+      if (locErr || !locData) {
+        return errorResponse(
+          "INVALID_LOCATIONS",
+          "Specified business location does not exist",
+          400,
+        );
+      }
+
+      if (!locData.is_active) {
+        return errorResponse(
+          "BUSINESS_INACTIVE",
+          "Business location is inactive",
+          403,
+        );
+      }
+
+      // Fetch Google Routes metrics
+      let routeMetrics;
+      try {
+        routeMetrics = await fetchGoogleRoutes(
+          locData.latitude,
+          locData.longitude,
+          dropoffLat,
+          dropoffLng,
+        );
+      } catch (err: any) {
+        return errorResponse(
+          "PRICING_UNAVAILABLE",
+          "Pricing version or routing service is currently unavailable",
+          503,
+        );
+      }
+
+      return await runIdempotentOp(
+        "create_delivery_quote",
+        "create_delivery_quote",
+        {
+          location_id: locationId,
+          dropoff_address_text: dropoffAddressText,
+          dropoff_lat: dropoffLat,
+          dropoff_lng: dropoffLng,
+          recipient_name: recipientName,
+          recipient_phone: recipientPhone,
+          package_type: packageType,
+          cash_to_collect: cashToCollect,
+          distance_meters: routeMetrics.distanceMeters,
+          duration_seconds: routeMetrics.durationSeconds,
+          route_calculated_at: routeMetrics.calculatedAt,
+        },
+      );
+    }
+
+    // -------------------------------------------------------------
+    // Route 13: Cancel Quote (POST /quotes/:id/cancel)
+    // -------------------------------------------------------------
+    const cancelQuoteMatch = path.match(
+      /^\/(?:api\/v1\/)?quotes\/([^\/]+)\/cancel$/,
+    );
+    if (req.method === "POST" && cancelQuoteMatch) {
+      const quoteId = cancelQuoteMatch[1];
+      return await runIdempotentOp(
+        `cancel_quote:${quoteId}`,
+        "cancel_delivery_quote",
+        {
+          quote_id: quoteId,
+        },
+      );
+    }
+
+    // -------------------------------------------------------------
+    // Route 14: Requote (POST /quotes/:id/requote)
+    // -------------------------------------------------------------
+    const requoteMatch = path.match(
+      /^\/(?:api\/v1\/)?quotes\/([^\/]+)\/requote$/,
+    );
+    if (req.method === "POST" && requoteMatch) {
+      const quoteId = requoteMatch[1];
+
+      const idempotencyKey =
+        req.headers.get("Idempotency-Key") ||
+        req.headers.get("idempotency-key");
+
+      if (!idempotencyKey) {
+        return errorResponse(
+          "IDEMPOTENCY_KEY_REQUIRED",
+          "Idempotency-Key header is required for this operation",
+          400,
+        );
+      }
+
+      if (!UUID_V4_REGEX.test(idempotencyKey)) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "Idempotency-Key must be a valid UUID v4",
+          400,
+        );
+      }
+
+      const canonicalPayload = JSON.stringify(sortKeysRecursively(body));
+      const fingerprint = await sha256Hex(
+        `${userId}:${req.method}:${path}:${canonicalPayload}`,
+      );
+
+      // Check idempotency cache first
+      const { data: cachedKey } = await serviceClient
+        .from("idempotency_keys")
+        .select("response_status, response_body, request_fingerprint")
+        .eq("user_id", userId)
+        .eq("scope", `requote_quote:${quoteId}`)
+        .eq("key", idempotencyKey)
+        .maybeSingle();
+
+      if (cachedKey) {
+        if (cachedKey.request_fingerprint !== fingerprint) {
+          return errorResponse(
+            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+            "Request payload fingerprint does not match original request",
+            422,
+          );
+        }
+        return jsonResponse(
+          cachedKey.response_body,
+          cachedKey.response_status || 201,
+          { "X-Cache": "HIT" },
+        );
+      }
+
+      // Fetch quote and delivery request to get locations
+      const { data: quoteRecord, error: quoteErr } = await serviceClient
+        .from("delivery_quotes")
+        .select(
+          "id, status, expires_at, delivery_requests (location_id, dropoff_address_snapshot, business_locations (latitude, longitude))",
+        )
+        .eq("id", quoteId)
+        .maybeSingle();
+
+      if (quoteErr || !quoteRecord) {
+        return errorResponse(
+          "QUOTE_NOT_FOUND",
+          "Delivery quote not found",
+          404,
+        );
+      }
+
+      const deliveryReq: any = quoteRecord.delivery_requests;
+      const pickupLoc: any = deliveryReq?.business_locations;
+      const dropoffSnapshot: any = deliveryReq?.dropoff_address_snapshot;
+
+      if (!pickupLoc || !dropoffSnapshot) {
+        return errorResponse(
+          "QUOTE_NOT_FOUND",
+          "Delivery request details not found",
+          404,
+        );
+      }
+
+      let routeMetrics;
+      try {
+        routeMetrics = await fetchGoogleRoutes(
+          pickupLoc.latitude,
+          pickupLoc.longitude,
+          dropoffSnapshot.latitude,
+          dropoffSnapshot.longitude,
+        );
+      } catch {
+        return errorResponse(
+          "PRICING_UNAVAILABLE",
+          "Pricing version or routing service is currently unavailable",
+          503,
+        );
+      }
+
+      return await runIdempotentOp(
+        `requote_quote:${quoteId}`,
+        "create_delivery_requote",
+        {
+          quote_id: quoteId,
+          distance_meters: routeMetrics.distanceMeters,
+          duration_seconds: routeMetrics.durationSeconds,
+          route_calculated_at: routeMetrics.calculatedAt,
+        },
+      );
+    }
+
+    // -------------------------------------------------------------
+    // Route 15: Get Quote by ID (GET /quotes/:id)
+    // -------------------------------------------------------------
+    const getQuoteMatch = path.match(/^\/(?:api\/v1\/)?quotes\/([^\/]+)$/);
+    if (req.method === "GET" && getQuoteMatch) {
+      const quoteId = getQuoteMatch[1];
+
+      const { data: quoteData, error: quoteErr } = await serviceClient.rpc(
+        "get_quote_for_actor",
+        {
+          p_actor_id: userId,
+          p_quote_id: quoteId,
+        },
+      );
+
+      if (quoteErr) {
+        if (quoteErr.message.includes("QUOTE_NOT_FOUND")) {
+          return errorResponse(
+            "QUOTE_NOT_FOUND",
+            "Delivery quote not found",
+            404,
+          );
+        }
+        if (quoteErr.message.includes("AUTH_FORBIDDEN")) {
+          return errorResponse(
+            "AUTH_FORBIDDEN",
+            "Action forbidden for current user",
+            403,
+          );
+        }
+        return errorResponse(
+          "DATABASE_ERROR",
+          "Database operation failed",
+          500,
+        );
+      }
+
+      return jsonResponse(quoteData);
     }
 
     // 404 Route Not Found
