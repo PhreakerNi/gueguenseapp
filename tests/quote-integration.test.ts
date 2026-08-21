@@ -164,7 +164,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
     });
 
     await new Promise<void>((resolve) => {
-      mockServer.listen(mockServerPort, () => {
+      mockServer.listen(mockServerPort, "0.0.0.0", () => {
         resolve();
       });
     });

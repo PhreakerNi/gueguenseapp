@@ -1045,25 +1045,32 @@ Deno.serve(async (req: Request) => {
       const routesApiUrl =
         Deno.env.get("GOOGLE_ROUTES_API_URL") ||
         "https://routes.googleapis.com/directions/v2:computeRoutes";
+      const isMockUrl =
+        routesApiUrl.includes("127.0.0.1") ||
+        routesApiUrl.includes("localhost");
 
       async function callGoogleApi(): Promise<{
         distanceMeters: number;
         durationSeconds: number;
       } | null> {
-        if (!routesApiKey) {
+        if (!routesApiKey && !isMockUrl) {
           return null;
         }
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
         try {
+          const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+            "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
+          };
+          if (routesApiKey) {
+            headers["X-Goog-Api-Key"] = routesApiKey;
+          }
+
           const response = await fetch(routesApiUrl, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Goog-Api-Key": routesApiKey,
-              "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
-            },
+            headers,
             body: JSON.stringify({
               origin: {
                 location: {
@@ -1121,8 +1128,9 @@ Deno.serve(async (req: Request) => {
           }
 
           return { distanceMeters, durationSeconds };
-        } catch {
+        } catch (err) {
           clearTimeout(timeoutId);
+          console.error("[callGoogleApi error]:", err);
           return null;
         }
       }
