@@ -491,6 +491,8 @@ SELECT throws_like(
 -- ============================================================================
 -- 14. Route Cache & Idempotency Helpers (5 assertions: 54-58)
 -- ============================================================================
+SET LOCAL ROLE postgres;
+
 -- 54. Upsert cache record
 SELECT lives_ok(
     $$ SELECT private.upsert_route_cache(
