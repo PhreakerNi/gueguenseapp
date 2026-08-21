@@ -617,16 +617,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      add_business_member: {
-        Args: {
-          p_actor_id: string
-          p_business_id: string
-          p_location_ids?: string[]
-          p_role: string
-          p_target_user_id: string
-        }
-        Returns: Json
-      }
       acquire_idempotency_lease: {
         Args: {
           p_actor_user_id: string
@@ -634,6 +624,16 @@ export type Database = {
           p_lease_seconds?: number
           p_request_fingerprint: string
           p_scope: string
+        }
+        Returns: Json
+      }
+      add_business_member: {
+        Args: {
+          p_actor_id: string
+          p_business_id: string
+          p_location_ids?: string[]
+          p_role: string
+          p_target_user_id: string
         }
         Returns: Json
       }
