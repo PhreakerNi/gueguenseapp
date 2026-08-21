@@ -726,9 +726,9 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
 
     const quoteId = resCreate.data.quote_id;
 
-    // Backdate expires_at
+    // Backdate expires_at and route_calculated_at to satisfy check constraint
     await dbPool.query(
-      `UPDATE public.delivery_quotes SET expires_at = now() - interval '5 seconds' WHERE id = $1`,
+      `UPDATE public.delivery_quotes SET expires_at = now() - interval '5 seconds', route_calculated_at = now() - interval '10 seconds' WHERE id = $1`,
       [quoteId],
     );
 
