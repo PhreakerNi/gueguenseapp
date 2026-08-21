@@ -943,6 +943,236 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
+-- 8.5 UPDATE IDEMPOTENT OPERATION EXECUTOR (Include Phase 4 Operations)
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.execute_idempotent_operation(
+    p_actor_user_id UUID,
+    p_scope TEXT,
+    p_key TEXT,
+    p_request_fingerprint TEXT,
+    p_operation_fn TEXT,
+    p_operation_params JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_lock_key BIGINT;
+    v_cached RECORD;
+    v_result JSONB;
+    v_status INTEGER := 200;
+    v_expires_at TIMESTAMPTZ;
+BEGIN
+    IF p_actor_user_id IS NULL THEN
+        RAISE EXCEPTION 'AUTH_REQUIRED: Actor user ID is required';
+    END IF;
+
+    IF p_key IS NULL OR p_scope IS NULL THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: key and scope are required';
+    END IF;
+
+    IF p_key !~* '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: Idempotency key must be a valid UUID v4';
+    END IF;
+
+    -- Generate consistent 64-bit advisory lock key from scope + key
+    v_lock_key := ('x' || pg_catalog.substr(pg_catalog.md5(p_scope || ':' || p_key), 1, 16))::bit(64)::bigint;
+    PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
+
+    -- Check if record exists in private.idempotency_responses
+    SELECT * INTO v_cached
+    FROM private.idempotency_responses
+    WHERE scope = p_scope AND key = p_key;
+
+    IF v_cached.id IS NOT NULL THEN
+        IF v_cached.expires_at <= pg_catalog.clock_timestamp() THEN
+            DELETE FROM private.idempotency_responses WHERE id = v_cached.id;
+            DELETE FROM public.idempotency_keys WHERE scope = p_scope AND key = p_key;
+            v_cached := NULL;
+        ELSE
+            IF v_cached.request_fingerprint <> p_request_fingerprint THEN
+                RAISE EXCEPTION 'IDEMPOTENCY_FINGERPRINT_MISMATCH: Request payload fingerprint does not match original request';
+            END IF;
+
+            RETURN jsonb_build_object(
+                'cached', true,
+                'status', v_cached.response_status,
+                'body', v_cached.response_body
+            );
+        END IF;
+    END IF;
+
+    -- Execute target operation dynamically
+    IF p_operation_fn IN ('create_business') THEN
+        v_result := public.create_business(
+            p_actor_user_id,
+            p_operation_params->>'legal_name',
+            p_operation_params->>'brand_name',
+            p_operation_params->>'tax_id'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn IN ('create_business_location') THEN
+        v_result := public.create_business_location(
+            p_actor_user_id,
+            (p_operation_params->>'business_id')::uuid,
+            COALESCE(p_operation_params->>'location_name', p_operation_params->>'name'),
+            COALESCE(p_operation_params->>'address_text', p_operation_params->>'address_line_1'),
+            (p_operation_params->>'latitude')::double precision,
+            (p_operation_params->>'longitude')::double precision,
+            p_operation_params->>'pickup_instructions'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn IN ('add_business_member', 'create_business_member') THEN
+        v_result := public.add_business_member(
+            p_actor_user_id,
+            (p_operation_params->>'business_id')::uuid,
+            (p_operation_params->>'target_user_id')::uuid,
+            p_operation_params->>'role',
+            CASE 
+                WHEN p_operation_params->'location_ids' IS NOT NULL AND jsonb_typeof(p_operation_params->'location_ids') = 'array' 
+                THEN ARRAY(SELECT jsonb_array_elements_text(p_operation_params->'location_ids')::uuid)
+                WHEN p_operation_params->'authorized_location_ids' IS NOT NULL AND jsonb_typeof(p_operation_params->'authorized_location_ids') = 'array' 
+                THEN ARRAY(SELECT jsonb_array_elements_text(p_operation_params->'authorized_location_ids')::uuid)
+                ELSE ARRAY[]::uuid[]
+            END
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn IN ('register_driver', 'create_driver_profile') THEN
+        v_result := public.register_driver(
+            p_actor_user_id,
+            p_operation_params->>'national_id_number',
+            p_operation_params->>'license_number'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn IN ('register_vehicle', 'create_driver_vehicle') THEN
+        v_result := public.register_vehicle(
+            p_actor_user_id,
+            p_operation_params->>'make',
+            p_operation_params->>'model',
+            (p_operation_params->>'year')::integer,
+            p_operation_params->>'color',
+            p_operation_params->>'license_plate'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn = 'commit_driver_document' THEN
+        v_result := public.commit_driver_document(
+            p_actor_user_id,
+            (p_operation_params->>'upload_id')::uuid,
+            p_operation_params->>'document_type'
+        );
+        v_status := 200;
+
+    ELSIF p_operation_fn = 'admin_verify_driver' THEN
+        v_result := public.admin_verify_driver(
+            p_actor_user_id,
+            (p_operation_params->>'driver_id')::uuid,
+            p_operation_params->>'decision',
+            p_operation_params->>'rejection_reason',
+            p_operation_params->>'actor_aal'
+        );
+        v_status := 200;
+
+    ELSIF p_operation_fn = 'create_delivery_quote' THEN
+        v_result := public.create_delivery_quote(
+            p_actor_user_id,
+            (p_operation_params->>'location_id')::uuid,
+            p_operation_params->>'dropoff_address_text',
+            (p_operation_params->>'dropoff_lat')::double precision,
+            (p_operation_params->>'dropoff_lng')::double precision,
+            p_operation_params->>'recipient_name',
+            p_operation_params->>'recipient_phone',
+            p_operation_params->>'package_type',
+            (p_operation_params->>'cash_to_collect')::numeric,
+            (p_operation_params->>'distance_meters')::bigint,
+            (p_operation_params->>'duration_seconds')::bigint,
+            (p_operation_params->>'route_calculated_at')::timestamptz
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn = 'cancel_delivery_quote' THEN
+        v_result := public.cancel_delivery_quote(
+            p_actor_user_id,
+            (p_operation_params->>'quote_id')::uuid
+        );
+        v_status := 200;
+
+    ELSIF p_operation_fn = 'create_delivery_requote' THEN
+        v_result := public.create_delivery_requote(
+            p_actor_user_id,
+            (p_operation_params->>'quote_id')::uuid,
+            (p_operation_params->>'distance_meters')::bigint,
+            (p_operation_params->>'duration_seconds')::bigint,
+            (p_operation_params->>'route_calculated_at')::timestamptz
+        );
+        v_status := 201;
+
+    ELSE
+        RAISE EXCEPTION 'INVALID_ARGUMENT: Unknown operation function %', p_operation_fn;
+    END IF;
+
+    v_expires_at := pg_catalog.clock_timestamp() + INTERVAL '24 hours';
+
+    -- Store idempotent response with 24h TTL in private schema
+    INSERT INTO private.idempotency_responses (
+        actor_user_id,
+        scope,
+        key,
+        request_fingerprint,
+        response_status,
+        response_body,
+        expires_at
+    ) VALUES (
+        p_actor_user_id,
+        p_scope,
+        p_key,
+        p_request_fingerprint,
+        v_status,
+        v_result,
+        v_expires_at
+    );
+
+    -- Also record in public.idempotency_keys for tracking and public RLS compliance
+    INSERT INTO public.idempotency_keys (
+        actor_type,
+        actor_user_id,
+        scope,
+        key,
+        request_fingerprint,
+        response_status,
+        response_body_ref,
+        expires_at
+    ) VALUES (
+        'user',
+        p_actor_user_id,
+        p_scope,
+        p_key,
+        p_request_fingerprint,
+        v_status,
+        p_scope || ':' || p_key,
+        v_expires_at
+    )
+    ON CONFLICT (scope, key) DO UPDATE SET
+        request_fingerprint = EXCLUDED.request_fingerprint,
+        response_status = EXCLUDED.response_status,
+        response_body_ref = EXCLUDED.response_body_ref,
+        expires_at = EXCLUDED.expires_at;
+
+    RETURN jsonb_build_object(
+        'cached', false,
+        'status', v_status,
+        'body', v_result
+    );
+END;
+$$;
+
+-- ----------------------------------------------------------------------------
 -- 9. Revoke Execution from PUBLIC/anon/authenticated & Grant to service_role ONLY
 -- ----------------------------------------------------------------------------
 
@@ -963,3 +1193,7 @@ GRANT EXECUTE ON FUNCTION public.cancel_delivery_quote(UUID, UUID) TO service_ro
 
 REVOKE EXECUTE ON FUNCTION public.create_delivery_requote(UUID, UUID, BIGINT, BIGINT, TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_delivery_requote(UUID, UUID, BIGINT, BIGINT, TIMESTAMPTZ) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) TO service_role;
+
