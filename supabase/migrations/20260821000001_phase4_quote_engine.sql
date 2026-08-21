@@ -1292,3 +1292,14 @@ GRANT EXECUTE ON FUNCTION public.get_business_location_coordinates(UUID) TO serv
 REVOKE EXECUTE ON FUNCTION public.get_requote_route_info(UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_requote_route_info(UUID) TO service_role;
 
+-- ----------------------------------------------------------------------------
+-- 10. Initial Global Pricing Version & Rules Seed (MVP Standard Rate)
+-- ----------------------------------------------------------------------------
+INSERT INTO public.pricing_versions (id, name, currency, effective_from, is_active, quote_ttl_seconds)
+VALUES ('dd000000-0000-4000-8000-000000000001', 'Tarifa Estándar Managua 2026', 'NIO', pg_catalog.clock_timestamp(), true, 300)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.pricing_rules (id, pricing_version_id, base_fee, per_km_rate, per_minute_rate, min_fare)
+VALUES ('ee000000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-000000000001', 35.00, 12.00, 1.50, 45.00)
+ON CONFLICT (id) DO NOTHING;
+
