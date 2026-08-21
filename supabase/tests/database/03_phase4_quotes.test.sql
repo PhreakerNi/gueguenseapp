@@ -78,11 +78,11 @@ VALUES
     ('bb000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000003', 'business_manager', 'ACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.business_locations (id, business_id, name, address_text, latitude, longitude, is_active)
+INSERT INTO public.business_locations (id, business_id, name, address_text, location, is_active)
 VALUES
-    ('cc000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001', 'Sucursal Central Alfa', 'Plaza España Managua', 12.136389, -86.251389, true),
-    ('cc000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001', 'Sucursal Carretera Masaya', 'Km 8 Carretera a Masaya', 12.100000, -86.220000, true),
-    ('cc000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000002', 'Sucursal Beta Centro', 'Metrocentro Managua', 12.126389, -86.261389, true)
+    ('cc000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001', 'Sucursal Central Alfa', 'Plaza España Managua', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.251389, 12.136389), 4326), true),
+    ('cc000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001', 'Sucursal Carretera Masaya', 'Km 8 Carretera a Masaya', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.220000, 12.100000), 4326), true),
+    ('cc000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000002', 'Sucursal Beta Centro', 'Metrocentro Managua', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.261389, 12.126389), 4326), true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Assign manager A only to location 1

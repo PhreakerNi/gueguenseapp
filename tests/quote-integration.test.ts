@@ -207,11 +207,11 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
           ('${businessAId}', 'Business Alfa S.A.', 'Alfa Store', 'J0310${Date.now()}1', 'ACTIVE'),
           ('${businessBId}', 'Business Beta S.A.', 'Beta Store', 'J0310${Date.now()}2', 'ACTIVE');
 
-        INSERT INTO public.business_locations (id, business_id, name, address_text, latitude, longitude, is_active)
+        INSERT INTO public.business_locations (id, business_id, name, address_text, location, is_active)
         VALUES
-          ('${locationA1Id}', '${businessAId}', 'Sucursal Central Alfa', 'Plaza España', 12.136389, -86.251389, true),
-          ('${locationA2Id}', '${businessAId}', 'Sucursal Carretera Masaya', 'Km 8 Masaya', 12.100000, -86.220000, true),
-          ('${locationB1Id}', '${businessBId}', 'Sucursal Beta Metrocentro', 'Metrocentro', 12.126389, -86.261389, true);
+          ('${locationA1Id}', '${businessAId}', 'Sucursal Central Alfa', 'Plaza España', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.251389, 12.136389), 4326), true),
+          ('${locationA2Id}', '${businessAId}', 'Sucursal Carretera Masaya', 'Km 8 Masaya', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.220000, 12.100000), 4326), true),
+          ('${locationB1Id}', '${businessBId}', 'Sucursal Beta Metrocentro', 'Metrocentro', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.261389, 12.126389), 4326), true);
 
         INSERT INTO public.business_members (id, business_id, user_id, role, status)
         VALUES

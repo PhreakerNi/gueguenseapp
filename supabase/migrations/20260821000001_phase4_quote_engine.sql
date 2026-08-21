@@ -364,8 +364,10 @@ BEGIN
     END IF;
 
     -- 1. Fetch location & business
-    SELECT l.id, l.business_id, l.name, l.address_text, l.latitude, l.longitude,
-           l.phone, l.is_active, b.account_status AS business_status
+    SELECT l.id, l.business_id, l.name, l.address_text,
+           extensions.ST_Y(l.location::extensions.geometry) AS latitude,
+           extensions.ST_X(l.location::extensions.geometry) AS longitude,
+           l.is_active, b.account_status AS business_status
     INTO v_loc
     FROM public.business_locations l
     JOIN public.businesses b ON b.id = l.business_id
@@ -427,10 +429,10 @@ BEGIN
     END IF;
 
     -- 4. Calculate pricing in PostgreSQL NUMERIC
-    v_km := p_distance_meters::numeric / 1000.0;
-    v_minutes := p_duration_seconds::numeric / 60.0;
+    v_km := pg_catalog.round(p_distance_meters::numeric / 1000.0, 3);
+    v_minutes := pg_catalog.round(p_duration_seconds::numeric / 60.0, 3);
 
-    v_base_amount := v_rule.base_fee;
+    v_base_amount := pg_catalog.round(v_rule.base_fee, 2);
     v_distance_amount := pg_catalog.round(v_km * v_rule.per_km_rate, 2);
     v_time_amount := pg_catalog.round(v_minutes * v_rule.per_minute_rate, 2);
 
@@ -446,8 +448,7 @@ BEGIN
         'name', v_loc.name,
         'address_text', v_loc.address_text,
         'latitude', v_loc.latitude,
-        'longitude', v_loc.longitude,
-        'phone', v_loc.phone
+        'longitude', v_loc.longitude
     );
 
     v_dropoff_snapshot := jsonb_build_object(
