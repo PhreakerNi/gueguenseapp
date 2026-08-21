@@ -141,13 +141,21 @@ jobs:
       - name: Verify Migration Immutability (against main SHA ae90e55)
         run: |
           git fetch --depth=1 origin ae90e5582339afe8ff53b9a402d1ee24b04ae862
-          git diff --exit-code ae90e5582339afe8ff53b9a402d1ee24b04ae862 -- supabase/migrations/01_foundation.sql supabase/migrations/20260819000001_phase3_onboarding.sql supabase/migrations/20260819000002_phase3_closure_v1_2.sql supabase/migrations/20260820000001_phase3_security_closure_v1_3.sql supabase/migrations/20260820000002_phase3_security_microclosure_v1_4.sql
+          git diff --exit-code ae90e5582339afe8ff53b9a402d1ee24b04ae862 -- \
+            supabase/migrations/20260811000001_foundation_extensions_schema.sql \
+            supabase/migrations/20260811000002_foundation_identity_business.sql \
+            supabase/migrations/20260811000003_foundation_driver.sql \
+            supabase/migrations/20260819000001_phase3_onboarding_and_verification.sql \
+            supabase/migrations/20260819000002_phase3_closure_v1_2.sql \
+            supabase/migrations/20260820000001_phase3_security_closure_v1_3.sql \
+            supabase/migrations/20260820000002_phase3_security_microclosure_v1_4.sql
 
       - name: Test Forward Migration Upgrade (F1-F3 -> F4)
         run: |
-          mv supabase/migrations/20260821000001_phase4_quote_engine.sql /tmp/
+          mkdir -p /tmp/f4_migrations
+          mv supabase/migrations/20260821*.sql /tmp/f4_migrations/
           pnpm supabase:reset
-          mv /tmp/20260821000001_phase4_quote_engine.sql supabase/migrations/
+          mv /tmp/f4_migrations/* supabase/migrations/
           pnpm supabase migration up --local
           pnpm supabase:reset
 

@@ -88,7 +88,7 @@ function generateUuidV4(): string {
   return crypto.randomUUID();
 }
 
-describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", () => {
+describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", () => {
   let mockServer: http.Server;
   let mockServerPort = 9876;
   let mockCallCount = 0;
@@ -217,7 +217,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
     managerAUserId = mgrAuth.user.id;
     managerAToken = mgrAuth.session.access_token;
 
-    // 3. Setup Seed Data in PostgreSQL directly
+    // 4. Setup Seed Data in PostgreSQL directly
     const client = await dbPool.connect();
     try {
       businessAId = generateUuidV4();
@@ -590,7 +590,9 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
     assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
   });
 
-  it("Q11: POST /quotes by manager for location outside their assigned scope returns 403 INVALID_LOCATION_SCOPE", async () => {
+  it("Q11: POST /quotes by manager for location outside their assigned scope returns 403 INVALID_LOCATION_SCOPE with 0 Google calls", async () => {
+    const prevCallCount = mockCallCount;
+
     const payload = {
       location_id: locationA2Id, // Manager A is only assigned to Location A1
       dropoff_address: {
@@ -613,9 +615,12 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
 
     assert.strictEqual(res.status, 403);
     assert.strictEqual(res.data.error.code, "INVALID_LOCATION_SCOPE");
+    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
   });
 
-  it("Q12: POST /quotes by user from another business returns 403 AUTH_FORBIDDEN", async () => {
+  it("Q12: POST /quotes by user from another business returns 403 AUTH_FORBIDDEN with 0 Google calls", async () => {
+    const prevCallCount = mockCallCount;
+
     const payload = {
       location_id: locationA1Id,
       dropoff_address: {
@@ -638,6 +643,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
 
     assert.strictEqual(res.status, 403);
     assert.strictEqual(res.data.error.code, "AUTH_FORBIDDEN");
+    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
   });
 
   it("Q13: POST /quotes unauthenticated returns 401 AUTH_REQUIRED", async () => {
@@ -741,6 +747,11 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
     assert.strictEqual(resGet.data.status, "EXPIRED");
   });
 
+  it("Q19: GET /quotes/:id unauthenticated returns 401 AUTH_REQUIRED", async () => {
+    const res = await apiFetch(`/quotes/${sharedQuoteId}`);
+    assert.strictEqual(res.status, 401);
+  });
+
   // =========================================================================
   // Q20 - Q24: Quote Cancellation
   // =========================================================================
@@ -793,6 +804,43 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
     assert.strictEqual(res.data.error.code, "QUOTE_NOT_FOUND");
   });
 
+  it("Q24: POST /quotes/:id/cancel on already EXPIRED quote returns 422 QUOTE_INVALID_STATE", async () => {
+    // Create quote and expire it
+    const resCreate = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: generateUuidV4(),
+      body: {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Plaza España",
+          latitude: 12.137,
+          longitude: -86.252,
+        },
+        recipient_name: "Expired Cancel Test",
+        recipient_phone: "+50588880001",
+        package_type: "PARCEL",
+      },
+    });
+
+    const quoteId = resCreate.data.quote_id;
+
+    await dbPool.query(
+      `UPDATE public.delivery_quotes SET status = 'EXPIRED', expires_at = now() - interval '5 seconds', route_calculated_at = now() - interval '10 seconds' WHERE id = $1`,
+      [quoteId],
+    );
+
+    const resCancel = await apiFetch(`/quotes/${quoteId}/cancel`, {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: generateUuidV4(),
+      body: {},
+    });
+
+    assert.strictEqual(resCancel.status, 422);
+    assert.strictEqual(resCancel.data.error.code, "QUOTE_INVALID_STATE");
+  });
+
   // =========================================================================
   // Q25 - Q30: Requote Lifecycle & Constraints
   // =========================================================================
@@ -811,7 +859,9 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
     assert.notStrictEqual(res.data.quote_id, sharedQuoteId);
   });
 
-  it("Q26: POST /quotes/:id/requote by Tenant B owner returns 403 AUTH_FORBIDDEN", async () => {
+  it("Q26: POST /quotes/:id/requote by Tenant B owner returns 403 AUTH_FORBIDDEN with 0 Google calls", async () => {
+    const prevCallCount = mockCallCount;
+
     const res = await apiFetch(`/quotes/${sharedQuoteId}/requote`, {
       method: "POST",
       token: ownerBToken,
@@ -821,6 +871,79 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
 
     assert.strictEqual(res.status, 403);
     assert.strictEqual(res.data.error.code, "AUTH_FORBIDDEN");
+    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
+  });
+
+  it("Q27: POST /quotes/:id/requote on active QUOTED quote returns 422 QUOTE_INVALID_STATE with 0 Google calls", async () => {
+    // Create an active QUOTED quote
+    const resCreate = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: generateUuidV4(),
+      body: {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Plaza España",
+          latitude: 12.137,
+          longitude: -86.252,
+        },
+        recipient_name: "Active Requote Test",
+        recipient_phone: "+50588880002",
+        package_type: "PARCEL",
+      },
+    });
+
+    const quoteId = resCreate.data.quote_id;
+    const prevCallCount = mockCallCount;
+
+    const resRequote = await apiFetch(`/quotes/${quoteId}/requote`, {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: generateUuidV4(),
+      body: {},
+    });
+
+    assert.strictEqual(resRequote.status, 422);
+    assert.strictEqual(resRequote.data.error.code, "QUOTE_INVALID_STATE");
+    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
+  });
+
+  it("Q28: POST /quotes/:id/requote for nonexistent quote returns 404 QUOTE_NOT_FOUND with 0 Google calls", async () => {
+    const prevCallCount = mockCallCount;
+
+    const res = await apiFetch(`/quotes/${generateUuidV4()}/requote`, {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: generateUuidV4(),
+      body: {},
+    });
+
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(res.data.error.code, "QUOTE_NOT_FOUND");
+    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
+  });
+
+  it("Q29: POST /quotes/:id/requote without Idempotency-Key header returns 400 IDEMPOTENCY_KEY_REQUIRED", async () => {
+    const res = await apiFetch(`/quotes/${sharedQuoteId}/requote`, {
+      method: "POST",
+      token: ownerAToken,
+      body: {},
+    });
+
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.data.error.code, "IDEMPOTENCY_KEY_REQUIRED");
+  });
+
+  it("Q30: POST /quotes/:id/requote with non-UUIDv4 Idempotency-Key returns 400 VALIDATION_ERROR", async () => {
+    const res = await apiFetch(`/quotes/${sharedQuoteId}/requote`, {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: "invalid-key-not-uuid",
+      body: {},
+    });
+
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
   });
 
   // =========================================================================
@@ -975,5 +1098,211 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
     assert.strictEqual(res.status, 400);
     assert.strictEqual(typeof res.data.error.message, "string");
     assert.strictEqual(res.data.error.stack, undefined);
+  });
+
+  // =========================================================================
+  // Q37 - Q40: Decisive Closure Tests (v1.1 Additions)
+  // =========================================================================
+
+  it("Q37 (Decisive Test): Idempotency replay returns cached quote with X-Cache: HIT even after deleting private.route_quote_cache", async () => {
+    mockBehavior = "success";
+    const testKey = generateUuidV4();
+
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Reparto San Juan",
+        latitude: 12.128,
+        longitude: -86.268,
+      },
+      recipient_name: "Decisive Test",
+      recipient_phone: "+50588880003",
+      package_type: "PARCEL",
+      cash_to_collect: 0,
+    };
+
+    // 1. Initial creation
+    const res1 = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: testKey,
+      body: payload,
+    });
+    assert.strictEqual(res1.status, 200);
+    const createdQuoteId = res1.data.quote_id;
+    const initialGoogleCalls = mockCallCount;
+
+    // Count delivery_requests and delivery_quotes before replay
+    const countReqsBefore = await dbPool.query(
+      "SELECT count(*) FROM public.delivery_requests",
+    );
+    const countQuotesBefore = await dbPool.query(
+      "SELECT count(*) FROM public.delivery_quotes",
+    );
+
+    // 2. Clear route cache completely
+    await dbPool.query("DELETE FROM private.route_quote_cache");
+
+    // 3. Repeat exact operation with key K
+    const res2 = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: testKey,
+      body: payload,
+    });
+
+    assert.strictEqual(res2.status, 200);
+    assert.strictEqual(res2.headers.get("x-cache"), "HIT");
+    assert.strictEqual(res2.data.quote_id, createdQuoteId);
+    assert.strictEqual(mockCallCount, initialGoogleCalls); // 0 additional Google calls
+
+    const countReqsAfter = await dbPool.query(
+      "SELECT count(*) FROM public.delivery_requests",
+    );
+    const countQuotesAfter = await dbPool.query(
+      "SELECT count(*) FROM public.delivery_quotes",
+    );
+
+    assert.strictEqual(
+      countReqsAfter.rows[0].count,
+      countReqsBefore.rows[0].count,
+      "0 additional delivery requests created",
+    );
+    assert.strictEqual(
+      countQuotesAfter.rows[0].count,
+      countQuotesBefore.rows[0].count,
+      "0 additional delivery quotes created",
+    );
+  });
+
+  it("Q38: Idempotency is strictly isolated per actor (two actors using same key do not share replay)", async () => {
+    mockBehavior = "success";
+    const sharedKey = generateUuidV4();
+
+    const payloadA = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Destino A",
+        latitude: 12.128,
+        longitude: -86.268,
+      },
+      recipient_name: "Cliente A",
+      recipient_phone: "+50588880004",
+      package_type: "PARCEL",
+      cash_to_collect: 0,
+    };
+
+    const payloadB = {
+      location_id: locationB1Id,
+      dropoff_address: {
+        address_text: "Destino B",
+        latitude: 12.129,
+        longitude: -86.269,
+      },
+      recipient_name: "Cliente B",
+      recipient_phone: "+50588880005",
+      package_type: "PARCEL",
+      cash_to_collect: 0,
+    };
+
+    // Owner A creates quote with sharedKey
+    const resA = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: sharedKey,
+      body: payloadA,
+    });
+    assert.strictEqual(resA.status, 200);
+
+    // Owner B creates quote with the SAME sharedKey
+    const resB = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerBToken,
+      idempotencyKey: sharedKey,
+      body: payloadB,
+    });
+    assert.strictEqual(resB.status, 200);
+    assert.notStrictEqual(resB.data.quote_id, resA.data.quote_id);
+    assert.notStrictEqual(
+      resB.headers.get("x-cache"),
+      "HIT",
+      "Actor B does not get cached replay from Actor A",
+    );
+  });
+
+  it("Q39: No active pricing version returns 503 PRICING_UNAVAILABLE with 0 Google calls", async () => {
+    // Temporarily deactivate pricing version
+    await dbPool.query(
+      "UPDATE public.pricing_versions SET is_active = false WHERE id = 'dd000000-0000-4000-8000-000000000001'",
+    );
+
+    const prevCallCount = mockCallCount;
+
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Altamira",
+        latitude: 12.12,
+        longitude: -86.26,
+      },
+      recipient_name: "Pricing Unavailable Test",
+      recipient_phone: "+50588885555",
+      package_type: "DOCUMENT",
+    };
+
+    const res = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: generateUuidV4(),
+      body: payload,
+    });
+
+    // Re-activate pricing version
+    await dbPool.query(
+      "UPDATE public.pricing_versions SET is_active = true WHERE id = 'dd000000-0000-4000-8000-000000000001'",
+    );
+
+    assert.strictEqual(res.status, 503);
+    assert.strictEqual(res.data.error.code, "PRICING_UNAVAILABLE");
+    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
+  });
+
+  it("Q40: Active pricing version without rules returns 503 PRICING_UNAVAILABLE with 0 Google calls", async () => {
+    // Delete pricing rules temporarily
+    await dbPool.query(
+      "DELETE FROM public.pricing_rules WHERE pricing_version_id = 'dd000000-0000-4000-8000-000000000001'",
+    );
+
+    const prevCallCount = mockCallCount;
+
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Altamira",
+        latitude: 12.12,
+        longitude: -86.26,
+      },
+      recipient_name: "Pricing Rules Missing Test",
+      recipient_phone: "+50588885555",
+      package_type: "DOCUMENT",
+    };
+
+    const res = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: generateUuidV4(),
+      body: payload,
+    });
+
+    // Re-insert pricing rules
+    await dbPool.query(`
+      INSERT INTO public.pricing_rules (id, pricing_version_id, base_fee, per_km_rate, per_minute_rate, min_fare)
+      VALUES ('ee000000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-000000000001', 35.00, 12.00, 1.50, 45.00)
+      ON CONFLICT (id) DO NOTHING;
+    `);
+
+    assert.strictEqual(res.status, 503);
+    assert.strictEqual(res.data.error.code, "PRICING_UNAVAILABLE");
+    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
   });
 });

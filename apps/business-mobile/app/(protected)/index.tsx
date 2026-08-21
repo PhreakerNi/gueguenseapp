@@ -46,8 +46,8 @@ export default function BusinessDashboardScreen() {
   const [recipientName, setRecipientName] = useState("");
   const [recipientPhone, setRecipientPhone] = useState("+505 ");
   const [dropoffAddress, setDropoffAddress] = useState("");
-  const [dropoffLat, setDropoffLat] = useState("12.13638");
-  const [dropoffLng, setDropoffLng] = useState("-86.25138");
+  const [dropoffLat, setDropoffLat] = useState("");
+  const [dropoffLng, setDropoffLng] = useState("");
   const [packageType, setPackageType] = useState<PackageType>("PARCEL");
   const [cashToCollect, setCashToCollect] = useState("0");
 

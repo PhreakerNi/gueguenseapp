@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(45);
+SELECT plan(58);
 
 -- ============================================================================
 -- 1. Structural Checks: Tables, Columns & Indexes (10 assertions: 1-10)
@@ -42,12 +42,15 @@ SELECT is(
 );
 
 -- ============================================================================
--- 2. Function Signatures & Security Checks (6 assertions: 11-16)
+-- 2. Function Signatures & Security Checks (9 assertions: 11-19)
 -- ============================================================================
 SELECT has_function('public', 'create_delivery_quote', ARRAY['uuid', 'uuid', 'text', 'double precision', 'double precision', 'text', 'text', 'text', 'numeric', 'bigint', 'bigint', 'timestamp with time zone'], 'create_delivery_quote exists with correct signature');
 SELECT has_function('public', 'get_quote_for_actor', ARRAY['uuid', 'uuid'], 'get_quote_for_actor exists with correct signature');
 SELECT has_function('public', 'cancel_delivery_quote', ARRAY['uuid', 'uuid'], 'cancel_delivery_quote exists with correct signature');
 SELECT has_function('public', 'create_delivery_requote', ARRAY['uuid', 'uuid', 'bigint', 'bigint', 'timestamp with time zone'], 'create_delivery_requote exists with correct signature');
+SELECT has_function('public', 'get_idempotent_response', ARRAY['uuid', 'text', 'text'], 'public.get_idempotent_response exists with correct signature');
+SELECT has_function('public', 'verify_quote_creation_scope', ARRAY['uuid', 'uuid'], 'public.verify_quote_creation_scope exists with correct signature');
+SELECT has_function('public', 'verify_requote_scope', ARRAY['uuid', 'uuid'], 'public.verify_requote_scope exists with correct signature');
 SELECT has_function('private', 'get_route_cache', ARRAY['text'], 'private.get_route_cache exists');
 SELECT has_function('private', 'upsert_route_cache', ARRAY['text', 'text', 'double precision', 'double precision', 'double precision', 'double precision', 'bigint', 'bigint', 'integer'], 'private.upsert_route_cache exists');
 
@@ -100,7 +103,7 @@ VALUES ('ee000000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-0000000
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
--- 4. Direct Client Execution Revoked (4 assertions: 17-20)
+-- 4. Direct Client Execution Revoked (4 assertions: 20-23)
 -- ============================================================================
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = 'a0000000-0000-4000-8000-000000000001';
@@ -130,11 +133,11 @@ SELECT throws_like(
 );
 
 -- ============================================================================
--- 5. Business Location & Scope Enforcement (3 assertions: 21-23)
+-- 5. Business Location & Scope Enforcement (3 assertions: 24-26)
 -- ============================================================================
 SET LOCAL ROLE service_role;
 
--- 21. Manager A attempting quote for Location 2 (unassigned) -> Throws INVALID_LOCATION_SCOPE
+-- 24. Manager A attempting quote for Location 2 (unassigned) -> Throws INVALID_LOCATION_SCOPE
 SELECT throws_like(
     $$ SELECT public.create_delivery_quote(
         'a0000000-0000-4000-8000-000000000003'::uuid,
@@ -145,7 +148,7 @@ SELECT throws_like(
     'Manager cannot create quote for location outside their assigned scope'
 );
 
--- 22. Non-member user attempting quote for Location 1 -> Throws AUTH_FORBIDDEN
+-- 25. Non-member user attempting quote for Location 1 -> Throws AUTH_FORBIDDEN
 SELECT throws_like(
     $$ SELECT public.create_delivery_quote(
         'a0000000-0000-4000-8000-000000000002'::uuid,
@@ -156,7 +159,7 @@ SELECT throws_like(
     'Non-member user cannot create quote for another business location'
 );
 
--- 23. Invalid dropoff coordinates -> Throws VALIDATION_ERROR
+-- 26. Invalid dropoff coordinates -> Throws VALIDATION_ERROR
 SELECT throws_like(
     $$ SELECT public.create_delivery_quote(
         'a0000000-0000-4000-8000-000000000001'::uuid,
@@ -168,11 +171,8 @@ SELECT throws_like(
 );
 
 -- ============================================================================
--- 6. Successful Quote Creation & Exact Math (5 assertions: 24-28)
+-- 6. Successful Quote Creation & Exact Math (5 assertions: 27-31)
 -- ============================================================================
--- 4.5 km, 13 min (780s):
--- base: 35.00, dist: 4.5 * 12 = 54.00, time: 13 * 1.5 = 19.50 -> total: 108.50 NIO
--- min_fare: 45.00
 DO $$
 DECLARE
     v_res JSONB;
@@ -228,10 +228,8 @@ SELECT is(
 );
 
 -- ============================================================================
--- 7. Minimum Fare Application (1 assertion: 29)
+-- 7. Minimum Fare Application (1 assertion: 32)
 -- ============================================================================
--- 500m (0.5km), 2 min (120s):
--- base: 35.00, dist: 0.5 * 12 = 6.00, time: 2 * 1.5 = 3.00 -> subtotal: 44.00 < min_fare (45.00) -> total: 45.00 NIO
 DO $$
 DECLARE
     v_res JSONB;
@@ -260,9 +258,8 @@ SELECT is(
 );
 
 -- ============================================================================
--- 8. Get Quote & Tenant RLS Read Isolation (3 assertions: 30-32)
+-- 8. Get Quote & Tenant RLS Read Isolation (3 assertions: 33-35)
 -- ============================================================================
--- 30. Get quote by owner -> returns full details
 DO $$
 DECLARE
     v_get JSONB;
@@ -280,7 +277,6 @@ SELECT is(
     'get_quote_for_actor returns quote details for authorized owner'
 );
 
--- 31. Attempt get quote by Owner B (Tenant B) -> Throws AUTH_FORBIDDEN
 SELECT throws_like(
     $$ SELECT public.get_quote_for_actor(
         'a0000000-0000-4000-8000-000000000002'::uuid,
@@ -290,7 +286,6 @@ SELECT throws_like(
     'Tenant B cannot access quotes belonging to Tenant A'
 );
 
--- 32. Direct RLS select: Owner B sees 0 quotes belonging to Tenant A
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = 'a0000000-0000-4000-8000-000000000002';
 
@@ -301,11 +296,10 @@ SELECT is(
 );
 
 -- ============================================================================
--- 9. Quote Cancellation & Idempotency (4 assertions: 33-36)
+-- 9. Quote Cancellation & Idempotency (4 assertions: 36-39)
 -- ============================================================================
 SET LOCAL ROLE service_role;
 
--- 33. Cancel active quote
 DO $$
 DECLARE
     v_res JSONB;
@@ -323,21 +317,18 @@ SELECT is(
     'cancel_delivery_quote transitions quote to CANCELED'
 );
 
--- 34. Idempotent cancel replay returns CANCELED
 SELECT is(
     (SELECT (public.cancel_delivery_quote('a0000000-0000-4000-8000-000000000001'::uuid, current_setting('test.quote_id')::uuid))->>'status'),
     'CANCELED',
     'Repeated cancel on CANCELED quote is idempotent'
 );
 
--- 35. Database status check
 SELECT is(
     (SELECT status FROM public.delivery_quotes WHERE id = current_setting('test.quote_id')::uuid),
     'CANCELED',
     'Database record status is CANCELED'
 );
 
--- 36. Tenant B cannot cancel Tenant A quote
 SELECT throws_like(
     $$ SELECT public.cancel_delivery_quote(
         'a0000000-0000-4000-8000-000000000002'::uuid,
@@ -348,7 +339,7 @@ SELECT throws_like(
 );
 
 -- ============================================================================
--- 10. Requote on Canceled Quote (3 assertions: 37-39)
+-- 10. Requote on Canceled Quote (3 assertions: 40-42)
 -- ============================================================================
 DO $$
 DECLARE
@@ -385,23 +376,20 @@ SELECT isnt(
 );
 
 -- ============================================================================
--- 11. Lazy Expiration & Requote on Expired Quote (3 assertions: 40-42)
+-- 11. Lazy Expiration & Requote on Expired Quote (3 assertions: 43-45)
 -- ============================================================================
--- Backdate expires_at on new quote
 UPDATE public.delivery_quotes
 SET route_calculated_at = now() - interval '400 seconds',
     created_at = now() - interval '400 seconds',
     expires_at = now() - interval '100 seconds'
 WHERE id = current_setting('test.new_quote_id')::uuid;
 
--- 40. get_quote_for_actor lazily marks quote as EXPIRED
 SELECT is(
     (SELECT (public.get_quote_for_actor('a0000000-0000-4000-8000-000000000001'::uuid, current_setting('test.new_quote_id')::uuid))->>'status'),
     'EXPIRED',
     'get_quote_for_actor lazily expires quote past its TTL'
 );
 
--- 41. Attempt to cancel EXPIRED quote -> Throws QUOTE_INVALID_STATE
 SELECT throws_like(
     $$ SELECT public.cancel_delivery_quote(
         'a0000000-0000-4000-8000-000000000001'::uuid,
@@ -411,7 +399,6 @@ SELECT throws_like(
     'Cannot cancel an EXPIRED quote'
 );
 
--- 42. Requote on EXPIRED quote succeeds
 SELECT is(
     (SELECT (public.create_delivery_requote('a0000000-0000-4000-8000-000000000001'::uuid, current_setting('test.new_quote_id')::uuid, 4500, 780, now()))->>'status'),
     'QUOTED',
@@ -419,9 +406,92 @@ SELECT is(
 );
 
 -- ============================================================================
--- 12. Route Cache Helpers (3 assertions: 43-45)
+-- 12. Check Constraints & Invariants (3 assertions: 46-48)
 -- ============================================================================
--- 43. Upsert cache record
+SELECT throws_like(
+    $$ INSERT INTO public.delivery_quotes (
+        delivery_request_id, pricing_version_id, status, currency, base_amount,
+        distance_amount, time_amount, zone_amount, demand_amount, discount_amount,
+        quoted_total, consumed_at, route_distance_meters, route_duration_seconds,
+        route_provider, route_calculated_at, expires_at
+    ) VALUES (
+        current_setting('test.request_id')::uuid, 'dd000000-0000-4000-8000-000000000001'::uuid,
+        'QUOTED', 'NIO', 35, 54, 19.5, 0, 0, 0, 108.5, now(), 4500, 780, 'GOOGLE_ROUTES', now(), now() + interval '300 seconds'
+    ) $$,
+    '%chk_quote_consumed_at%',
+    'chk_quote_consumed_at rejects non-CONSUMED quote with non-null consumed_at'
+);
+
+SELECT throws_like(
+    $$ INSERT INTO public.delivery_quotes (
+        delivery_request_id, pricing_version_id, status, currency, base_amount,
+        distance_amount, time_amount, zone_amount, demand_amount, discount_amount,
+        quoted_total, consumed_at, route_distance_meters, route_duration_seconds,
+        route_provider, route_calculated_at, expires_at
+    ) VALUES (
+        current_setting('test.request_id')::uuid, 'dd000000-0000-4000-8000-000000000001'::uuid,
+        'CONSUMED', 'NIO', 35, 54, 19.5, 0, 0, 0, 108.5, NULL, 4500, 780, 'GOOGLE_ROUTES', now(), now() + interval '300 seconds'
+    ) $$,
+    '%chk_quote_consumed_at%',
+    'chk_quote_consumed_at rejects CONSUMED quote with null consumed_at'
+);
+
+SELECT throws_like(
+    $$ INSERT INTO public.delivery_quotes (
+        delivery_request_id, pricing_version_id, status, currency, base_amount,
+        distance_amount, time_amount, zone_amount, demand_amount, discount_amount,
+        quoted_total, route_distance_meters, route_duration_seconds,
+        route_provider, route_calculated_at, expires_at
+    ) VALUES (
+        current_setting('test.request_id')::uuid, 'dd000000-0000-4000-8000-000000000001'::uuid,
+        'QUOTED', 'NIO', 35, 54, 19.5, 0, 0, 0, 108.5, 4500, 780, 'GOOGLE_ROUTES', now(), now() - interval '10 seconds'
+    ) $$,
+    '%chk_quote_expires_at%',
+    'chk_quote_expires_at rejects expires_at earlier than route_calculated_at'
+);
+
+-- ============================================================================
+-- 13. Scope Verification Helper RPCs (5 assertions: 49-53)
+-- ============================================================================
+-- 49. verify_quote_creation_scope succeeds for authorized owner
+SELECT is(
+    (SELECT (public.verify_quote_creation_scope('a0000000-0000-4000-8000-000000000001'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid))->>'business_id'),
+    'b0000000-0000-4000-8000-000000000001',
+    'verify_quote_creation_scope returns business_id for authorized owner'
+);
+
+-- 50. verify_quote_creation_scope throws INVALID_LOCATION_SCOPE for unassigned manager
+SELECT throws_like(
+    $$ SELECT public.verify_quote_creation_scope('a0000000-0000-4000-8000-000000000003'::uuid, 'cc000000-0000-4000-8000-000000000002'::uuid) $$,
+    '%INVALID_LOCATION_SCOPE%',
+    'verify_quote_creation_scope throws INVALID_LOCATION_SCOPE for unassigned manager'
+);
+
+-- 51. verify_quote_creation_scope throws AUTH_FORBIDDEN for non-member
+SELECT throws_like(
+    $$ SELECT public.verify_quote_creation_scope('a0000000-0000-4000-8000-000000000002'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid) $$,
+    '%AUTH_FORBIDDEN%',
+    'verify_quote_creation_scope throws AUTH_FORBIDDEN for non-member'
+);
+
+-- 52. verify_requote_scope succeeds for canceled quote
+SELECT is(
+    (SELECT (public.verify_requote_scope('a0000000-0000-4000-8000-000000000001'::uuid, current_setting('test.quote_id')::uuid))->>'delivery_request_id'),
+    current_setting('test.request_id'),
+    'verify_requote_scope returns delivery_request_id for canceled quote'
+);
+
+-- 53. verify_requote_scope throws AUTH_FORBIDDEN for Tenant B on Tenant A quote
+SELECT throws_like(
+    $$ SELECT public.verify_requote_scope('a0000000-0000-4000-8000-000000000002'::uuid, current_setting('test.quote_id')::uuid) $$,
+    '%AUTH_FORBIDDEN%',
+    'verify_requote_scope throws AUTH_FORBIDDEN for Tenant B actor'
+);
+
+-- ============================================================================
+-- 14. Route Cache & Idempotency Helpers (5 assertions: 54-58)
+-- ============================================================================
+-- 54. Upsert cache record
 SELECT lives_ok(
     $$ SELECT private.upsert_route_cache(
         'route:google:12.13639,-86.25139->12.12500,-86.26500',
@@ -437,18 +507,44 @@ SELECT lives_ok(
     'Upsert route cache record executes without error'
 );
 
--- 44. Get route cache returns cached metrics
+-- 55. Get route cache returns cached metrics
 SELECT is(
     (SELECT (private.get_route_cache('route:google:12.13639,-86.25139->12.12500,-86.26500'))->>'distance_meters'),
     '4500',
     'get_route_cache retrieves cached distance_meters'
 );
 
--- 45. Get nonexistent cache returns NULL
+-- 56. Get nonexistent cache returns NULL
 SELECT is(
     (SELECT private.get_route_cache('route:google:nonexistent_key')),
     NULL,
     'get_route_cache returns NULL for cache miss'
+);
+
+-- 57. Fast Idempotency Reader retrieves response
+INSERT INTO private.idempotency_responses (
+    actor_user_id, scope, key, request_fingerprint, response_status, response_body, expires_at
+) VALUES (
+    'a0000000-0000-4000-8000-000000000001'::uuid,
+    'create_delivery_quote',
+    '00000000-0000-4000-8000-000000000001',
+    'fp_test_123',
+    200,
+    '{"quote_id":"test-quote-123"}'::jsonb,
+    now() + interval '1 hour'
+);
+
+SELECT is(
+    (SELECT (public.get_idempotent_response('a0000000-0000-4000-8000-000000000001'::uuid, 'create_delivery_quote', '00000000-0000-4000-8000-000000000001'))->>'request_fingerprint'),
+    'fp_test_123',
+    'get_idempotent_response returns cached response fingerprint'
+);
+
+-- 58. Fast Idempotency Reader returns NULL for missing key
+SELECT is(
+    (SELECT public.get_idempotent_response('a0000000-0000-4000-8000-000000000001'::uuid, 'create_delivery_quote', '00000000-0000-4000-8000-999999999999')),
+    NULL,
+    'get_idempotent_response returns NULL for nonexistent key'
 );
 
 SELECT * FROM finish();

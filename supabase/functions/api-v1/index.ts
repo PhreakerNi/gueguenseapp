@@ -1045,28 +1045,25 @@ Deno.serve(async (req: Request) => {
       let routesApiUrl = Deno.env.get("GOOGLE_ROUTES_API_URL") || "";
 
       if (!routesApiUrl) {
-        if (routesApiKey && !routesApiKey.startsWith("mock-")) {
-          routesApiUrl =
-            "https://routes.googleapis.com/directions/v2:computeRoutes";
-        } else {
-          routesApiUrl = "http://127.0.0.1:9876/directions/v2:computeRoutes";
-        }
+        routesApiUrl =
+          "https://routes.googleapis.com/directions/v2:computeRoutes";
       }
 
       const isMockUrl =
         routesApiUrl.includes("127.0.0.1") ||
         routesApiUrl.includes("localhost") ||
-        !routesApiKey ||
+        routesApiUrl.includes("host.docker.internal") ||
+        routesApiUrl.includes("172.17.0.1") ||
         routesApiKey.startsWith("mock-");
+
+      if (!routesApiKey && !isMockUrl) {
+        throw new Error("GOOGLE_MAPS_ROUTES_API_KEY is not configured");
+      }
 
       async function callGoogleApi(): Promise<{
         distanceMeters: number;
         durationSeconds: number;
       } | null> {
-        if (!routesApiKey && !isMockUrl) {
-          return null;
-        }
-
         const candidateUrls = [routesApiUrl];
         if (isMockUrl) {
           if (routesApiUrl.includes("127.0.0.1")) {
@@ -1169,8 +1166,9 @@ Deno.serve(async (req: Request) => {
       // Attempt 1
       let googleResult = await callGoogleApi();
 
-      // 1 controlled retry if attempt 1 failed
+      // Retry 1 (with 150ms backoff)
       if (!googleResult) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
         googleResult = await callGoogleApi();
       }
 
@@ -1196,6 +1194,7 @@ Deno.serve(async (req: Request) => {
         };
       }
 
+      // Fail closed with 503 (Strictly NO Haversine fallback)
       throw new Error(
         "PRICING_UNAVAILABLE: Routing provider and cache unavailable",
       );
@@ -1208,17 +1207,22 @@ Deno.serve(async (req: Request) => {
       req.method === "POST" &&
       (path === "/quotes" || path === "/api/v1/quotes")
     ) {
-      const locationId = body.location_id || body.locationId;
-      const dropoffAddress = body.dropoff_address || body.dropoffAddress;
-      const recipientName = body.recipient_name || body.recipientName;
-      const recipientPhone = body.recipient_phone || body.recipientPhone;
-      const packageType = body.package_type || body.packageType;
-      const cashToCollect =
-        body.cash_to_collect !== undefined
-          ? body.cash_to_collect
-          : body.cashToCollect !== undefined
-            ? body.cashToCollect
-            : 0;
+      if (!userId) {
+        return errorResponse(
+          "AUTH_REQUIRED",
+          "Authentication token is required",
+          401,
+        );
+      }
+
+      const {
+        location_id: locationId,
+        dropoff_address: dropoffAddress,
+        recipient_name: recipientName,
+        recipient_phone: recipientPhone,
+        package_type: packageType,
+        cash_to_collect: cashToCollect,
+      } = body;
 
       if (
         !locationId ||
@@ -1263,6 +1267,31 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      const cleanPkgType = String(packageType).trim().toUpperCase();
+      if (
+        !["PARCEL", "DOCUMENT", "FOOD", "FRAGILE", "BULKY"].includes(
+          cleanPkgType,
+        )
+      ) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          `Invalid package_type ${packageType}`,
+          400,
+        );
+      }
+
+      if (
+        cashToCollect !== undefined &&
+        cashToCollect !== null &&
+        Number(cashToCollect) < 0
+      ) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "cash_to_collect must be non-negative",
+          400,
+        );
+      }
+
       const idempotencyKey =
         req.headers.get("Idempotency-Key") ||
         req.headers.get("idempotency-key");
@@ -1288,14 +1317,15 @@ Deno.serve(async (req: Request) => {
         `${userId}:${req.method}:${path}:${canonicalPayload}`,
       );
 
-      // Check idempotency cache first so replay NEVER calls Google Routes again
-      const { data: cachedKey } = await serviceClient
-        .from("idempotency_keys")
-        .select("response_status, response_body, request_fingerprint")
-        .eq("user_id", userId)
-        .eq("scope", "create_delivery_quote")
-        .eq("key", idempotencyKey)
-        .maybeSingle();
+      // Fast Idempotency Replay (0 calls to Google Routes, 0 route cache queries)
+      const { data: cachedKey } = await serviceClient.rpc(
+        "get_idempotent_response",
+        {
+          p_actor_user_id: userId,
+          p_scope: "create_delivery_quote",
+          p_key: idempotencyKey,
+        },
+      );
 
       if (cachedKey) {
         if (cachedKey.request_fingerprint !== fingerprint) {
@@ -1307,37 +1337,62 @@ Deno.serve(async (req: Request) => {
         }
         return jsonResponse(
           cachedKey.response_body,
-          cachedKey.response_status || 201,
+          cachedKey.response_status || 200,
           { "X-Cache": "HIT" },
         );
       }
 
-      // Fetch pickup location from DB using helper RPC
-      const { data: locData, error: locErr } = await serviceClient.rpc(
-        "get_business_location_coordinates",
+      // Pre-routing authorization & scope verification (0 calls to Google Routes if unauthorized)
+      const { data: scopeData, error: scopeErr } = await serviceClient.rpc(
+        "verify_quote_creation_scope",
         {
+          p_actor_id: userId,
           p_location_id: locationId,
         },
       );
 
-      if (locErr || !locData) {
-        return errorResponse(
-          "INVALID_LOCATIONS",
-          "Specified business location does not exist",
-          400,
-        );
+      if (scopeErr) {
+        const msg = scopeErr.message || "";
+        if (msg.includes("AUTH_FORBIDDEN")) {
+          return errorResponse(
+            "AUTH_FORBIDDEN",
+            "User is not authorized for this business",
+            403,
+          );
+        }
+        if (msg.includes("INVALID_LOCATION_SCOPE")) {
+          return errorResponse(
+            "INVALID_LOCATION_SCOPE",
+            "User lacks authority over specified location",
+            403,
+          );
+        }
+        if (msg.includes("INVALID_LOCATIONS")) {
+          return errorResponse(
+            "INVALID_LOCATIONS",
+            "Specified business location does not exist",
+            400,
+          );
+        }
+        if (msg.includes("BUSINESS_INACTIVE")) {
+          return errorResponse(
+            "BUSINESS_INACTIVE",
+            "Business or location is currently inactive",
+            403,
+          );
+        }
+        if (msg.includes("PRICING_UNAVAILABLE")) {
+          return errorResponse(
+            "PRICING_UNAVAILABLE",
+            "Active pricing version or rules unavailable",
+            503,
+          );
+        }
+        return errorResponse("VALIDATION_ERROR", msg, 400);
       }
 
-      if (!locData.is_active) {
-        return errorResponse(
-          "BUSINESS_INACTIVE",
-          "Business location is inactive",
-          403,
-        );
-      }
-
-      const pickupLat = Number(locData.latitude);
-      const pickupLng = Number(locData.longitude);
+      const pickupLat = Number(scopeData.pickup_lat);
+      const pickupLng = Number(scopeData.pickup_lng);
 
       if (isNaN(pickupLat) || isNaN(pickupLng)) {
         return errorResponse(
@@ -1390,7 +1445,27 @@ Deno.serve(async (req: Request) => {
       /^\/(?:api\/v1\/)?quotes\/([^\/]+)\/cancel$/,
     );
     if (req.method === "POST" && cancelQuoteMatch) {
+      if (!userId) {
+        return errorResponse(
+          "AUTH_REQUIRED",
+          "Authentication token is required",
+          401,
+        );
+      }
+
       const quoteId = cancelQuoteMatch[1];
+      const idempotencyKey =
+        req.headers.get("Idempotency-Key") ||
+        req.headers.get("idempotency-key");
+
+      if (idempotencyKey && !UUID_V4_REGEX.test(idempotencyKey)) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "Idempotency-Key must be a valid UUID v4",
+          400,
+        );
+      }
+
       return await runIdempotentOp(
         `cancel_quote:${quoteId}`,
         "cancel_delivery_quote",
@@ -1407,6 +1482,14 @@ Deno.serve(async (req: Request) => {
       /^\/(?:api\/v1\/)?quotes\/([^\/]+)\/requote$/,
     );
     if (req.method === "POST" && requoteMatch) {
+      if (!userId) {
+        return errorResponse(
+          "AUTH_REQUIRED",
+          "Authentication token is required",
+          401,
+        );
+      }
+
       const quoteId = requoteMatch[1];
 
       const idempotencyKey =
@@ -1434,14 +1517,15 @@ Deno.serve(async (req: Request) => {
         `${userId}:${req.method}:${path}:${canonicalPayload}`,
       );
 
-      // Check idempotency cache first
-      const { data: cachedKey } = await serviceClient
-        .from("idempotency_keys")
-        .select("response_status, response_body, request_fingerprint")
-        .eq("user_id", userId)
-        .eq("scope", `requote_quote:${quoteId}`)
-        .eq("key", idempotencyKey)
-        .maybeSingle();
+      // Fast Idempotency Replay (0 calls to Google Routes)
+      const { data: cachedKey } = await serviceClient.rpc(
+        "get_idempotent_response",
+        {
+          p_actor_user_id: userId,
+          p_scope: `requote_quote:${quoteId}`,
+          p_key: idempotencyKey,
+        },
+      );
 
       if (cachedKey) {
         if (cachedKey.request_fingerprint !== fingerprint) {
@@ -1453,31 +1537,69 @@ Deno.serve(async (req: Request) => {
         }
         return jsonResponse(
           cachedKey.response_body,
-          cachedKey.response_status || 201,
+          cachedKey.response_status || 200,
           { "X-Cache": "HIT" },
         );
       }
 
-      // Fetch route info for requote from DB using helper RPC
-      const { data: routeInfo, error: routeInfoErr } = await serviceClient.rpc(
-        "get_requote_route_info",
-        {
+      // Pre-routing authorization & requote eligibility verification (0 calls to Google Routes if unauthorized/invalid)
+      const { data: requoteScope, error: requoteScopeErr } =
+        await serviceClient.rpc("verify_requote_scope", {
+          p_actor_id: userId,
           p_quote_id: quoteId,
-        },
-      );
+        });
 
-      if (routeInfoErr || !routeInfo) {
-        return errorResponse(
-          "QUOTE_NOT_FOUND",
-          "Delivery quote not found",
-          404,
-        );
+      if (requoteScopeErr) {
+        const msg = requoteScopeErr.message || "";
+        if (msg.includes("QUOTE_NOT_FOUND")) {
+          return errorResponse(
+            "QUOTE_NOT_FOUND",
+            "Delivery quote not found",
+            404,
+          );
+        }
+        if (msg.includes("AUTH_FORBIDDEN")) {
+          return errorResponse(
+            "AUTH_FORBIDDEN",
+            "User does not have access to this quote",
+            403,
+          );
+        }
+        if (msg.includes("INVALID_LOCATION_SCOPE")) {
+          return errorResponse(
+            "INVALID_LOCATION_SCOPE",
+            "User lacks authority over this quote location",
+            403,
+          );
+        }
+        if (msg.includes("QUOTE_INVALID_STATE")) {
+          return errorResponse(
+            "QUOTE_INVALID_STATE",
+            "Quote cannot be requoted in its current state",
+            422,
+          );
+        }
+        if (msg.includes("BUSINESS_INACTIVE")) {
+          return errorResponse(
+            "BUSINESS_INACTIVE",
+            "Business or location is currently inactive",
+            403,
+          );
+        }
+        if (msg.includes("PRICING_UNAVAILABLE")) {
+          return errorResponse(
+            "PRICING_UNAVAILABLE",
+            "Active pricing version or rules unavailable",
+            503,
+          );
+        }
+        return errorResponse("VALIDATION_ERROR", msg, 400);
       }
 
-      const pickupLat = Number(routeInfo.pickup_lat);
-      const pickupLng = Number(routeInfo.pickup_lng);
-      const dropoffLat = Number(routeInfo.dropoff_lat);
-      const dropoffLng = Number(routeInfo.dropoff_lng);
+      const pickupLat = Number(requoteScope.pickup_lat);
+      const pickupLng = Number(requoteScope.pickup_lng);
+      const dropoffLat = Number(requoteScope.dropoff_lat);
+      const dropoffLng = Number(requoteScope.dropoff_lng);
 
       let routeMetrics;
       try {

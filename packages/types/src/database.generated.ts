@@ -732,6 +732,10 @@ export type Database = {
         Args: { p_document_id: string }
         Returns: Json
       }
+      get_idempotent_response: {
+        Args: { p_actor_user_id: string; p_key: string; p_scope: string }
+        Returns: Json
+      }
       get_quote_for_actor: {
         Args: { p_actor_id: string; p_quote_id: string }
         Returns: Json
@@ -771,6 +775,14 @@ export type Database = {
           p_ttl_seconds?: number
         }
         Returns: undefined
+      }
+      verify_quote_creation_scope: {
+        Args: { p_actor_id: string; p_location_id: string }
+        Returns: Json
+      }
+      verify_requote_scope: {
+        Args: { p_actor_id: string; p_quote_id: string }
+        Returns: Json
       }
     }
     Enums: {
