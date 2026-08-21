@@ -316,6 +316,10 @@ Deno.serve(async (req: Request) => {
         } else if (error.message.includes("INVALID_LOCATIONS")) {
           errCode = "INVALID_LOCATIONS";
           errMsg = "Specified business location does not exist";
+        } else {
+          errCode = "INTERNAL_SERVER_ERROR";
+          errMsg = "An unexpected error occurred while processing the request";
+          statusCode = 500;
         }
 
         let statusCode = 400;
@@ -1317,32 +1321,7 @@ Deno.serve(async (req: Request) => {
         `${userId}:${req.method}:${path}:${canonicalPayload}`,
       );
 
-      // Fast Idempotency Replay (0 calls to Google Routes, 0 route cache queries)
-      const { data: cachedKey } = await serviceClient.rpc(
-        "get_idempotent_response",
-        {
-          p_actor_user_id: userId,
-          p_scope: "create_delivery_quote",
-          p_key: idempotencyKey,
-        },
-      );
-
-      if (cachedKey) {
-        if (cachedKey.request_fingerprint !== fingerprint) {
-          return errorResponse(
-            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
-            "Request payload fingerprint does not match original request",
-            422,
-          );
-        }
-        return jsonResponse(
-          cachedKey.response_body,
-          cachedKey.response_status || 200,
-          { "X-Cache": "HIT" },
-        );
-      }
-
-      // Pre-routing authorization & scope verification (0 calls to Google Routes if unauthorized)
+      // 1. Pre-routing authorization & scope verification FIRST (MANDATORY: 0 calls to Google if unauthorized, revoked user receives NO replay)
       const { data: scopeData, error: scopeErr } = await serviceClient.rpc(
         "verify_quote_creation_scope",
         {
@@ -1388,7 +1367,11 @@ Deno.serve(async (req: Request) => {
             503,
           );
         }
-        return errorResponse("VALIDATION_ERROR", msg, 400);
+        return errorResponse(
+          "VALIDATION_ERROR",
+          msg.replace(/^[^:]+:\s*/, ""),
+          400,
+        );
       }
 
       const pickupLat = Number(scopeData.pickup_lat);
@@ -1402,7 +1385,73 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Fetch Google Routes metrics
+      // 2. Acquire Idempotency Lease / Replay Reservation (BEFORE Route Cache or Google Call)
+      const { data: leaseData, error: leaseErr } = await serviceClient.rpc(
+        "acquire_idempotency_lease",
+        {
+          p_actor_user_id: userId,
+          p_scope: "create_delivery_quote",
+          p_key: idempotencyKey,
+          p_request_fingerprint: fingerprint,
+          p_lease_seconds: 30,
+        },
+      );
+
+      if (leaseErr) {
+        const msg = leaseErr.message || "";
+        if (msg.includes("IDEMPOTENCY_FINGERPRINT_MISMATCH")) {
+          return errorResponse(
+            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+            "Request payload fingerprint does not match original request",
+            422,
+          );
+        }
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
+        );
+      }
+
+      if (leaseData?.action === "REPLAY") {
+        return jsonResponse(
+          leaseData.response_body,
+          leaseData.response_status || 201,
+          { "X-Cache": "HIT" },
+        );
+      }
+
+      if (leaseData?.action === "IN_FLIGHT") {
+        // Concurrent identical request in flight: poll for completed response
+        let attempts = 0;
+        let polledResponse = null;
+        while (attempts < 30) {
+          await new Promise((r) => setTimeout(r, 100));
+          attempts++;
+          const { data: cached } = await serviceClient.rpc(
+            "get_idempotent_response",
+            {
+              p_actor_user_id: userId,
+              p_scope: "create_delivery_quote",
+              p_key: idempotencyKey,
+            },
+          );
+          if (cached && cached.response_body) {
+            polledResponse = cached;
+            break;
+          }
+        }
+
+        if (polledResponse) {
+          return jsonResponse(
+            polledResponse.response_body,
+            polledResponse.response_status || 201,
+            { "X-Cache": "HIT" },
+          );
+        }
+      }
+
+      // 3. Fetch Google Routes metrics (Only executed if lease is granted)
       let routeMetrics;
       try {
         routeMetrics = await fetchGoogleRoutes(
@@ -1419,6 +1468,7 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      // 4. Commit quote creation and idempotent record atomically (Returns 201)
       return await runIdempotentOp(
         "create_delivery_quote",
         "create_delivery_quote",
@@ -1517,32 +1567,7 @@ Deno.serve(async (req: Request) => {
         `${userId}:${req.method}:${path}:${canonicalPayload}`,
       );
 
-      // Fast Idempotency Replay (0 calls to Google Routes)
-      const { data: cachedKey } = await serviceClient.rpc(
-        "get_idempotent_response",
-        {
-          p_actor_user_id: userId,
-          p_scope: `requote_quote:${quoteId}`,
-          p_key: idempotencyKey,
-        },
-      );
-
-      if (cachedKey) {
-        if (cachedKey.request_fingerprint !== fingerprint) {
-          return errorResponse(
-            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
-            "Request payload fingerprint does not match original request",
-            422,
-          );
-        }
-        return jsonResponse(
-          cachedKey.response_body,
-          cachedKey.response_status || 200,
-          { "X-Cache": "HIT" },
-        );
-      }
-
-      // Pre-routing authorization & requote eligibility verification (0 calls to Google Routes if unauthorized/invalid)
+      // 1. Pre-routing authorization & requote eligibility verification FIRST (0 calls to Google if unauthorized/invalid)
       const { data: requoteScope, error: requoteScopeErr } =
         await serviceClient.rpc("verify_requote_scope", {
           p_actor_id: userId,
@@ -1568,15 +1593,8 @@ Deno.serve(async (req: Request) => {
         if (msg.includes("INVALID_LOCATION_SCOPE")) {
           return errorResponse(
             "INVALID_LOCATION_SCOPE",
-            "User lacks authority over this quote location",
+            "User lacks authority over specified location",
             403,
-          );
-        }
-        if (msg.includes("QUOTE_INVALID_STATE")) {
-          return errorResponse(
-            "QUOTE_INVALID_STATE",
-            "Quote cannot be requoted in its current state",
-            422,
           );
         }
         if (msg.includes("BUSINESS_INACTIVE")) {
@@ -1586,6 +1604,13 @@ Deno.serve(async (req: Request) => {
             403,
           );
         }
+        if (msg.includes("QUOTE_INVALID_STATE")) {
+          return errorResponse(
+            "QUOTE_INVALID_STATE",
+            "Quote is not in a valid state for this operation",
+            422,
+          );
+        }
         if (msg.includes("PRICING_UNAVAILABLE")) {
           return errorResponse(
             "PRICING_UNAVAILABLE",
@@ -1593,7 +1618,77 @@ Deno.serve(async (req: Request) => {
             503,
           );
         }
-        return errorResponse("VALIDATION_ERROR", msg, 400);
+        return errorResponse(
+          "VALIDATION_ERROR",
+          msg.replace(/^[^:]+:\s*/, ""),
+          400,
+        );
+      }
+
+      // 2. Acquire Idempotency Lease / Replay Reservation (BEFORE Route Cache or Google Call)
+      const { data: leaseData, error: leaseErr } = await serviceClient.rpc(
+        "acquire_idempotency_lease",
+        {
+          p_actor_user_id: userId,
+          p_scope: `requote_quote:${quoteId}`,
+          p_key: idempotencyKey,
+          p_request_fingerprint: fingerprint,
+          p_lease_seconds: 30,
+        },
+      );
+
+      if (leaseErr) {
+        const msg = leaseErr.message || "";
+        if (msg.includes("IDEMPOTENCY_FINGERPRINT_MISMATCH")) {
+          return errorResponse(
+            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+            "Request payload fingerprint does not match original request",
+            422,
+          );
+        }
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
+        );
+      }
+
+      if (leaseData?.action === "REPLAY") {
+        return jsonResponse(
+          leaseData.response_body,
+          leaseData.response_status || 201,
+          { "X-Cache": "HIT" },
+        );
+      }
+
+      if (leaseData?.action === "IN_FLIGHT") {
+        // Concurrent identical request in flight: poll for completed response
+        let attempts = 0;
+        let polledResponse = null;
+        while (attempts < 30) {
+          await new Promise((r) => setTimeout(r, 100));
+          attempts++;
+          const { data: cached } = await serviceClient.rpc(
+            "get_idempotent_response",
+            {
+              p_actor_user_id: userId,
+              p_scope: `requote_quote:${quoteId}`,
+              p_key: idempotencyKey,
+            },
+          );
+          if (cached && cached.response_body) {
+            polledResponse = cached;
+            break;
+          }
+        }
+
+        if (polledResponse) {
+          return jsonResponse(
+            polledResponse.response_body,
+            polledResponse.response_status || 201,
+            { "X-Cache": "HIT" },
+          );
+        }
       }
 
       const pickupLat = Number(requoteScope.pickup_lat);
@@ -1601,6 +1696,20 @@ Deno.serve(async (req: Request) => {
       const dropoffLat = Number(requoteScope.dropoff_lat);
       const dropoffLng = Number(requoteScope.dropoff_lng);
 
+      if (
+        isNaN(pickupLat) ||
+        isNaN(pickupLng) ||
+        isNaN(dropoffLat) ||
+        isNaN(dropoffLng)
+      ) {
+        return errorResponse(
+          "INVALID_LOCATIONS",
+          "Quote coordinates are invalid",
+          400,
+        );
+      }
+
+      // 3. Fetch Google Routes metrics
       let routeMetrics;
       try {
         routeMetrics = await fetchGoogleRoutes(
@@ -1609,7 +1718,7 @@ Deno.serve(async (req: Request) => {
           dropoffLat,
           dropoffLng,
         );
-      } catch {
+      } catch (err: any) {
         return errorResponse(
           "PRICING_UNAVAILABLE",
           "Pricing version or routing service is currently unavailable",
@@ -1617,6 +1726,7 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      // 4. Commit requote creation and idempotent record atomically (Returns 201)
       return await runIdempotentOp(
         `requote_quote:${quoteId}`,
         "create_delivery_requote",

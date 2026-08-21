@@ -1,9 +1,9 @@
 BEGIN;
 
-SELECT plan(58);
+SELECT plan(65);
 
 -- ============================================================================
--- 1. Structural Checks: Tables, Columns & Indexes (10 assertions: 1-10)
+-- 1. Structural Checks: Tables, Columns & Indexes (11 assertions: 1-11)
 -- ============================================================================
 SELECT has_table('public', 'pricing_versions', 'public.pricing_versions exists');
 SELECT is(
@@ -34,6 +34,7 @@ SELECT is(
 );
 
 SELECT has_table('private', 'route_quote_cache', 'private.route_quote_cache exists');
+SELECT has_table('private', 'idempotency_reservations', 'private.idempotency_reservations exists');
 
 SELECT is(
     (SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'pricing_versions' AND indexname = 'idx_pricing_versions_single_active'),
@@ -42,13 +43,14 @@ SELECT is(
 );
 
 -- ============================================================================
--- 2. Function Signatures & Security Checks (9 assertions: 11-19)
+-- 2. Function Signatures & Security Checks (10 assertions: 12-21)
 -- ============================================================================
 SELECT has_function('public', 'create_delivery_quote', ARRAY['uuid', 'uuid', 'text', 'double precision', 'double precision', 'text', 'text', 'text', 'numeric', 'bigint', 'bigint', 'timestamp with time zone'], 'create_delivery_quote exists with correct signature');
 SELECT has_function('public', 'get_quote_for_actor', ARRAY['uuid', 'uuid'], 'get_quote_for_actor exists with correct signature');
 SELECT has_function('public', 'cancel_delivery_quote', ARRAY['uuid', 'uuid'], 'cancel_delivery_quote exists with correct signature');
 SELECT has_function('public', 'create_delivery_requote', ARRAY['uuid', 'uuid', 'bigint', 'bigint', 'timestamp with time zone'], 'create_delivery_requote exists with correct signature');
 SELECT has_function('public', 'get_idempotent_response', ARRAY['uuid', 'text', 'text'], 'public.get_idempotent_response exists with correct signature');
+SELECT has_function('public', 'acquire_idempotency_lease', ARRAY['uuid', 'text', 'text', 'text', 'integer'], 'public.acquire_idempotency_lease exists with correct signature');
 SELECT has_function('public', 'verify_quote_creation_scope', ARRAY['uuid', 'uuid'], 'public.verify_quote_creation_scope exists with correct signature');
 SELECT has_function('public', 'verify_requote_scope', ARRAY['uuid', 'uuid'], 'public.verify_requote_scope exists with correct signature');
 SELECT has_function('private', 'get_route_cache', ARRAY['text'], 'private.get_route_cache exists');
@@ -547,6 +549,107 @@ SELECT is(
     (SELECT public.get_idempotent_response('a0000000-0000-4000-8000-000000000001'::uuid, 'create_delivery_quote', '00000000-0000-4000-8000-999999999999')),
     NULL,
     'get_idempotent_response returns NULL for nonexistent key'
+);
+
+-- ============================================================================
+-- 15. Idempotency Lease Locking & Concurrency Subsystem (7 assertions: 59-65)
+-- ============================================================================
+
+-- 59. acquire_idempotency_lease returns action: EXECUTE on brand new key
+SELECT is(
+    (SELECT (public.acquire_idempotency_lease(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'create_delivery_quote',
+        '00000000-0000-4000-8000-000000000099',
+        'fp_initial_99',
+        30
+    ))->>'action'),
+    'EXECUTE',
+    'acquire_idempotency_lease grants EXECUTE lease on new key'
+);
+
+-- 60. acquire_idempotency_lease returns action: IN_FLIGHT for concurrent active lease
+SELECT is(
+    (SELECT (public.acquire_idempotency_lease(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'create_delivery_quote',
+        '00000000-0000-4000-8000-000000000099',
+        'fp_initial_99',
+        30
+    ))->>'action'),
+    'IN_FLIGHT',
+    'acquire_idempotency_lease reports IN_FLIGHT for concurrent active lease'
+);
+
+-- 61. acquire_idempotency_lease throws IDEMPOTENCY_FINGERPRINT_MISMATCH on different fingerprint
+SELECT throws_like(
+    $$ SELECT public.acquire_idempotency_lease(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'create_delivery_quote',
+        '00000000-0000-4000-8000-000000000099',
+        'fp_different_fingerprint_mismatch',
+        30
+    ) $$,
+    '%IDEMPOTENCY_FINGERPRINT_MISMATCH%',
+    'acquire_idempotency_lease raises fingerprint mismatch error'
+);
+
+-- 62. execute_idempotent_operation executes and returns status 201 for create_delivery_quote
+SELECT is(
+    (SELECT (public.execute_idempotent_operation(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'create_delivery_quote',
+        '00000000-0000-4000-8000-000000000099',
+        'fp_initial_99',
+        'create_delivery_quote',
+        jsonb_build_object(
+            'location_id', 'cc000000-0000-4000-8000-000000000001'::uuid,
+            'dropoff_address_text', 'Lease Test Address',
+            'dropoff_lat', 12.125,
+            'dropoff_lng', -86.265,
+            'recipient_name', 'Lease Recipient',
+            'recipient_phone', '+50588889999',
+            'package_type', 'PARCEL',
+            'cash_to_collect', 0,
+            'distance_meters', 4500,
+            'duration_seconds', 780,
+            'route_calculated_at', now()
+        )
+    ))->>'status'),
+    '201',
+    'execute_idempotent_operation returns status 201 for create_delivery_quote'
+);
+
+-- 63. acquire_idempotency_lease returns action: REPLAY with status 201 after completion
+SELECT is(
+    (SELECT (public.acquire_idempotency_lease(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'create_delivery_quote',
+        '00000000-0000-4000-8000-000000000099',
+        'fp_initial_99',
+        30
+    ))->>'action'),
+    'REPLAY',
+    'acquire_idempotency_lease returns REPLAY for completed reservation'
+);
+
+SELECT is(
+    (SELECT (public.acquire_idempotency_lease(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'create_delivery_quote',
+        '00000000-0000-4000-8000-000000000099',
+        'fp_initial_99',
+        30
+    ))->>'response_status'),
+    '201',
+    'acquire_idempotency_lease preserves response_status 201 on replay'
+);
+
+-- 65. Verify private.idempotency_reservations record status is COMPLETED
+SELECT is(
+    (SELECT status FROM private.idempotency_reservations WHERE key = '00000000-0000-4000-8000-000000000099'),
+    'COMPLETED',
+    'idempotency_reservations row status is COMPLETED'
 );
 
 SELECT * FROM finish();

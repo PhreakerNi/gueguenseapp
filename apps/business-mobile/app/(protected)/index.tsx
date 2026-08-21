@@ -50,6 +50,7 @@ export default function BusinessDashboardScreen() {
   const [dropoffLng, setDropoffLng] = useState("");
   const [packageType, setPackageType] = useState<PackageType>("PARCEL");
   const [cashToCollect, setCashToCollect] = useState("0");
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(generateUuidV4());
 
   // UI state
   const [submitting, setSubmitting] = useState(false);
@@ -59,21 +60,11 @@ export default function BusinessDashboardScreen() {
 
   useEffect(() => {
     async function loadAuthorizedLocations() {
-      if (!identity?.businessMemberships?.length) {
-        setLoadingLocations(false);
-        return;
-      }
       try {
         const client = getSupabaseClient();
-        const businessId = identity.businessMemberships[0]?.businessId;
-        if (!businessId) {
-          setLoadingLocations(false);
-          return;
-        }
         const { data, error } = await client
           .from("business_locations")
-          .select("id, name, address_text")
-          .eq("business_id", businessId)
+          .select("id, name, address_text, business_id")
           .eq("is_active", true);
 
         if (!error && data && data.length > 0) {
@@ -128,7 +119,6 @@ export default function BusinessDashboardScreen() {
     setErrorMessage(null);
 
     try {
-      const idempotencyKey = generateUuidV4();
       const payload = {
         location_id: selectedLocationId,
         dropoff_address: {
@@ -162,8 +152,11 @@ export default function BusinessDashboardScreen() {
         );
       } else {
         setQuoteResult(data);
+        // Refresh key for next distinct quote intention
+        setIdempotencyKey(generateUuidV4());
       }
     } catch {
+      // On network failure, preserve idempotencyKey for retry attempt
       setErrorMessage("Error de conexión al cotizar el envío");
     } finally {
       setSubmitting(false);

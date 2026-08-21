@@ -627,6 +627,16 @@ export type Database = {
         }
         Returns: Json
       }
+      acquire_idempotency_lease: {
+        Args: {
+          p_actor_user_id: string
+          p_key: string
+          p_lease_seconds?: number
+          p_request_fingerprint: string
+          p_scope: string
+        }
+        Returns: Json
+      }
       admin_verify_driver: {
         Args: {
           p_actor_aal?: string

@@ -88,7 +88,7 @@ function generateUuidV4(): string {
   return crypto.randomUUID();
 }
 
-describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", () => {
+describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", () => {
   let mockServer: http.Server;
   let mockServerPort = 9876;
   let mockCallCount = 0;
@@ -337,7 +337,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", (
       body: payload,
     });
 
-    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.status, 201);
     assert.strictEqual(res.data.status, "QUOTED");
     assert.strictEqual(res.data.currency, "NIO");
     assert.strictEqual(res.data.base_amount, "35.00");
@@ -379,7 +379,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", (
       body: payload,
     });
 
-    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.status, 201);
     assert.strictEqual(res.headers.get("x-cache"), "HIT");
     assert.strictEqual(res.data.quote_id, sharedQuoteId);
     assert.strictEqual(mockCallCount, prevCallCount); // Google not called again
@@ -853,7 +853,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", (
       body: {},
     });
 
-    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.status, 201);
     assert.strictEqual(res.data.status, "QUOTED");
     assert.strictEqual(res.data.delivery_request_id, sharedDeliveryRequestId);
     assert.notStrictEqual(res.data.quote_id, sharedQuoteId);
@@ -973,7 +973,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", (
       body: payload,
     });
 
-    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.status, 201);
     assert.strictEqual(res.data.status, "QUOTED");
     assert.strictEqual(mockCallCount, 2); // Called twice (1 retry)
   });
@@ -1013,7 +1013,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", (
       body: payload,
     });
 
-    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.status, 201);
     assert.strictEqual(res.data.route_distance_meters, 6000);
   });
 
@@ -1128,7 +1128,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", (
       idempotencyKey: testKey,
       body: payload,
     });
-    assert.strictEqual(res1.status, 200);
+    assert.strictEqual(res1.status, 201);
     const createdQuoteId = res1.data.quote_id;
     const initialGoogleCalls = mockCallCount;
 
@@ -1151,7 +1151,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", (
       body: payload,
     });
 
-    assert.strictEqual(res2.status, 200);
+    assert.strictEqual(res2.status, 201);
     assert.strictEqual(res2.headers.get("x-cache"), "HIT");
     assert.strictEqual(res2.data.quote_id, createdQuoteId);
     assert.strictEqual(mockCallCount, initialGoogleCalls); // 0 additional Google calls
@@ -1212,7 +1212,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", (
       idempotencyKey: sharedKey,
       body: payloadA,
     });
-    assert.strictEqual(resA.status, 200);
+    assert.strictEqual(resA.status, 201);
 
     // Owner B creates quote with the SAME sharedKey
     const resB = await apiFetch("/quotes", {
@@ -1221,7 +1221,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", (
       idempotencyKey: sharedKey,
       body: payloadB,
     });
-    assert.strictEqual(resB.status, 200);
+    assert.strictEqual(resB.status, 201);
     assert.notStrictEqual(resB.data.quote_id, resA.data.quote_id);
     assert.notStrictEqual(
       resB.headers.get("x-cache"),
@@ -1304,5 +1304,267 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q40)", (
     assert.strictEqual(res.status, 503);
     assert.strictEqual(res.data.error.code, "PRICING_UNAVAILABLE");
     assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
+  });
+
+  // =========================================================================
+  // Q41 - Q46: Microclosure v1.2 Concurrency, Revocation, Privacy & Sanitization
+  // =========================================================================
+
+  it("Q41: Authorization Revocation Barrier: Revoked user sending same idempotency key receives 403 AUTH_FORBIDDEN (0 cached replay, 0 Google calls)", async () => {
+    mockBehavior = "success";
+    const testKey = generateUuidV4();
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Reparto San Juan",
+        latitude: 12.128,
+        longitude: -86.268,
+      },
+      recipient_name: "Revocation Test",
+      recipient_phone: "+50588880041",
+      package_type: "PARCEL",
+      cash_to_collect: 0,
+    };
+
+    // 1. Initial valid creation
+    const res1 = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: testKey,
+      body: payload,
+    });
+    assert.strictEqual(res1.status, 201);
+    const initialGoogleCalls = mockCallCount;
+
+    // 2. Suspend/Revoke Owner A membership
+    await dbPool.query(
+      "UPDATE public.business_members SET status = 'SUSPENDED' WHERE user_id = $1",
+      [ownerAUserId],
+    );
+
+    try {
+      // 3. Repeat request with same Key K: MUST fail with 403, NOT return cached replay!
+      const res2 = await apiFetch("/quotes", {
+        method: "POST",
+        token: ownerAToken,
+        idempotencyKey: testKey,
+        body: payload,
+      });
+
+      assert.strictEqual(res2.status, 403);
+      assert.strictEqual(res2.data.error.code, "AUTH_FORBIDDEN");
+      assert.strictEqual(
+        mockCallCount,
+        initialGoogleCalls,
+        "0 additional Google calls",
+      );
+    } finally {
+      // Restore Owner A membership
+      await dbPool.query(
+        "UPDATE public.business_members SET status = 'ACTIVE' WHERE user_id = $1",
+        [ownerAUserId],
+      );
+    }
+  });
+
+  it("Q42: Concurrent identical requests with same actor + key + payload generate EXACTLY 1 Google call and 1 quote", async () => {
+    mockBehavior = "success";
+    mockCallCount = 0;
+    const concurrentKey = generateUuidV4();
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Rotonda El Gueguense",
+        latitude: 12.138,
+        longitude: -86.275,
+      },
+      recipient_name: "Concurrent Test",
+      recipient_phone: "+50588880042",
+      package_type: "PARCEL",
+      cash_to_collect: 50.0,
+    };
+
+    const countReqsBefore = await dbPool.query(
+      "SELECT count(*) FROM public.delivery_requests",
+    );
+    const countQuotesBefore = await dbPool.query(
+      "SELECT count(*) FROM public.delivery_quotes",
+    );
+
+    // Fire 2 concurrent requests simultaneously
+    const [res1, res2] = await Promise.all([
+      apiFetch("/quotes", {
+        method: "POST",
+        token: ownerAToken,
+        idempotencyKey: concurrentKey,
+        body: payload,
+      }),
+      apiFetch("/quotes", {
+        method: "POST",
+        token: ownerAToken,
+        idempotencyKey: concurrentKey,
+        body: payload,
+      }),
+    ]);
+
+    assert.strictEqual(res1.status, 201);
+    assert.strictEqual(res2.status, 201);
+    assert.strictEqual(res1.data.quote_id, res2.data.quote_id);
+    assert.strictEqual(
+      mockCallCount,
+      1,
+      "Google Routes was called EXACTLY once across concurrent requests",
+    );
+
+    const countReqsAfter = await dbPool.query(
+      "SELECT count(*) FROM public.delivery_requests",
+    );
+    const countQuotesAfter = await dbPool.query(
+      "SELECT count(*) FROM public.delivery_quotes",
+    );
+
+    assert.strictEqual(
+      Number(countReqsAfter.rows[0].count),
+      Number(countReqsBefore.rows[0].count) + 1,
+      "EXACTLY 1 delivery request created",
+    );
+    assert.strictEqual(
+      Number(countQuotesAfter.rows[0].count),
+      Number(countQuotesBefore.rows[0].count) + 1,
+      "EXACTLY 1 delivery quote created",
+    );
+  });
+
+  it("Q43: Concurrent requests with same key but DIFFERENT payload produce 422 mismatch without 2nd Google call", async () => {
+    mockBehavior = "success";
+    mockCallCount = 0;
+    const concurrentKey = generateUuidV4();
+
+    const payloadA = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Payload Alpha",
+        latitude: 12.138,
+        longitude: -86.275,
+      },
+      recipient_name: "Alpha User",
+      recipient_phone: "+50588880043",
+      package_type: "PARCEL",
+      cash_to_collect: 0,
+    };
+
+    const payloadB = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Payload Beta Different",
+        latitude: 12.14,
+        longitude: -86.28,
+      },
+      recipient_name: "Beta User",
+      recipient_phone: "+50588880044",
+      package_type: "DOCUMENT",
+      cash_to_collect: 0,
+    };
+
+    // Sequential / concurrent attempt with different payload on same key
+    const res1 = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: concurrentKey,
+      body: payloadA,
+    });
+    assert.strictEqual(res1.status, 201);
+
+    const res2 = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: concurrentKey,
+      body: payloadB,
+    });
+    assert.strictEqual(res2.status, 422);
+    assert.strictEqual(
+      res2.data.error.code,
+      "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+    );
+    assert.strictEqual(
+      mockCallCount,
+      1,
+      "0 second Google call made on fingerprint mismatch",
+    );
+  });
+
+  it("Q44: Idempotency subsystem failure / invalid key fails closed with 0 Google calls", async () => {
+    const prevCallCount = mockCallCount;
+    const res = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: "12345-not-a-valid-uuid",
+      body: {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Plaza España",
+          latitude: 12.137,
+          longitude: -86.252,
+        },
+        recipient_name: "Invalid Key Test",
+        recipient_phone: "+50588880045",
+        package_type: "PARCEL",
+      },
+    });
+
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
+    assert.strictEqual(mockCallCount, prevCallCount); // 0 Google calls
+  });
+
+  it("Q45: Log privacy test with sentinel values: Secrets and PII are never leaked in error responses", async () => {
+    const sentinelSecret = "SUPER_SECRET_INTERNAL_SENTINEL_TOKEN_999";
+    const res = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: generateUuidV4(),
+      body: {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: `Address with ${sentinelSecret}`,
+          latitude: 999.0, // Invalid latitude to force validation error
+          longitude: -86.252,
+        },
+        recipient_name: "Sentinel User",
+        recipient_phone: "+50588880046",
+        package_type: "PARCEL",
+      },
+    });
+
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
+    assert.ok(
+      !JSON.stringify(res.data).includes(sentinelSecret),
+      "Sentinel value is not leaked in error response body",
+    );
+  });
+
+  it("Q46: Unknown Postgres error sanitization: Internal stack traces or raw database messages are never leaked", async () => {
+    const res = await apiFetch("/quotes", {
+      method: "POST",
+      token: ownerAToken,
+      idempotencyKey: generateUuidV4(),
+      body: {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Valid text",
+          latitude: 12.13,
+          longitude: -86.27,
+        },
+        recipient_name: "Sanitization Test",
+        recipient_phone: "+50588880047",
+        package_type: "INVALID_UNKNOWN_TYPE" as any,
+      },
+    });
+
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
+    assert.strictEqual(res.data.error.stack, undefined);
+    assert.strictEqual(typeof res.data.error.message, "string");
   });
 });
