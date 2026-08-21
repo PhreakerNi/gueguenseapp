@@ -50,7 +50,8 @@ export default function BusinessDashboardScreen() {
   const [dropoffLng, setDropoffLng] = useState("");
   const [packageType, setPackageType] = useState<PackageType>("PARCEL");
   const [cashToCollect, setCashToCollect] = useState("0");
-  const [idempotencyKey, setIdempotencyKey] = useState<string>(generateUuidV4());
+  const [idempotencyKey, setIdempotencyKey] =
+    useState<string>(generateUuidV4());
 
   // UI state
   const [submitting, setSubmitting] = useState(false);
