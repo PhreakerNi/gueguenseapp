@@ -86,7 +86,7 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Assign manager A only to location 1
-INSERT INTO public.business_member_locations (member_id, location_id)
+INSERT INTO public.business_member_locations (business_member_id, business_location_id)
 VALUES ('bm000000-0000-4000-8000-000000000003', 'l0000000-0000-4000-8000-000000000001')
 ON CONFLICT DO NOTHING;
 

@@ -170,8 +170,8 @@ USING (
               bm.role = 'business_owner'
               OR EXISTS (
                   SELECT 1 FROM public.business_member_locations bml
-                  WHERE bml.member_id = bm.id
-                    AND bml.location_id = delivery_requests.location_id
+                  WHERE bml.business_member_id = bm.id
+                    AND bml.business_location_id = delivery_requests.location_id
               )
           )
     )
@@ -195,8 +195,8 @@ USING (
               bm.role = 'business_owner'
               OR EXISTS (
                   SELECT 1 FROM public.business_member_locations bml
-                  WHERE bml.member_id = bm.id
-                    AND bml.location_id = dr.location_id
+                  WHERE bml.business_member_id = bm.id
+                    AND bml.business_location_id = dr.location_id
               )
           )
     )
@@ -397,8 +397,8 @@ BEGIN
     IF v_member.role <> 'business_owner' THEN
         IF NOT EXISTS (
             SELECT 1 FROM public.business_member_locations bml
-            WHERE bml.member_id = v_member.id
-              AND bml.location_id = p_location_id
+            WHERE bml.business_member_id = v_member.id
+              AND bml.business_location_id = p_location_id
         ) THEN
             RAISE EXCEPTION 'INVALID_LOCATION_SCOPE: User lacks authority over location %', p_location_id;
         END IF;
@@ -604,8 +604,8 @@ BEGIN
     IF v_member.role <> 'business_owner' THEN
         IF NOT EXISTS (
             SELECT 1 FROM public.business_member_locations bml
-            WHERE bml.member_id = v_member.id
-              AND bml.location_id = v_quote.location_id
+            WHERE bml.business_member_id = v_member.id
+              AND bml.business_location_id = v_quote.location_id
         ) THEN
             RAISE EXCEPTION 'AUTH_FORBIDDEN: User lacks authority over this quote location';
         END IF;
@@ -705,8 +705,8 @@ BEGIN
     IF v_member.role <> 'business_owner' THEN
         IF NOT EXISTS (
             SELECT 1 FROM public.business_member_locations bml
-            WHERE bml.member_id = v_member.id
-              AND bml.location_id = v_quote.location_id
+            WHERE bml.business_member_id = v_member.id
+              AND bml.business_location_id = v_quote.location_id
         ) THEN
             RAISE EXCEPTION 'AUTH_FORBIDDEN: User lacks authority over this quote location';
         END IF;
@@ -807,8 +807,8 @@ BEGIN
     IF v_member.role <> 'business_owner' THEN
         IF NOT EXISTS (
             SELECT 1 FROM public.business_member_locations bml
-            WHERE bml.member_id = v_member.id
-              AND bml.location_id = v_old_quote.location_id
+            WHERE bml.business_member_id = v_member.id
+              AND bml.business_location_id = v_old_quote.location_id
         ) THEN
             RAISE EXCEPTION 'AUTH_FORBIDDEN: User lacks authority over this quote location';
         END IF;
