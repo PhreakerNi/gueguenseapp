@@ -190,6 +190,7 @@ export type Database = {
           delivery_request_id: string
           demand_amount: number
           discount_amount: number
+          distance_amount: number
           driver_earning_estimate: number | null
           expires_at: string
           id: string
@@ -212,6 +213,7 @@ export type Database = {
           delivery_request_id: string
           demand_amount?: number
           discount_amount?: number
+          distance_amount: number
           driver_earning_estimate?: number | null
           expires_at: string
           id?: string
@@ -234,6 +236,7 @@ export type Database = {
           delivery_request_id?: string
           demand_amount?: number
           discount_amount?: number
+          distance_amount?: number
           driver_earning_estimate?: number | null
           expires_at?: string
           id?: string
