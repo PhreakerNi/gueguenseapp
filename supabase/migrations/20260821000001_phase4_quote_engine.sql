@@ -437,7 +437,11 @@ BEGIN
     v_time_amount := pg_catalog.round(v_minutes * v_rule.per_minute_rate, 2);
 
     v_subtotal := pg_catalog.round(v_base_amount + v_distance_amount + v_time_amount, 2);
-    v_quoted_total := pg_catalog.greatest(v_rule.min_fare, v_subtotal);
+    IF v_subtotal < v_rule.min_fare THEN
+        v_quoted_total := v_rule.min_fare;
+    ELSE
+        v_quoted_total := v_subtotal;
+    END IF;
 
     v_calc_at := COALESCE(p_route_calculated_at, pg_catalog.clock_timestamp());
     v_expires_at := v_calc_at + (v_pv.quote_ttl_seconds || ' seconds')::interval;
@@ -859,7 +863,11 @@ BEGIN
     v_time_amount := pg_catalog.round(v_minutes * v_rule.per_minute_rate, 2);
 
     v_subtotal := pg_catalog.round(v_base_amount + v_distance_amount + v_time_amount, 2);
-    v_quoted_total := pg_catalog.greatest(v_rule.min_fare, v_subtotal);
+    IF v_subtotal < v_rule.min_fare THEN
+        v_quoted_total := v_rule.min_fare;
+    ELSE
+        v_quoted_total := v_subtotal;
+    END IF;
 
     v_calc_at := COALESCE(p_route_calculated_at, pg_catalog.clock_timestamp());
     v_expires_at := v_calc_at + (v_pv.quote_ttl_seconds || ' seconds')::interval;

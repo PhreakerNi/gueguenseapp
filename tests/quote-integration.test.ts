@@ -169,7 +169,44 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
       });
     });
 
-    // 2. Setup Seed Data in PostgreSQL directly
+    // 2. Setup Authenticated Test Users
+    const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const testPassword = "Password123!Secure";
+    const runTag = Date.now().toString().slice(-6);
+
+    const { data: ownerAAuth, error: errA } = await anonClient.auth.signUp({
+      email: `ownera_${runTag}@test.com`,
+      password: testPassword,
+    });
+    if (errA || !ownerAAuth.user || !ownerAAuth.session) {
+      throw new Error(`Failed to create ownerA: ${errA?.message}`);
+    }
+    ownerAUserId = ownerAAuth.user.id;
+    ownerAToken = ownerAAuth.session.access_token;
+
+    const { data: ownerBAuth, error: errB } = await anonClient.auth.signUp({
+      email: `ownerb_${runTag}@test.com`,
+      password: testPassword,
+    });
+    if (errB || !ownerBAuth.user || !ownerBAuth.session) {
+      throw new Error(`Failed to create ownerB: ${errB?.message}`);
+    }
+    ownerBUserId = ownerBAuth.user.id;
+    ownerBToken = ownerBAuth.session.access_token;
+
+    const { data: mgrAuth, error: errM } = await anonClient.auth.signUp({
+      email: `managera_${runTag}@test.com`,
+      password: testPassword,
+    });
+    if (errM || !mgrAuth.user || !mgrAuth.session) {
+      throw new Error(`Failed to create managerA: ${errM?.message}`);
+    }
+    managerAUserId = mgrAuth.user.id;
+    managerAToken = mgrAuth.session.access_token;
+
+    // 3. Setup Seed Data in PostgreSQL directly
     const client = await dbPool.connect();
     try {
       // Ensure pricing version & rules exist
@@ -183,11 +220,6 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
         ON CONFLICT (id) DO UPDATE SET base_fee = 35.00, per_km_rate = 12.00, per_minute_rate = 1.50, min_fare = 45.00;
       `);
 
-      // Create Users & Businesses
-      ownerAUserId = generateUuidV4();
-      ownerBUserId = generateUuidV4();
-      managerAUserId = generateUuidV4();
-
       businessAId = generateUuidV4();
       locationA1Id = generateUuidV4();
       locationA2Id = generateUuidV4();
@@ -196,12 +228,6 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
       locationB1Id = generateUuidV4();
 
       await client.query(`
-        INSERT INTO auth.users (id, email, raw_user_meta_data)
-        VALUES
-          ('${ownerAUserId}', 'ownera_${Date.now()}@test.com', '{"full_name":"Owner A"}'::jsonb),
-          ('${ownerBUserId}', 'ownerb_${Date.now()}@test.com', '{"full_name":"Owner B"}'::jsonb),
-          ('${managerAUserId}', 'managera_${Date.now()}@test.com', '{"full_name":"Manager A"}'::jsonb);
-
         INSERT INTO public.businesses (id, legal_name, brand_name, tax_id, account_status)
         VALUES
           ('${businessAId}', 'Business Alfa S.A.', 'Alfa Store', 'J0310${Date.now()}1', 'ACTIVE'),
@@ -235,79 +261,6 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
     } finally {
       client.release();
     }
-
-    // Generate JWT tokens for test actors
-    const serviceClient = createClient(
-      SUPABASE_URL,
-      SUPABASE_SERVICE_ROLE_KEY,
-      {
-        auth: { autoRefreshToken: false, persistSession: false },
-      },
-    );
-
-    // Helper: generate a signed JWT
-    async function getUserToken(uid: string, email: string): Promise<string> {
-      // Sign using service role admin token generator or direct mock JWT if needed
-      // Supabase JS admin provides createSession or generateLink
-      const { data } = await serviceClient.auth.admin.generateLink({
-        type: "magiclink",
-        email,
-      });
-      // Exchange hashed token or verify directly
-      if (data?.properties?.hashed_token) {
-        const { data: sessionData } = await serviceClient.auth.verifyOtp({
-          token_hash: data.properties.hashed_token,
-          type: "magiclink",
-        });
-        if (sessionData?.session?.access_token) {
-          return sessionData.session.access_token;
-        }
-      }
-      return "";
-    }
-
-    // Since we created users directly in auth.users, let's generate valid tokens
-    const { data: linkA } = await serviceClient.auth.admin.generateLink({
-      type: "magiclink",
-      email: (
-        await dbPool.query(`SELECT email FROM auth.users WHERE id = $1`, [
-          ownerAUserId,
-        ])
-      ).rows[0].email,
-    });
-    const { data: sessA } = await serviceClient.auth.verifyOtp({
-      token_hash: linkA?.properties?.hashed_token || "",
-      type: "magiclink",
-    });
-    ownerAToken = sessA?.session?.access_token || "";
-
-    const { data: linkB } = await serviceClient.auth.admin.generateLink({
-      type: "magiclink",
-      email: (
-        await dbPool.query(`SELECT email FROM auth.users WHERE id = $1`, [
-          ownerBUserId,
-        ])
-      ).rows[0].email,
-    });
-    const { data: sessB } = await serviceClient.auth.verifyOtp({
-      token_hash: linkB?.properties?.hashed_token || "",
-      type: "magiclink",
-    });
-    ownerBToken = sessB?.session?.access_token || "";
-
-    const { data: linkM } = await serviceClient.auth.admin.generateLink({
-      type: "magiclink",
-      email: (
-        await dbPool.query(`SELECT email FROM auth.users WHERE id = $1`, [
-          managerAUserId,
-        ])
-      ).rows[0].email,
-    });
-    const { data: sessM } = await serviceClient.auth.verifyOtp({
-      token_hash: linkM?.properties?.hashed_token || "",
-      type: "magiclink",
-    });
-    managerAToken = sessM?.session?.access_token || "";
   });
 
   after(async () => {
