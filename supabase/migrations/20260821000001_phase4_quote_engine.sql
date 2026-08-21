@@ -288,6 +288,48 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.get_route_cache(p_cache_key TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    RETURN private.get_route_cache(p_cache_key);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.upsert_route_cache(
+    p_cache_key TEXT,
+    p_provider TEXT,
+    p_origin_lat DOUBLE PRECISION,
+    p_origin_lng DOUBLE PRECISION,
+    p_dest_lat DOUBLE PRECISION,
+    p_dest_lng DOUBLE PRECISION,
+    p_distance_meters BIGINT,
+    p_duration_seconds BIGINT,
+    p_ttl_seconds INTEGER DEFAULT 86400
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    PERFORM private.upsert_route_cache(
+        p_cache_key,
+        p_provider,
+        p_origin_lat,
+        p_origin_lng,
+        p_dest_lat,
+        p_dest_lng,
+        p_distance_meters,
+        p_duration_seconds,
+        p_ttl_seconds
+    );
+END;
+$$;
+
 -- ----------------------------------------------------------------------------
 -- 8. Core Quote Management RPCs
 -- ----------------------------------------------------------------------------
@@ -1094,7 +1136,7 @@ BEGIN
             (p_operation_params->>'duration_seconds')::bigint,
             (p_operation_params->>'route_calculated_at')::timestamptz
         );
-        v_status := 201;
+        v_status := 200;
 
     ELSIF p_operation_fn = 'cancel_delivery_quote' THEN
         v_result := public.cancel_delivery_quote(
@@ -1111,7 +1153,7 @@ BEGIN
             (p_operation_params->>'duration_seconds')::bigint,
             (p_operation_params->>'route_calculated_at')::timestamptz
         );
-        v_status := 201;
+        v_status := 200;
 
     ELSE
         RAISE EXCEPTION 'INVALID_ARGUMENT: Unknown operation function %', p_operation_fn;
@@ -1291,6 +1333,12 @@ GRANT EXECUTE ON FUNCTION public.get_business_location_coordinates(UUID) TO serv
 
 REVOKE EXECUTE ON FUNCTION public.get_requote_route_info(UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_requote_route_info(UUID) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.get_route_cache(TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_route_cache(TEXT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.upsert_route_cache(TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION, BIGINT, BIGINT, INTEGER) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.upsert_route_cache(TEXT, TEXT, DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION, BIGINT, BIGINT, INTEGER) TO service_role;
 
 -- ----------------------------------------------------------------------------
 -- 10. Initial Global Pricing Version & Rules Seed (MVP Standard Rate)

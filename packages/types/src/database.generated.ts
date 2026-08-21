@@ -737,6 +737,10 @@ export type Database = {
         Returns: Json
       }
       get_requote_route_info: { Args: { p_quote_id: string }; Returns: Json }
+      get_route_cache: {
+        Args: { p_cache_key: string }
+        Returns: Json
+      }
       get_user_platform_role: { Args: { p_user_id: string }; Returns: string }
       register_driver: {
         Args: {
@@ -756,6 +760,20 @@ export type Database = {
           p_year: number
         }
         Returns: Json
+      }
+      upsert_route_cache: {
+        Args: {
+          p_cache_key: string
+          p_dest_lat: number
+          p_dest_lng: number
+          p_distance_meters: number
+          p_duration_seconds: number
+          p_origin_lat: number
+          p_origin_lng: number
+          p_provider: string
+          p_ttl_seconds?: number
+        }
+        Returns: undefined
       }
     }
     Enums: {
