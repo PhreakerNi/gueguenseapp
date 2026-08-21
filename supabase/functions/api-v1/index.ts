@@ -294,9 +294,12 @@ Deno.serve(async (req: Request) => {
         } else if (error.message.includes("INVALID_FILE_SIZE")) {
           errCode = "INVALID_FILE_SIZE";
           errMsg = "Uploaded file size does not match authorization";
-        } else if (error.message.includes("INVALID_MIME_TYPE")) {
-          errCode = "INVALID_MIME_TYPE";
-          errMsg = "Uploaded file MIME type does not match authorization";
+        } else if (error.message.includes("QUOTE_INVALID_STATE")) {
+          errCode = "QUOTE_INVALID_STATE";
+          errMsg = "Quote is not in a valid state for this operation";
+        } else if (error.message.includes("QUOTE_NOT_FOUND")) {
+          errCode = "QUOTE_NOT_FOUND";
+          errMsg = "Delivery quote not found";
         } else if (error.message.includes("INVALID_STATE")) {
           errCode = "INVALID_STATE";
           errMsg = "Operation invalid for current entity state";
@@ -307,12 +310,6 @@ Deno.serve(async (req: Request) => {
           errCode = "PRICING_UNAVAILABLE";
           errMsg =
             "Pricing version or routing service is currently unavailable";
-        } else if (error.message.includes("QUOTE_NOT_FOUND")) {
-          errCode = "QUOTE_NOT_FOUND";
-          errMsg = "Delivery quote not found";
-        } else if (error.message.includes("QUOTE_INVALID_STATE")) {
-          errCode = "QUOTE_INVALID_STATE";
-          errMsg = "Quote is not in a valid state for this operation";
         } else if (error.message.includes("VALIDATION_ERROR")) {
           errCode = "VALIDATION_ERROR";
           errMsg = error.message.replace(/^[^:]+:\s*/, "");

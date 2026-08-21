@@ -312,10 +312,10 @@ CREATE OR REPLACE FUNCTION public.create_delivery_quote(
     p_recipient_name TEXT,
     p_recipient_phone TEXT,
     p_package_type TEXT,
-    p_cash_to_collect NUMERIC DEFAULT 0,
-    p_distance_meters BIGINT DEFAULT NULL,
-    p_duration_seconds BIGINT DEFAULT NULL,
-    p_route_calculated_at TIMESTAMPTZ DEFAULT NULL
+    p_cash_to_collect NUMERIC,
+    p_distance_meters BIGINT,
+    p_duration_seconds BIGINT,
+    p_route_calculated_at TIMESTAMPTZ
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -573,7 +573,7 @@ CREATE OR REPLACE FUNCTION public.create_delivery_requote(
     p_quote_id UUID,
     p_distance_meters BIGINT,
     p_duration_seconds BIGINT,
-    p_route_calculated_at TIMESTAMPTZ DEFAULT NULL
+    p_route_calculated_at TIMESTAMPTZ
 )
 RETURNS JSONB
 LANGUAGE plpgsql
