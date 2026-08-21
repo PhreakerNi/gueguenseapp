@@ -644,10 +644,7 @@ export type Database = {
         Returns: Json
       }
       cancel_delivery_quote: {
-        Args: {
-          p_actor_id: string
-          p_quote_id: string
-        }
+        Args: { p_actor_id: string; p_quote_id: string }
         Returns: Json
       }
       commit_driver_document: {
@@ -684,7 +681,7 @@ export type Database = {
       create_delivery_quote: {
         Args: {
           p_actor_id: string
-          p_cash_to_collect?: number
+          p_cash_to_collect: number
           p_distance_meters: number
           p_dropoff_address_text: string
           p_dropoff_lat: number
@@ -724,17 +721,19 @@ export type Database = {
         Returns: Json
       }
       get_admin_driver_verification_queue: { Args: never; Returns: Json }
+      get_business_location_coordinates: {
+        Args: { p_location_id: string }
+        Returns: Json
+      }
       get_driver_document_storage_path: {
         Args: { p_document_id: string }
         Returns: Json
       }
       get_quote_for_actor: {
-        Args: {
-          p_actor_id: string
-          p_quote_id: string
-        }
+        Args: { p_actor_id: string; p_quote_id: string }
         Returns: Json
       }
+      get_requote_route_info: { Args: { p_quote_id: string }; Returns: Json }
       get_user_platform_role: { Args: { p_user_id: string }; Returns: string }
       register_driver: {
         Args: {
