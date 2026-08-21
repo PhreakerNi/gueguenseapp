@@ -1173,9 +1173,98 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 9. Revoke Execution from PUBLIC/anon/authenticated & Grant to service_role ONLY
+-- 8.6 Helper Read RPCs for API Edge Functions
 -- ----------------------------------------------------------------------------
 
+CREATE OR REPLACE FUNCTION public.get_business_location_coordinates(p_location_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_rec RECORD;
+BEGIN
+    SELECT 
+        l.id,
+        l.business_id,
+        l.name,
+        l.address_text,
+        l.is_active,
+        extensions.ST_Y(l.location::extensions.geometry) AS latitude,
+        extensions.ST_X(l.location::extensions.geometry) AS longitude
+    INTO v_rec
+    FROM public.business_locations l
+    WHERE l.id = p_location_id;
+
+    IF v_rec.id IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'id', v_rec.id,
+        'business_id', v_rec.business_id,
+        'name', v_rec.name,
+        'address_text', v_rec.address_text,
+        'is_active', v_rec.is_active,
+        'latitude', v_rec.latitude,
+        'longitude', v_rec.longitude
+    );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_requote_route_info(p_quote_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_rec RECORD;
+BEGIN
+    SELECT 
+        q.id AS quote_id,
+        q.status,
+        q.delivery_request_id,
+        r.business_id,
+        (r.pickup_address_snapshot->>'latitude')::double precision AS pickup_lat,
+        (r.pickup_address_snapshot->>'longitude')::double precision AS pickup_lng,
+        (r.dropoff_address_snapshot->>'latitude')::double precision AS dropoff_lat,
+        (r.dropoff_address_snapshot->>'longitude')::double precision AS dropoff_lng
+    INTO v_rec
+    FROM public.delivery_quotes q
+    JOIN public.delivery_requests r ON r.id = q.delivery_request_id
+    WHERE q.id = p_quote_id;
+
+    IF v_rec.quote_id IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'quote_id', v_rec.quote_id,
+        'status', v_rec.status,
+        'delivery_request_id', v_rec.delivery_request_id,
+        'business_id', v_rec.business_id,
+        'pickup_lat', v_rec.pickup_lat,
+        'pickup_lng', v_rec.pickup_lng,
+        'dropoff_lat', v_rec.dropoff_lat,
+        'dropoff_lng', v_rec.dropoff_lng
+    );
+END;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 9. Table Grants & Function Revocations
+-- ----------------------------------------------------------------------------
+
+-- Table permissions
+GRANT SELECT ON TABLE public.pricing_versions, public.pricing_rules, public.delivery_requests, public.delivery_quotes TO authenticated;
+GRANT ALL ON TABLE public.pricing_versions, public.pricing_rules, public.delivery_requests, public.delivery_quotes, private.route_quote_cache TO service_role;
+GRANT ALL ON TABLE public.pricing_versions, public.pricing_rules, public.delivery_requests, public.delivery_quotes, private.route_quote_cache TO postgres;
+
+-- Function permissions
 REVOKE EXECUTE ON FUNCTION private.get_route_cache(TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION private.get_route_cache(TEXT) TO service_role;
 
@@ -1196,4 +1285,10 @@ GRANT EXECUTE ON FUNCTION public.create_delivery_requote(UUID, UUID, BIGINT, BIG
 
 REVOKE EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.get_business_location_coordinates(UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_business_location_coordinates(UUID) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.get_requote_route_info(UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_requote_route_info(UUID) TO service_role;
 

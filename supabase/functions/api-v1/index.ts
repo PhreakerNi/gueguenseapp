@@ -1273,12 +1273,13 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Fetch pickup location from DB
-      const { data: locData, error: locErr } = await serviceClient
-        .from("business_locations")
-        .select("id, location, is_active, business_id")
-        .eq("id", locationId)
-        .maybeSingle();
+      // Fetch pickup location from DB using helper RPC
+      const { data: locData, error: locErr } = await serviceClient.rpc(
+        "get_business_location_coordinates",
+        {
+          p_location_id: locationId,
+        },
+      );
 
       if (locErr || !locData) {
         return errorResponse(
@@ -1296,8 +1297,10 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const pickupCoords = parseGeographyCoordinates(locData.location);
-      if (!pickupCoords) {
+      const pickupLat = Number(locData.latitude);
+      const pickupLng = Number(locData.longitude);
+
+      if (isNaN(pickupLat) || isNaN(pickupLng)) {
         return errorResponse(
           "INVALID_LOCATIONS",
           "Business location coordinates are invalid",
@@ -1309,8 +1312,8 @@ Deno.serve(async (req: Request) => {
       let routeMetrics;
       try {
         routeMetrics = await fetchGoogleRoutes(
-          pickupCoords.lat,
-          pickupCoords.lng,
+          pickupLat,
+          pickupLng,
           dropoffLat,
           dropoffLng,
         );
@@ -1416,16 +1419,15 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Fetch quote and delivery request to get locations
-      const { data: quoteRecord, error: quoteErr } = await serviceClient
-        .from("delivery_quotes")
-        .select(
-          "id, status, expires_at, delivery_requests (location_id, pickup_address_snapshot, dropoff_address_snapshot)",
-        )
-        .eq("id", quoteId)
-        .maybeSingle();
+      // Fetch route info for requote from DB using helper RPC
+      const { data: routeInfo, error: routeInfoErr } = await serviceClient.rpc(
+        "get_requote_route_info",
+        {
+          p_quote_id: quoteId,
+        },
+      );
 
-      if (quoteErr || !quoteRecord) {
+      if (routeInfoErr || !routeInfo) {
         return errorResponse(
           "QUOTE_NOT_FOUND",
           "Delivery quote not found",
@@ -1433,22 +1435,10 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const deliveryReq: any = quoteRecord.delivery_requests;
-      const pickupSnap: any = deliveryReq?.pickup_address_snapshot;
-      const dropoffSnap: any = deliveryReq?.dropoff_address_snapshot;
-
-      if (!pickupSnap || !dropoffSnap) {
-        return errorResponse(
-          "QUOTE_NOT_FOUND",
-          "Delivery request details not found",
-          404,
-        );
-      }
-
-      const pickupLat = Number(pickupSnap.latitude);
-      const pickupLng = Number(pickupSnap.longitude);
-      const dropoffLat = Number(dropoffSnap.latitude);
-      const dropoffLng = Number(dropoffSnap.longitude);
+      const pickupLat = Number(routeInfo.pickup_lat);
+      const pickupLng = Number(routeInfo.pickup_lng);
+      const dropoffLat = Number(routeInfo.dropoff_lat);
+      const dropoffLng = Number(routeInfo.dropoff_lng);
 
       let routeMetrics;
       try {
