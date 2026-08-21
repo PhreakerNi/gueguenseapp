@@ -268,18 +268,17 @@ BEGIN
     v_lock_key := ('x' || pg_catalog.substr(pg_catalog.md5(p_actor_user_id::text || ':' || p_scope || ':' || p_key), 1, 16))::bit(64)::bigint;
     PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
 
-    -- Check if completed record exists in private.idempotency_reservations
+    -- Check if record exists in private.idempotency_responses
     SELECT * INTO v_cached
-    FROM private.idempotency_reservations
+    FROM private.idempotency_responses
     WHERE actor_user_id = p_actor_user_id
       AND scope = p_scope
-      AND key = p_key
-      AND status = 'COMPLETED';
+      AND key = p_key;
 
     IF v_cached.id IS NOT NULL THEN
         IF v_cached.expires_at <= v_now THEN
-            DELETE FROM private.idempotency_reservations WHERE id = v_cached.id;
-            DELETE FROM private.idempotency_responses WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
+            DELETE FROM private.idempotency_reservations WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
+            DELETE FROM private.idempotency_responses WHERE id = v_cached.id;
             DELETE FROM public.idempotency_keys WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
             v_cached := NULL;
         ELSE
@@ -292,6 +291,35 @@ BEGIN
                 'status', v_cached.response_status,
                 'body', v_cached.response_body
             );
+        END IF;
+    END IF;
+
+    -- Also check private.idempotency_reservations
+    IF v_cached.id IS NULL THEN
+        SELECT * INTO v_cached
+        FROM private.idempotency_reservations
+        WHERE actor_user_id = p_actor_user_id
+          AND scope = p_scope
+          AND key = p_key
+          AND status = 'COMPLETED';
+
+        IF v_cached.id IS NOT NULL THEN
+            IF v_cached.expires_at <= v_now THEN
+                DELETE FROM private.idempotency_reservations WHERE id = v_cached.id;
+                DELETE FROM private.idempotency_responses WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
+                DELETE FROM public.idempotency_keys WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
+                v_cached := NULL;
+            ELSE
+                IF v_cached.request_fingerprint <> p_request_fingerprint THEN
+                    RAISE EXCEPTION 'IDEMPOTENCY_FINGERPRINT_MISMATCH: Request payload fingerprint does not match original request';
+                END IF;
+
+                RETURN pg_catalog.jsonb_build_object(
+                    'cached', true,
+                    'status', v_cached.response_status,
+                    'body', v_cached.response_body
+                );
+            END IF;
         END IF;
     END IF;
 

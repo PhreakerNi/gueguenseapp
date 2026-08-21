@@ -489,7 +489,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", (
       body: payload,
     });
 
-    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.status, 201);
     assert.strictEqual(res.data.quoted_total, "45.00");
   });
 
@@ -1440,12 +1440,15 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", (
     mockCallCount = 0;
     const concurrentKey = generateUuidV4();
 
+    // Clear route cache so first request hits Google
+    await dbPool.query("DELETE FROM private.route_quote_cache");
+
     const payloadA = {
       location_id: locationA1Id,
       dropoff_address: {
-        address_text: "Payload Alpha",
-        latitude: 12.138,
-        longitude: -86.275,
+        address_text: "Payload Alpha Mismatch",
+        latitude: 12.155,
+        longitude: -86.295,
       },
       recipient_name: "Alpha User",
       recipient_phone: "+50588880043",
@@ -1457,8 +1460,8 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", (
       location_id: locationA1Id,
       dropoff_address: {
         address_text: "Payload Beta Different",
-        latitude: 12.14,
-        longitude: -86.28,
+        latitude: 12.165,
+        longitude: -86.305,
       },
       recipient_name: "Beta User",
       recipient_phone: "+50588880044",

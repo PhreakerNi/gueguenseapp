@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(65);
+SELECT plan(67);
 
 -- ============================================================================
 -- 1. Structural Checks: Tables, Columns & Indexes (11 assertions: 1-11)
