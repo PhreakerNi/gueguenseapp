@@ -67,36 +67,36 @@ ON CONFLICT (id) DO NOTHING;
 -- Businesses & Locations
 INSERT INTO public.businesses (id, legal_name, brand_name, tax_id, account_status)
 VALUES 
-    ('b0000000-0000-4000-8000-000000000001', 'Empresa Alfa S.A.', 'Alfa Store', 'J0310000000001', 'ACTIVE'),
-    ('b0000000-0000-4000-8000-000000000002', 'Empresa Beta S.A.', 'Beta Store', 'J0310000000002', 'ACTIVE')
+    ('b0000000-0000-4000-8000-000000000001', 'Empresa Alfa S.A.', 'Alfa Store', 'J0310444400001', 'ACTIVE'),
+    ('b0000000-0000-4000-8000-000000000002', 'Empresa Beta S.A.', 'Beta Store', 'J0310444400002', 'ACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.business_members (id, business_id, user_id, role, status)
 VALUES
-    ('bm000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'business_owner', 'ACTIVE'),
-    ('bm000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000002', 'business_owner', 'ACTIVE'),
-    ('bm000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000003', 'business_manager', 'ACTIVE')
+    ('bb000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'business_owner', 'ACTIVE'),
+    ('bb000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000002', 'business_owner', 'ACTIVE'),
+    ('bb000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000003', 'business_manager', 'ACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.business_locations (id, business_id, name, address_text, latitude, longitude, is_active)
 VALUES
-    ('l0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001', 'Sucursal Central Alfa', 'Plaza España Managua', 12.136389, -86.251389, true),
-    ('l0000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001', 'Sucursal Carretera Masaya', 'Km 8 Carretera a Masaya', 12.100000, -86.220000, true),
-    ('l0000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000002', 'Sucursal Beta Centro', 'Metrocentro Managua', 12.126389, -86.261389, true)
+    ('cc000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001', 'Sucursal Central Alfa', 'Plaza España Managua', 12.136389, -86.251389, true),
+    ('cc000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001', 'Sucursal Carretera Masaya', 'Km 8 Carretera a Masaya', 12.100000, -86.220000, true),
+    ('cc000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000002', 'Sucursal Beta Centro', 'Metrocentro Managua', 12.126389, -86.261389, true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Assign manager A only to location 1
 INSERT INTO public.business_member_locations (business_member_id, business_location_id)
-VALUES ('bm000000-0000-4000-8000-000000000003', 'l0000000-0000-4000-8000-000000000001')
+VALUES ('bb000000-0000-4000-8000-000000000003', 'cc000000-0000-4000-8000-000000000001')
 ON CONFLICT DO NOTHING;
 
 -- Seed Pricing Version & Rules (base_fee: 35.00, per_km: 12.00, per_min: 1.50, min_fare: 45.00, ttl: 300)
 INSERT INTO public.pricing_versions (id, name, currency, effective_from, is_active, quote_ttl_seconds)
-VALUES ('pv000000-0000-4000-8000-000000000001', 'Tarifa Estándar Managua 2026', 'NIO', now(), true, 300)
+VALUES ('dd000000-0000-4000-8000-000000000001', 'Tarifa Estándar Managua 2026', 'NIO', now(), true, 300)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.pricing_rules (id, pricing_version_id, base_fee, per_km_rate, per_minute_rate, min_fare)
-VALUES ('pr000000-0000-4000-8000-000000000001', 'pv000000-0000-4000-8000-000000000001', 35.00, 12.00, 1.50, 45.00)
+VALUES ('ee000000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-000000000001', 35.00, 12.00, 1.50, 45.00)
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
@@ -106,7 +106,7 @@ SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = 'a0000000-0000-4000-8000-000000000001';
 
 SELECT throws_like(
-    $$ SELECT public.create_delivery_quote('a0000000-0000-4000-8000-000000000001'::uuid, 'l0000000-0000-4000-8000-000000000001'::uuid, 'Destino', 12.14, -86.26, 'Juan', '+50588888888', 'PARCEL', 0, 4500, 780, now()) $$,
+    $$ SELECT public.create_delivery_quote('a0000000-0000-4000-8000-000000000001'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid, 'Destino', 12.14, -86.26, 'Juan', '+50588888888', 'PARCEL', 0, 4500, 780, now()) $$,
     '%permission denied%',
     'Direct execution of create_delivery_quote is denied to authenticated'
 );
@@ -138,7 +138,7 @@ SET LOCAL ROLE service_role;
 SELECT throws_like(
     $$ SELECT public.create_delivery_quote(
         'a0000000-0000-4000-8000-000000000003'::uuid,
-        'l0000000-0000-4000-8000-000000000002'::uuid,
+        'cc000000-0000-4000-8000-000000000002'::uuid,
         'Altamira', 12.12, -86.24, 'Pedro', '+50588889999', 'DOCUMENT', 0, 3000, 600, now()
     ) $$,
     '%INVALID_LOCATION_SCOPE%',
@@ -149,7 +149,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$ SELECT public.create_delivery_quote(
         'a0000000-0000-4000-8000-000000000002'::uuid,
-        'l0000000-0000-4000-8000-000000000001'::uuid,
+        'cc000000-0000-4000-8000-000000000001'::uuid,
         'Altamira', 12.12, -86.24, 'Pedro', '+50588889999', 'DOCUMENT', 0, 3000, 600, now()
     ) $$,
     '%AUTH_FORBIDDEN%',
@@ -160,7 +160,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$ SELECT public.create_delivery_quote(
         'a0000000-0000-4000-8000-000000000001'::uuid,
-        'l0000000-0000-4000-8000-000000000001'::uuid,
+        'cc000000-0000-4000-8000-000000000001'::uuid,
         'Invalid Coords', 95.0, -86.24, 'Pedro', '+50588889999', 'DOCUMENT', 0, 3000, 600, now()
     ) $$,
     '%VALIDATION_ERROR%',
@@ -172,13 +172,14 @@ SELECT throws_like(
 -- ============================================================================
 -- 4.5 km, 13 min (780s):
 -- base: 35.00, dist: 4.5 * 12 = 54.00, time: 13 * 1.5 = 19.50 -> total: 108.50 NIO
+-- min_fare: 45.00
 DO $$
 DECLARE
     v_res JSONB;
 BEGIN
     v_res := public.create_delivery_quote(
         'a0000000-0000-4000-8000-000000000001'::uuid,
-        'l0000000-0000-4000-8000-000000000001'::uuid,
+        'cc000000-0000-4000-8000-000000000001'::uuid,
         'Colonia Los Robles',
         12.125000,
         -86.265000,
@@ -237,7 +238,7 @@ DECLARE
 BEGIN
     v_res := public.create_delivery_quote(
         'a0000000-0000-4000-8000-000000000001'::uuid,
-        'l0000000-0000-4000-8000-000000000001'::uuid,
+        'cc000000-0000-4000-8000-000000000001'::uuid,
         'Cerca de Plaza España',
         12.137000,
         -86.252000,

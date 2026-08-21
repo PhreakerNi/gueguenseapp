@@ -175,11 +175,11 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
       // Ensure pricing version & rules exist
       await client.query(`
         INSERT INTO public.pricing_versions (id, name, currency, effective_from, is_active, quote_ttl_seconds)
-        VALUES ('pv111111-1111-4111-8111-111111111111', 'Tarifa Managua F4', 'NIO', now(), true, 300)
+        VALUES ('dd111111-1111-4111-8111-111111111111', 'Tarifa Managua F4', 'NIO', now(), true, 300)
         ON CONFLICT (id) DO UPDATE SET is_active = true;
 
         INSERT INTO public.pricing_rules (id, pricing_version_id, base_fee, per_km_rate, per_minute_rate, min_fare)
-        VALUES ('pr111111-1111-4111-8111-111111111111', 'pv111111-1111-4111-8111-111111111111', 35.00, 12.00, 1.50, 45.00)
+        VALUES ('ee111111-1111-4111-8111-111111111111', 'dd111111-1111-4111-8111-111111111111', 35.00, 12.00, 1.50, 45.00)
         ON CONFLICT (id) DO UPDATE SET base_fee = 35.00, per_km_rate = 12.00, per_minute_rate = 1.50, min_fare = 45.00;
       `);
 
