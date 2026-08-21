@@ -181,6 +181,150 @@ export type Database = {
         }
         Relationships: []
       }
+      delivery_quotes: {
+        Row: {
+          base_amount: number
+          consumed_at: string | null
+          created_at: string
+          currency: string
+          delivery_request_id: string
+          demand_amount: number
+          discount_amount: number
+          driver_earning_estimate: number | null
+          expires_at: string
+          id: string
+          platform_revenue_estimate: number | null
+          pricing_version_id: string
+          quoted_total: number
+          route_calculated_at: string
+          route_distance_meters: number
+          route_duration_seconds: number
+          route_provider: string
+          status: string
+          time_amount: number
+          zone_amount: number
+        }
+        Insert: {
+          base_amount: number
+          consumed_at?: string | null
+          created_at?: string
+          currency: string
+          delivery_request_id: string
+          demand_amount?: number
+          discount_amount?: number
+          driver_earning_estimate?: number | null
+          expires_at: string
+          id?: string
+          platform_revenue_estimate?: number | null
+          pricing_version_id: string
+          quoted_total: number
+          route_calculated_at: string
+          route_distance_meters: number
+          route_duration_seconds: number
+          route_provider: string
+          status: string
+          time_amount: number
+          zone_amount?: number
+        }
+        Update: {
+          base_amount?: number
+          consumed_at?: string | null
+          created_at?: string
+          currency?: string
+          delivery_request_id?: string
+          demand_amount?: number
+          discount_amount?: number
+          driver_earning_estimate?: number | null
+          expires_at?: string
+          id?: string
+          platform_revenue_estimate?: number | null
+          pricing_version_id?: string
+          quoted_total?: number
+          route_calculated_at?: string
+          route_distance_meters?: number
+          route_duration_seconds?: number
+          route_provider?: string
+          status?: string
+          time_amount?: number
+          zone_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_quotes_delivery_request_id_fkey"
+            columns: ["delivery_request_id"]
+            isOneToOne: false
+            referencedRelation: "delivery_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_quotes_pricing_version_id_fkey"
+            columns: ["pricing_version_id"]
+            isOneToOne: false
+            referencedRelation: "pricing_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_requests: {
+        Row: {
+          business_id: string
+          cash_to_collect: number
+          created_at: string
+          created_by: string
+          dropoff_address_snapshot: Json
+          dropoff_location: unknown
+          id: string
+          location_id: string
+          package_type: string
+          pickup_address_snapshot: Json
+          recipient_name: string
+          recipient_phone: string
+        }
+        Insert: {
+          business_id: string
+          cash_to_collect?: number
+          created_at?: string
+          created_by: string
+          dropoff_address_snapshot: Json
+          dropoff_location: unknown
+          id?: string
+          location_id: string
+          package_type: string
+          pickup_address_snapshot: Json
+          recipient_name: string
+          recipient_phone: string
+        }
+        Update: {
+          business_id?: string
+          cash_to_collect?: number
+          created_at?: string
+          created_by?: string
+          dropoff_address_snapshot?: Json
+          dropoff_location?: unknown
+          id?: string
+          location_id?: string
+          package_type?: string
+          pickup_address_snapshot?: Json
+          recipient_name?: string
+          recipient_phone?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_requests_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_requests_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "business_locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       driver_documents: {
         Row: {
           created_at: string

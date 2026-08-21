@@ -202,10 +202,10 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
           ('${ownerBUserId}', 'ownerb_${Date.now()}@test.com', '{"full_name":"Owner B"}'::jsonb),
           ('${managerAUserId}', 'managera_${Date.now()}@test.com', '{"full_name":"Manager A"}'::jsonb);
 
-        INSERT INTO public.businesses (id, owner_id, legal_name, brand_name, tax_id, account_status)
+        INSERT INTO public.businesses (id, legal_name, brand_name, tax_id, account_status)
         VALUES
-          ('${businessAId}', '${ownerAUserId}', 'Business Alfa S.A.', 'Alfa Store', 'J0310${Date.now()}1', 'ACTIVE'),
-          ('${businessBId}', '${ownerBUserId}', 'Business Beta S.A.', 'Beta Store', 'J0310${Date.now()}2', 'ACTIVE');
+          ('${businessAId}', 'Business Alfa S.A.', 'Alfa Store', 'J0310${Date.now()}1', 'ACTIVE'),
+          ('${businessBId}', 'Business Beta S.A.', 'Beta Store', 'J0310${Date.now()}2', 'ACTIVE');
 
         INSERT INTO public.business_locations (id, business_id, name, address_text, latitude, longitude, is_active)
         VALUES
@@ -229,7 +229,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
 
       // Assign Manager A ONLY to Location A1
       await client.query(`
-        INSERT INTO public.business_member_locations (member_id, location_id)
+        INSERT INTO public.business_member_locations (business_member_id, business_location_id)
         VALUES ('${managerMemberId}', '${locationA1Id}');
       `);
     } finally {

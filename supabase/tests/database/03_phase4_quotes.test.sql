@@ -65,10 +65,10 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Businesses & Locations
-INSERT INTO public.businesses (id, owner_id, legal_name, brand_name, tax_id, account_status)
+INSERT INTO public.businesses (id, legal_name, brand_name, tax_id, account_status)
 VALUES 
-    ('b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'Empresa Alfa S.A.', 'Alfa Store', 'J0310000000001', 'ACTIVE'),
-    ('b0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000002', 'Empresa Beta S.A.', 'Beta Store', 'J0310000000002', 'ACTIVE')
+    ('b0000000-0000-4000-8000-000000000001', 'Empresa Alfa S.A.', 'Alfa Store', 'J0310000000001', 'ACTIVE'),
+    ('b0000000-0000-4000-8000-000000000002', 'Empresa Beta S.A.', 'Beta Store', 'J0310000000002', 'ACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.business_members (id, business_id, user_id, role, status)
