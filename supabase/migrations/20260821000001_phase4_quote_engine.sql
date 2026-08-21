@@ -481,7 +481,7 @@ BEGIN
         v_dropoff_snapshot,
         pg_catalog.btrim(p_recipient_name),
         pg_catalog.btrim(p_recipient_phone),
-        extensions.st_setsrid(extensions.st_makepoint(p_dropoff_lng, p_dropoff_lat), 4326)::geography,
+        extensions.st_setsrid(extensions.st_makepoint(p_dropoff_lng, p_dropoff_lat), 4326)::extensions.geography,
         v_clean_package_type,
         COALESCE(p_cash_to_collect, 0),
         p_actor_id,

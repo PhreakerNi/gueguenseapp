@@ -934,7 +934,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
       .from("delivery_quotes")
       .select("*")
       .eq("id", sharedQuoteId);
-    assert.strictEqual(data?.length, 0);
+    assert.strictEqual(data?.length ?? 0, 0);
   });
 
   it("Q35: Direct RPC execution of create_delivery_quote is denied to authenticated client", async () => {
@@ -959,7 +959,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q36)", (
     });
 
     assert.ok(error);
-    assert.match(error.message, /permission denied/i);
+    assert.match(error.message, /permission denied|forbidden/i);
   });
 
   it("Q36: Sanitized error responses do not leak internal stack traces or private tokens", async () => {

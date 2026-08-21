@@ -961,6 +961,55 @@ Deno.serve(async (req: Request) => {
     // Phase 4: Quote Engine Helper & Routes (Solo Delivery)
     // =============================================================
 
+    function parseGeographyCoordinates(
+      geo: any,
+    ): { lat: number; lng: number } | null {
+      if (!geo) return null;
+      if (typeof geo === "object") {
+        if (Array.isArray(geo.coordinates) && geo.coordinates.length >= 2) {
+          return {
+            lng: Number(geo.coordinates[0]),
+            lat: Number(geo.coordinates[1]),
+          };
+        }
+        if (geo.latitude !== undefined && geo.longitude !== undefined) {
+          return { lat: Number(geo.latitude), lng: Number(geo.longitude) };
+        }
+        if (geo.lat !== undefined && geo.lng !== undefined) {
+          return { lat: Number(geo.lat), lng: Number(geo.lng) };
+        }
+      }
+      if (typeof geo === "string") {
+        const wktMatch = geo.match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
+        if (wktMatch) {
+          return { lng: parseFloat(wktMatch[1]), lat: parseFloat(wktMatch[2]) };
+        }
+        if (/^[0-9a-fA-F]{42,}$/.test(geo.trim())) {
+          try {
+            const hex = geo.trim();
+            const bytes: number[] = [];
+            for (let i = 0; i < hex.length; i += 2) {
+              bytes.push(parseInt(hex.substr(i, 2), 16));
+            }
+            const buf = new Uint8Array(bytes);
+            const view = new DataView(
+              buf.buffer,
+              buf.byteOffset,
+              buf.byteLength,
+            );
+            const isLittleEndian = buf[0] === 1;
+            const type = view.getUint32(1, isLittleEndian);
+            const hasSrid = (type & 0x20000000) !== 0;
+            const coordOffset = hasSrid ? 9 : 5;
+            const lng = view.getFloat64(coordOffset, isLittleEndian);
+            const lat = view.getFloat64(coordOffset + 8, isLittleEndian);
+            return { lat, lng };
+          } catch {}
+        }
+      }
+      return null;
+    }
+
     async function fetchGoogleRoutes(
       originLat: number,
       originLng: number,
@@ -978,6 +1027,19 @@ Deno.serve(async (req: Request) => {
       const { data: cachedRoute } = await serviceClient.rpc("get_route_cache", {
         p_cache_key: cacheKey,
       });
+
+      if (
+        cachedRoute &&
+        cachedRoute.distance_meters &&
+        cachedRoute.duration_seconds
+      ) {
+        return {
+          distanceMeters: Number(cachedRoute.distance_meters),
+          durationSeconds: Number(cachedRoute.duration_seconds),
+          provider: "GOOGLE_ROUTES",
+          calculatedAt: cachedRoute.calculated_at || new Date().toISOString(),
+        };
+      }
 
       const routesApiKey = Deno.env.get("GOOGLE_MAPS_ROUTES_API_KEY") || "";
       const routesApiUrl =
@@ -1092,20 +1154,6 @@ Deno.serve(async (req: Request) => {
           durationSeconds: googleResult.durationSeconds,
           provider: "GOOGLE_ROUTES",
           calculatedAt: new Date().toISOString(),
-        };
-      }
-
-      // If Google failed, check valid cache fallback
-      if (
-        cachedRoute &&
-        cachedRoute.distance_meters &&
-        cachedRoute.duration_seconds
-      ) {
-        return {
-          distanceMeters: Number(cachedRoute.distance_meters),
-          durationSeconds: Number(cachedRoute.duration_seconds),
-          provider: "GOOGLE_ROUTES",
-          calculatedAt: cachedRoute.calculated_at || new Date().toISOString(),
         };
       }
 
@@ -1228,7 +1276,7 @@ Deno.serve(async (req: Request) => {
       // Fetch pickup location from DB
       const { data: locData, error: locErr } = await serviceClient
         .from("business_locations")
-        .select("id, latitude, longitude, is_active, business_id")
+        .select("id, location, is_active, business_id")
         .eq("id", locationId)
         .maybeSingle();
 
@@ -1248,12 +1296,21 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      const pickupCoords = parseGeographyCoordinates(locData.location);
+      if (!pickupCoords) {
+        return errorResponse(
+          "INVALID_LOCATIONS",
+          "Business location coordinates are invalid",
+          400,
+        );
+      }
+
       // Fetch Google Routes metrics
       let routeMetrics;
       try {
         routeMetrics = await fetchGoogleRoutes(
-          locData.latitude,
-          locData.longitude,
+          pickupCoords.lat,
+          pickupCoords.lng,
           dropoffLat,
           dropoffLng,
         );
@@ -1363,7 +1420,7 @@ Deno.serve(async (req: Request) => {
       const { data: quoteRecord, error: quoteErr } = await serviceClient
         .from("delivery_quotes")
         .select(
-          "id, status, expires_at, delivery_requests (location_id, dropoff_address_snapshot, business_locations (latitude, longitude))",
+          "id, status, expires_at, delivery_requests (location_id, pickup_address_snapshot, dropoff_address_snapshot)",
         )
         .eq("id", quoteId)
         .maybeSingle();
@@ -1377,10 +1434,10 @@ Deno.serve(async (req: Request) => {
       }
 
       const deliveryReq: any = quoteRecord.delivery_requests;
-      const pickupLoc: any = deliveryReq?.business_locations;
-      const dropoffSnapshot: any = deliveryReq?.dropoff_address_snapshot;
+      const pickupSnap: any = deliveryReq?.pickup_address_snapshot;
+      const dropoffSnap: any = deliveryReq?.dropoff_address_snapshot;
 
-      if (!pickupLoc || !dropoffSnapshot) {
+      if (!pickupSnap || !dropoffSnap) {
         return errorResponse(
           "QUOTE_NOT_FOUND",
           "Delivery request details not found",
@@ -1388,13 +1445,18 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      const pickupLat = Number(pickupSnap.latitude);
+      const pickupLng = Number(pickupSnap.longitude);
+      const dropoffLat = Number(dropoffSnap.latitude);
+      const dropoffLng = Number(dropoffSnap.longitude);
+
       let routeMetrics;
       try {
         routeMetrics = await fetchGoogleRoutes(
-          pickupLoc.latitude,
-          pickupLoc.longitude,
-          dropoffSnapshot.latitude,
-          dropoffSnapshot.longitude,
+          pickupLat,
+          pickupLng,
+          dropoffLat,
+          dropoffLng,
         );
       } catch {
         return errorResponse(
