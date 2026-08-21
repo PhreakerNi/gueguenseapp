@@ -737,10 +737,7 @@ export type Database = {
         Returns: Json
       }
       get_requote_route_info: { Args: { p_quote_id: string }; Returns: Json }
-      get_route_cache: {
-        Args: { p_cache_key: string }
-        Returns: Json
-      }
+      get_route_cache: { Args: { p_cache_key: string }; Returns: Json }
       get_user_platform_role: { Args: { p_user_id: string }; Returns: string }
       register_driver: {
         Args: {

@@ -1045,20 +1045,19 @@ Deno.serve(async (req: Request) => {
       let routesApiUrl = Deno.env.get("GOOGLE_ROUTES_API_URL") || "";
 
       if (!routesApiUrl) {
-        if (
-          routesApiKey === "mock-routes-ci-key" ||
-          routesApiKey.startsWith("mock-")
-        ) {
-          routesApiUrl = "http://127.0.0.1:9876/directions/v2:computeRoutes";
-        } else {
+        if (routesApiKey && !routesApiKey.startsWith("mock-")) {
           routesApiUrl =
             "https://routes.googleapis.com/directions/v2:computeRoutes";
+        } else {
+          routesApiUrl = "http://127.0.0.1:9876/directions/v2:computeRoutes";
         }
       }
 
       const isMockUrl =
         routesApiUrl.includes("127.0.0.1") ||
-        routesApiUrl.includes("localhost");
+        routesApiUrl.includes("localhost") ||
+        !routesApiKey ||
+        routesApiKey.startsWith("mock-");
 
       async function callGoogleApi(): Promise<{
         distanceMeters: number;
