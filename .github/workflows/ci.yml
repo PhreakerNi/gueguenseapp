@@ -327,12 +327,15 @@ jobs:
           echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> $GITHUB_ENV
           echo "SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY" >> $GITHUB_ENV
           echo "DB_URL=$DB_URL" >> $GITHUB_ENV
-          mkdir -p supabase
+          mkdir -p supabase/functions/api-v1
           echo "API_URL=$SUPABASE_URL" > supabase/.env.local
           echo "SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY" >> supabase/.env.local
           echo "ANON_KEY=$SUPABASE_ANON_KEY" >> supabase/.env.local
           echo "GOOGLE_MAPS_ROUTES_API_KEY=mock-routes-ci-key" >> supabase/.env.local
           echo "GOOGLE_ROUTES_API_URL=http://127.0.0.1:9876/directions/v2:computeRoutes" >> supabase/.env.local
+          cp supabase/.env.local supabase/functions/.env
+          cp supabase/.env.local supabase/functions/api-v1/.env
+          cp supabase/.env.local .env
           rm -f supabase_status.json
           pnpm supabase functions serve api-v1 --no-verify-jwt --env-file supabase/.env.local &
           echo "Waiting for api-v1 Edge Function to be ready..."

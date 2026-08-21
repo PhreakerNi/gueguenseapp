@@ -1042,9 +1042,20 @@ Deno.serve(async (req: Request) => {
       }
 
       const routesApiKey = Deno.env.get("GOOGLE_MAPS_ROUTES_API_KEY") || "";
-      const routesApiUrl =
-        Deno.env.get("GOOGLE_ROUTES_API_URL") ||
-        "https://routes.googleapis.com/directions/v2:computeRoutes";
+      let routesApiUrl = Deno.env.get("GOOGLE_ROUTES_API_URL") || "";
+
+      if (!routesApiUrl) {
+        if (
+          routesApiKey === "mock-routes-ci-key" ||
+          routesApiKey.startsWith("mock-")
+        ) {
+          routesApiUrl = "http://127.0.0.1:9876/directions/v2:computeRoutes";
+        } else {
+          routesApiUrl =
+            "https://routes.googleapis.com/directions/v2:computeRoutes";
+        }
+      }
+
       const isMockUrl =
         routesApiUrl.includes("127.0.0.1") ||
         routesApiUrl.includes("localhost");
