@@ -4,8 +4,9 @@
 --   1. Clean up default seed fixtures from v1.0
 --   2. Strengthen check constraints (chk_quote_consumed_at, chk_quote_expires_at)
 --   3. Fast idempotency response reader RPC (get_idempotent_response)
---   4. Pre-routing actor & scope verification RPCs (verify_quote_creation_scope, verify_requote_scope)
---   5. Unified PostgreSQL NUMERIC pricing calculation across create & requote RPCs
+--   4. Actor-isolated idempotency constraints & executor (actor_user_id + scope + key)
+--   5. Pre-routing actor & scope verification RPCs (verify_quote_creation_scope, verify_requote_scope)
+--   6. Unified PostgreSQL NUMERIC pricing calculation across create & requote RPCs
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -26,7 +27,18 @@ ALTER TABLE public.delivery_quotes ADD CONSTRAINT chk_quote_expires_at
     CHECK (expires_at >= route_calculated_at);
 
 -- ----------------------------------------------------------------------------
--- 3. Fast Idempotency Response Helper RPC
+-- 3. Actor-Isolated Idempotency Table Constraints
+-- ----------------------------------------------------------------------------
+ALTER TABLE private.idempotency_responses DROP CONSTRAINT IF EXISTS idempotency_responses_scope_key_unique;
+ALTER TABLE private.idempotency_responses DROP CONSTRAINT IF EXISTS idempotency_responses_actor_scope_key_unique;
+ALTER TABLE private.idempotency_responses ADD CONSTRAINT idempotency_responses_actor_scope_key_unique UNIQUE (actor_user_id, scope, key);
+
+ALTER TABLE public.idempotency_keys DROP CONSTRAINT IF EXISTS idempotency_keys_scope_key_unique;
+ALTER TABLE public.idempotency_keys DROP CONSTRAINT IF EXISTS idempotency_keys_actor_scope_key_unique;
+ALTER TABLE public.idempotency_keys ADD CONSTRAINT idempotency_keys_actor_scope_key_unique UNIQUE (actor_user_id, scope, key);
+
+-- ----------------------------------------------------------------------------
+-- 4. Fast Idempotency Response Helper RPC
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.get_idempotent_response(
     p_actor_user_id UUID,
@@ -66,10 +78,10 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 4. Pre-Routing Actor & Scope Verification RPCs
+-- 5. Pre-Routing Actor & Scope Verification RPCs
 -- ----------------------------------------------------------------------------
 
--- 4.1 Verify Quote Creation Scope & Pricing Availability (Pre-routing)
+-- 5.1 Verify Quote Creation Scope & Pricing Availability (Pre-routing)
 CREATE OR REPLACE FUNCTION public.verify_quote_creation_scope(
     p_actor_id UUID,
     p_location_id UUID
@@ -167,7 +179,7 @@ BEGIN
 END;
 $$;
 
--- 4.2 Verify Requote Scope & State (Pre-routing)
+-- 5.2 Verify Requote Scope & State (Pre-routing)
 CREATE OR REPLACE FUNCTION public.verify_requote_scope(
     p_actor_id UUID,
     p_quote_id UUID
@@ -192,11 +204,11 @@ BEGIN
         RAISE EXCEPTION 'INVALID_ARGUMENT: quote_id is required';
     END IF;
 
-    -- 1. Fetch original quote and request
+    -- 1. Fetch original quote, request, and location
     SELECT q.id, q.delivery_request_id, q.status, q.expires_at,
            dr.business_id, dr.location_id,
-           extensions.ST_Y(dr.pickup_location::extensions.geometry) AS pickup_lat,
-           extensions.ST_X(dr.pickup_location::extensions.geometry) AS pickup_lng,
+           extensions.ST_Y(l.location::extensions.geometry) AS pickup_lat,
+           extensions.ST_X(l.location::extensions.geometry) AS pickup_lng,
            extensions.ST_Y(dr.dropoff_location::extensions.geometry) AS dropoff_lat,
            extensions.ST_X(dr.dropoff_location::extensions.geometry) AS dropoff_lng,
            b.account_status AS business_status,
@@ -288,7 +300,7 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 5. Unified create_delivery_quote & create_delivery_requote
+-- 6. Unified create_delivery_quote & create_delivery_requote
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.create_delivery_quote(
@@ -600,10 +612,10 @@ BEGIN
         RAISE EXCEPTION 'VALIDATION_ERROR: route_duration_seconds must be non-negative';
     END IF;
 
-    SELECT q.*, r.business_id, r.location_id
+    SELECT q.*, dr.business_id, dr.location_id
     INTO v_old_quote
     FROM public.delivery_quotes q
-    JOIN public.delivery_requests r ON r.id = q.delivery_request_id
+    JOIN public.delivery_requests dr ON dr.id = q.delivery_request_id
     WHERE q.id = p_quote_id;
 
     IF v_old_quote.id IS NULL THEN
@@ -755,7 +767,242 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 6. Permissions & Revocations
+-- 7. Actor-Isolated execute_idempotent_operation
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.execute_idempotent_operation(
+    p_actor_user_id UUID,
+    p_scope TEXT,
+    p_key TEXT,
+    p_request_fingerprint TEXT,
+    p_operation_fn TEXT,
+    p_operation_params JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_lock_key BIGINT;
+    v_cached RECORD;
+    v_result JSONB;
+    v_status INTEGER := 200;
+    v_expires_at TIMESTAMPTZ;
+BEGIN
+    IF p_actor_user_id IS NULL THEN
+        RAISE EXCEPTION 'AUTH_REQUIRED: Actor user ID is required';
+    END IF;
+
+    IF p_key IS NULL OR p_scope IS NULL THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: key and scope are required';
+    END IF;
+
+    IF p_key !~* '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: Idempotency key must be a valid UUID v4';
+    END IF;
+
+    -- Generate actor-isolated 64-bit advisory lock key
+    v_lock_key := ('x' || pg_catalog.substr(pg_catalog.md5(p_actor_user_id::text || ':' || p_scope || ':' || p_key), 1, 16))::bit(64)::bigint;
+    PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
+
+    -- Check if record exists in private.idempotency_responses for THIS actor
+    SELECT * INTO v_cached
+    FROM private.idempotency_responses
+    WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
+
+    IF v_cached.id IS NOT NULL THEN
+        IF v_cached.expires_at <= pg_catalog.clock_timestamp() THEN
+            DELETE FROM private.idempotency_responses WHERE id = v_cached.id;
+            DELETE FROM public.idempotency_keys WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
+            v_cached := NULL;
+        ELSE
+            IF v_cached.request_fingerprint <> p_request_fingerprint THEN
+                RAISE EXCEPTION 'IDEMPOTENCY_FINGERPRINT_MISMATCH: Request payload fingerprint does not match original request';
+            END IF;
+
+            RETURN pg_catalog.jsonb_build_object(
+                'cached', true,
+                'status', v_cached.response_status,
+                'body', v_cached.response_body
+            );
+        END IF;
+    END IF;
+
+    -- Execute target operation dynamically
+    IF p_operation_fn IN ('create_business') THEN
+        v_result := public.create_business(
+            p_actor_user_id,
+            p_operation_params->>'legal_name',
+            p_operation_params->>'brand_name',
+            p_operation_params->>'tax_id'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn IN ('create_business_location') THEN
+        v_result := public.create_business_location(
+            p_actor_user_id,
+            (p_operation_params->>'business_id')::uuid,
+            COALESCE(p_operation_params->>'location_name', p_operation_params->>'name'),
+            COALESCE(p_operation_params->>'address_text', p_operation_params->>'address_line_1'),
+            (p_operation_params->>'latitude')::double precision,
+            (p_operation_params->>'longitude')::double precision,
+            p_operation_params->>'pickup_instructions'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn IN ('add_business_member', 'create_business_member') THEN
+        v_result := public.add_business_member(
+            p_actor_user_id,
+            (p_operation_params->>'business_id')::uuid,
+            (p_operation_params->>'target_user_id')::uuid,
+            p_operation_params->>'role',
+            CASE 
+                WHEN p_operation_params->'location_ids' IS NOT NULL AND jsonb_typeof(p_operation_params->'location_ids') = 'array' 
+                THEN ARRAY(SELECT jsonb_array_elements_text(p_operation_params->'location_ids')::uuid)
+                WHEN p_operation_params->'authorized_location_ids' IS NOT NULL AND jsonb_typeof(p_operation_params->'authorized_location_ids') = 'array' 
+                THEN ARRAY(SELECT jsonb_array_elements_text(p_operation_params->'authorized_location_ids')::uuid)
+                ELSE ARRAY[]::uuid[]
+            END
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn IN ('register_driver', 'create_driver_profile') THEN
+        v_result := public.register_driver(
+            p_actor_user_id,
+            p_operation_params->>'national_id_number',
+            p_operation_params->>'license_number'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn IN ('register_vehicle', 'create_driver_vehicle') THEN
+        v_result := public.register_vehicle(
+            p_actor_user_id,
+            p_operation_params->>'make',
+            p_operation_params->>'model',
+            (p_operation_params->>'year')::integer,
+            p_operation_params->>'color',
+            p_operation_params->>'license_plate'
+        );
+        v_status := 201;
+
+    ELSIF p_operation_fn = 'commit_driver_document' THEN
+        v_result := public.commit_driver_document(
+            p_actor_user_id,
+            (p_operation_params->>'upload_id')::uuid,
+            p_operation_params->>'document_type'
+        );
+        v_status := 200;
+
+    ELSIF p_operation_fn = 'admin_verify_driver' THEN
+        v_result := public.admin_verify_driver(
+            p_actor_user_id,
+            (p_operation_params->>'driver_id')::uuid,
+            p_operation_params->>'decision',
+            p_operation_params->>'rejection_reason',
+            p_operation_params->>'actor_aal'
+        );
+        v_status := 200;
+
+    ELSIF p_operation_fn = 'create_delivery_quote' THEN
+        v_result := public.create_delivery_quote(
+            p_actor_user_id,
+            (p_operation_params->>'location_id')::uuid,
+            p_operation_params->>'dropoff_address_text',
+            (p_operation_params->>'dropoff_lat')::double precision,
+            (p_operation_params->>'dropoff_lng')::double precision,
+            p_operation_params->>'recipient_name',
+            p_operation_params->>'recipient_phone',
+            p_operation_params->>'package_type',
+            (p_operation_params->>'cash_to_collect')::numeric,
+            (p_operation_params->>'distance_meters')::bigint,
+            (p_operation_params->>'duration_seconds')::bigint,
+            (p_operation_params->>'route_calculated_at')::timestamptz
+        );
+        v_status := 200;
+
+    ELSIF p_operation_fn = 'cancel_delivery_quote' THEN
+        v_result := public.cancel_delivery_quote(
+            p_actor_user_id,
+            (p_operation_params->>'quote_id')::uuid
+        );
+        v_status := 200;
+
+    ELSIF p_operation_fn = 'create_delivery_requote' THEN
+        v_result := public.create_delivery_requote(
+            p_actor_user_id,
+            (p_operation_params->>'quote_id')::uuid,
+            (p_operation_params->>'distance_meters')::bigint,
+            (p_operation_params->>'duration_seconds')::bigint,
+            (p_operation_params->>'route_calculated_at')::timestamptz
+        );
+        v_status := 200;
+
+    ELSE
+        RAISE EXCEPTION 'INVALID_ARGUMENT: Unknown operation function %', p_operation_fn;
+    END IF;
+
+    v_expires_at := pg_catalog.clock_timestamp() + INTERVAL '24 hours';
+
+    -- Store idempotent response with 24h TTL in private schema isolated by actor
+    INSERT INTO private.idempotency_responses (
+        actor_user_id,
+        scope,
+        key,
+        request_fingerprint,
+        response_status,
+        response_body,
+        expires_at
+    ) VALUES (
+        p_actor_user_id,
+        p_scope,
+        p_key,
+        p_request_fingerprint,
+        v_status,
+        v_result,
+        v_expires_at
+    )
+    ON CONFLICT (actor_user_id, scope, key) DO UPDATE
+    SET response_status = EXCLUDED.response_status,
+        response_body = EXCLUDED.response_body,
+        request_fingerprint = EXCLUDED.request_fingerprint,
+        expires_at = EXCLUDED.expires_at;
+
+    -- Also record in public.idempotency_keys for tracking and public RLS compliance
+    INSERT INTO public.idempotency_keys (
+        actor_type,
+        actor_user_id,
+        scope,
+        key,
+        request_fingerprint,
+        response_status,
+        response_body_ref,
+        expires_at
+    ) VALUES (
+        'user',
+        p_actor_user_id,
+        p_scope,
+        p_key,
+        p_request_fingerprint,
+        v_status,
+        p_scope || ':' || p_key,
+        v_expires_at
+    )
+    ON CONFLICT (actor_user_id, scope, key) DO UPDATE SET
+        request_fingerprint = EXCLUDED.request_fingerprint,
+        response_status = EXCLUDED.response_status,
+        response_body_ref = EXCLUDED.response_body_ref,
+        expires_at = EXCLUDED.expires_at;
+
+    RETURN pg_catalog.jsonb_build_object(
+        'cached', false,
+        'status', v_status,
+        'body', v_result
+    );
+END;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 8. Permissions & Revocations
 -- ----------------------------------------------------------------------------
 REVOKE EXECUTE ON FUNCTION public.get_idempotent_response(UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_idempotent_response(UUID, TEXT, TEXT) TO service_role;
@@ -765,3 +1012,6 @@ GRANT EXECUTE ON FUNCTION public.verify_quote_creation_scope(UUID, UUID) TO serv
 
 REVOKE EXECUTE ON FUNCTION public.verify_requote_scope(UUID, UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.verify_requote_scope(UUID, UUID) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.execute_idempotent_operation(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) TO service_role;
