@@ -338,7 +338,11 @@ Deno.serve(async (req: Request) => {
           errCode === "QUOTE_NOT_FOUND"
         ) {
           statusCode = 404;
-        } else if (errCode === "IDEMPOTENCY_FINGERPRINT_MISMATCH") {
+        } else if (
+          errCode === "IDEMPOTENCY_FINGERPRINT_MISMATCH" ||
+          errCode === "QUOTE_INVALID_STATE" ||
+          errCode === "INVALID_STATE"
+        ) {
           statusCode = 422;
         } else if (errCode === "PRICING_UNAVAILABLE") {
           statusCode = 503;
