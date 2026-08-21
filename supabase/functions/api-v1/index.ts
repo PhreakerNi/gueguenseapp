@@ -1066,83 +1066,104 @@ Deno.serve(async (req: Request) => {
         if (!routesApiKey && !isMockUrl) {
           return null;
         }
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        try {
-          const headers: Record<string, string> = {
-            "Content-Type": "application/json",
-            "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
-          };
-          if (routesApiKey) {
-            headers["X-Goog-Api-Key"] = routesApiKey;
-          }
-
-          const response = await fetch(routesApiUrl, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              origin: {
-                location: {
-                  latLng: {
-                    latitude: originLat,
-                    longitude: originLng,
-                  },
-                },
-              },
-              destination: {
-                location: {
-                  latLng: {
-                    latitude: destLat,
-                    longitude: destLng,
-                  },
-                },
-              },
-              travelMode: "TWO_WHEELER",
-              routingPreference: "TRAFFIC_UNAWARE",
-            }),
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            return null;
-          }
-
-          const json = await response.json();
-          const route = json.routes?.[0];
-          if (!route || !route.distanceMeters || !route.duration) {
-            return null;
-          }
-
-          const distanceMeters = Number(route.distanceMeters);
-          let durationSeconds = 0;
-          if (
-            typeof route.duration === "string" &&
-            route.duration.endsWith("s")
-          ) {
-            durationSeconds = Math.round(
-              parseFloat(route.duration.slice(0, -1)),
+        const candidateUrls = [routesApiUrl];
+        if (isMockUrl) {
+          if (routesApiUrl.includes("127.0.0.1")) {
+            candidateUrls.push(
+              routesApiUrl.replace("127.0.0.1", "host.docker.internal"),
+              routesApiUrl.replace("127.0.0.1", "172.17.0.1"),
+              routesApiUrl.replace("127.0.0.1", "localhost"),
             );
-          } else {
-            durationSeconds = Math.round(Number(route.duration));
+          } else if (routesApiUrl.includes("localhost")) {
+            candidateUrls.push(
+              routesApiUrl.replace("localhost", "127.0.0.1"),
+              routesApiUrl.replace("localhost", "host.docker.internal"),
+              routesApiUrl.replace("localhost", "172.17.0.1"),
+            );
           }
-
-          if (
-            isNaN(distanceMeters) ||
-            isNaN(durationSeconds) ||
-            distanceMeters <= 0 ||
-            durationSeconds < 0
-          ) {
-            return null;
-          }
-
-          return { distanceMeters, durationSeconds };
-        } catch (err) {
-          clearTimeout(timeoutId);
-          console.error("[callGoogleApi error]:", err);
-          return null;
         }
+
+        for (const targetUrl of candidateUrls) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+          try {
+            const headers: Record<string, string> = {
+              "Content-Type": "application/json",
+              "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
+            };
+            if (routesApiKey) {
+              headers["X-Goog-Api-Key"] = routesApiKey;
+            }
+
+            const response = await fetch(targetUrl, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                origin: {
+                  location: {
+                    latLng: {
+                      latitude: originLat,
+                      longitude: originLng,
+                    },
+                  },
+                },
+                destination: {
+                  location: {
+                    latLng: {
+                      latitude: destLat,
+                      longitude: destLng,
+                    },
+                  },
+                },
+                travelMode: "TWO_WHEELER",
+                routingPreference: "TRAFFIC_UNAWARE",
+              }),
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              return null;
+            }
+
+            const json = await response.json();
+            const route = json.routes?.[0];
+            if (!route || !route.distanceMeters || !route.duration) {
+              return null;
+            }
+
+            const distanceMeters = Number(route.distanceMeters);
+            let durationSeconds = 0;
+            if (
+              typeof route.duration === "string" &&
+              route.duration.endsWith("s")
+            ) {
+              durationSeconds = Math.round(
+                parseFloat(route.duration.slice(0, -1)),
+              );
+            } else {
+              durationSeconds = Math.round(Number(route.duration));
+            }
+
+            if (
+              isNaN(distanceMeters) ||
+              isNaN(durationSeconds) ||
+              distanceMeters <= 0 ||
+              durationSeconds < 0
+            ) {
+              return null;
+            }
+
+            return { distanceMeters, durationSeconds };
+          } catch {
+            clearTimeout(timeoutId);
+            continue;
+          }
+        }
+
+        return null;
       }
 
       // Attempt 1
