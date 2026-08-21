@@ -130,7 +130,7 @@ BEGIN
       AND key = p_key
       AND expires_at > v_now;
 
-    IF v_rec.id IS NOT NULL THEN
+    IF v_rec.key IS NOT NULL THEN
         IF v_rec.request_fingerprint <> p_request_fingerprint THEN
             RAISE EXCEPTION 'IDEMPOTENCY_FINGERPRINT_MISMATCH: Request payload fingerprint does not match original request';
         END IF;
@@ -275,10 +275,10 @@ BEGIN
       AND scope = p_scope
       AND key = p_key;
 
-    IF v_cached.id IS NOT NULL THEN
+    IF v_cached.key IS NOT NULL THEN
         IF v_cached.expires_at <= v_now THEN
             DELETE FROM private.idempotency_reservations WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
-            DELETE FROM private.idempotency_responses WHERE id = v_cached.id;
+            DELETE FROM private.idempotency_responses WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
             DELETE FROM public.idempotency_keys WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
             v_cached := NULL;
         ELSE
@@ -295,7 +295,7 @@ BEGIN
     END IF;
 
     -- Also check private.idempotency_reservations
-    IF v_cached.id IS NULL THEN
+    IF v_cached IS NULL OR v_cached.key IS NULL THEN
         SELECT * INTO v_cached
         FROM private.idempotency_reservations
         WHERE actor_user_id = p_actor_user_id
@@ -303,9 +303,9 @@ BEGIN
           AND key = p_key
           AND status = 'COMPLETED';
 
-        IF v_cached.id IS NOT NULL THEN
+        IF v_cached.key IS NOT NULL THEN
             IF v_cached.expires_at <= v_now THEN
-                DELETE FROM private.idempotency_reservations WHERE id = v_cached.id;
+                DELETE FROM private.idempotency_reservations WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
                 DELETE FROM private.idempotency_responses WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
                 DELETE FROM public.idempotency_keys WHERE actor_user_id = p_actor_user_id AND scope = p_scope AND key = p_key;
                 v_cached := NULL;
