@@ -876,7 +876,6 @@ BEGIN
         route_distance_meters,
         route_duration_seconds,
         route_provider,
-        route_polyline,
         route_calculated_at,
         expires_at,
         created_at
@@ -897,7 +896,6 @@ BEGIN
         p_distance_meters,
         p_duration_seconds,
         'GOOGLE_ROUTES',
-        NULL,
         v_calc_at,
         v_expires_at,
         v_now
@@ -1137,7 +1135,6 @@ BEGIN
         route_distance_meters,
         route_duration_seconds,
         route_provider,
-        route_polyline,
         route_calculated_at,
         expires_at,
         created_at
@@ -1158,7 +1155,6 @@ BEGIN
         p_distance_meters,
         p_duration_seconds,
         'GOOGLE_ROUTES',
-        NULL,
         v_calc_at,
         v_expires_at,
         v_now
