@@ -117,28 +117,28 @@ SELECT throws_like(
 -- H02: Segunda pricing_rule misma version viola unique
 SELECT throws_like(
     $$ INSERT INTO public.pricing_rules (pricing_version_id, base_fee, per_km_rate, per_minute_rate, min_fare) VALUES ('dd000000-0000-4000-8000-000000000001'::uuid, 40, 15, 2, 50) $$,
-    '%pricing_rules_pricing_version_id_key%',
+    '%uq_pricing_rules_version%',
     'H02: Inserting second pricing rule for same pricing version violates unique constraint'
 );
 
 -- H03: quote_ttl_seconds > 0
 SELECT throws_like(
     $$ INSERT INTO public.pricing_versions (name, currency, is_active, quote_ttl_seconds) VALUES ('Zero TTL', 'NIO', false, 0) $$,
-    '%chk_pricing_versions_ttl%',
+    '%pricing_versions_quote_ttl_seconds_check%',
     'H03: quote_ttl_seconds <= 0 violates check constraint'
 );
 
 -- H04: quote_ttl_seconds <= 3600
 SELECT throws_like(
     $$ INSERT INTO public.pricing_versions (name, currency, is_active, quote_ttl_seconds) VALUES ('Excess TTL', 'NIO', false, 3601) $$,
-    '%chk_pricing_versions_ttl%',
+    '%pricing_versions_quote_ttl_seconds_check%',
     'H04: quote_ttl_seconds > 3600 violates check constraint'
 );
 
 -- H05: currency = 'NIO'
 SELECT throws_like(
     $$ INSERT INTO public.pricing_versions (name, currency, is_active, quote_ttl_seconds) VALUES ('USD Version', 'USD', false, 300) $$,
-    '%chk_pricing_versions_currency%',
+    '%pricing_versions_currency_check%',
     'H05: Invalid currency violates check constraint'
 );
 
@@ -146,11 +146,11 @@ SELECT throws_like(
 SELECT throws_like(
     $$ INSERT INTO public.delivery_quotes (
         delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount,
-        zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_calculated_at, expires_at
+        zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_provider, route_calculated_at, expires_at
     ) VALUES (
-        gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 0, 0, 0, 0, 0, 45, 0, 100, now(), now() + interval '300s'
+        gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 0, 0, 0, 0, 0, 45, 0, 100, 'GOOGLE_ROUTES', now(), now() + interval '300s'
     ) $$,
-    '%chk_quote_distance%',
+    '%delivery_quotes_route_distance_meters_check%',
     'H06: route_distance_meters <= 0 violates check constraint'
 );
 
@@ -158,19 +158,19 @@ SELECT throws_like(
 SELECT throws_like(
     $$ INSERT INTO public.delivery_quotes (
         delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount,
-        zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_calculated_at, expires_at
+        zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_provider, route_calculated_at, expires_at
     ) VALUES (
-        gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 10, 0, 0, 0, 0, 45, 1000, -5, now(), now() + interval '300s'
+        gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 10, 0, 0, 0, 0, 45, 1000, -5, 'GOOGLE_ROUTES', now(), now() + interval '300s'
     ) $$,
-    '%chk_quote_duration%',
+    '%delivery_quotes_route_duration_seconds_check%',
     'H07: route_duration_seconds < 0 violates check constraint'
 );
 
 -- H08: max 1 CONSUMED por delivery_request
 SELECT is(
-    (SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'delivery_quotes' AND indexname = 'uq_delivery_quotes_single_consumed'),
+    (SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'delivery_quotes' AND indexname = 'idx_delivery_quotes_single_consumed'),
     1::bigint,
-    'H08: Unique index uq_delivery_quotes_single_consumed exists'
+    'H08: Unique index idx_delivery_quotes_single_consumed exists'
 );
 
 -- ============================================================================
@@ -189,8 +189,8 @@ SELECT throws_like(
 
 -- H10: Authenticated direct INSERT delivery_quotes denied
 SELECT throws_like(
-    $$ INSERT INTO public.delivery_quotes (delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount, zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_calculated_at, expires_at)
-       VALUES (gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 10, 5, 0, 0, 0, 50, 1000, 120, now(), now() + interval '300s') $$,
+    $$ INSERT INTO public.delivery_quotes (delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount, zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_provider, route_calculated_at, expires_at)
+       VALUES (gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 10, 5, 0, 0, 0, 50, 1000, 120, 'GOOGLE_ROUTES', now(), now() + interval '300s') $$,
     '%permission denied%',
     'H10: Direct INSERT on delivery_quotes denied to authenticated'
 );
@@ -206,8 +206,8 @@ SET LOCAL ROLE anon;
 
 -- H12: Anon direct mutation denied
 SELECT throws_like(
-    $$ INSERT INTO public.delivery_quotes (delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount, zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_calculated_at, expires_at)
-       VALUES (gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 10, 5, 0, 0, 0, 50, 1000, 120, now(), now() + interval '300s') $$,
+    $$ INSERT INTO public.delivery_quotes (delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount, zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_provider, route_calculated_at, expires_at)
+       VALUES (gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 10, 5, 0, 0, 0, 50, 1000, 120, 'GOOGLE_ROUTES', now(), now() + interval '300s') $$,
     '%permission denied%',
     'H12: Direct mutation denied to anon'
 );

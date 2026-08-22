@@ -256,16 +256,28 @@ BEGIN
         expires_at = EXCLUDED.expires_at;
 
     INSERT INTO public.idempotency_keys (
-        actor_user_id, scope, key, request_fingerprint,
-        response_status, response_body, expires_at, created_at
+        actor_type,
+        actor_user_id,
+        scope,
+        key,
+        request_fingerprint,
+        response_status,
+        response_body_ref,
+        expires_at
     ) VALUES (
-        p_actor_user_id, p_scope, p_key, p_request_fingerprint,
-        p_response_status, p_response_body, v_exp, v_now
+        'user',
+        p_actor_user_id,
+        p_scope,
+        p_key,
+        p_request_fingerprint,
+        p_response_status,
+        'private.idempotency_responses',
+        v_exp
     )
     ON CONFLICT (actor_user_id, scope, key) DO UPDATE SET
         request_fingerprint = EXCLUDED.request_fingerprint,
         response_status = EXCLUDED.response_status,
-        response_body = EXCLUDED.response_body,
+        response_body_ref = EXCLUDED.response_body_ref,
         expires_at = EXCLUDED.expires_at;
 
     RETURN pg_catalog.jsonb_build_object(
@@ -934,16 +946,28 @@ BEGIN
         expires_at = EXCLUDED.expires_at;
 
     INSERT INTO public.idempotency_keys (
-        actor_user_id, scope, key, request_fingerprint,
-        response_status, response_body, expires_at, created_at
+        actor_type,
+        actor_user_id,
+        scope,
+        key,
+        request_fingerprint,
+        response_status,
+        response_body_ref,
+        expires_at
     ) VALUES (
-        p_actor_id, 'create_delivery_quote', p_idempotency_key, p_request_fingerprint,
-        201, v_response_body, v_exp, v_now
+        'user',
+        p_actor_id,
+        'create_delivery_quote',
+        p_idempotency_key,
+        p_request_fingerprint,
+        201,
+        'private.idempotency_responses',
+        v_exp
     )
     ON CONFLICT (actor_user_id, scope, key) DO UPDATE SET
         request_fingerprint = EXCLUDED.request_fingerprint,
         response_status = EXCLUDED.response_status,
-        response_body = EXCLUDED.response_body,
+        response_body_ref = EXCLUDED.response_body_ref,
         expires_at = EXCLUDED.expires_at;
 
     RETURN v_response_body;
@@ -1183,16 +1207,28 @@ BEGIN
         expires_at = EXCLUDED.expires_at;
 
     INSERT INTO public.idempotency_keys (
-        actor_user_id, scope, key, request_fingerprint,
-        response_status, response_body, expires_at, created_at
+        actor_type,
+        actor_user_id,
+        scope,
+        key,
+        request_fingerprint,
+        response_status,
+        response_body_ref,
+        expires_at
     ) VALUES (
-        p_actor_id, v_scope, p_idempotency_key, p_request_fingerprint,
-        201, v_response_body, v_exp, v_now
+        'user',
+        p_actor_id,
+        v_scope,
+        p_idempotency_key,
+        p_request_fingerprint,
+        201,
+        'private.idempotency_responses',
+        v_exp
     )
     ON CONFLICT (actor_user_id, scope, key) DO UPDATE SET
         request_fingerprint = EXCLUDED.request_fingerprint,
         response_status = EXCLUDED.response_status,
-        response_body = EXCLUDED.response_body,
+        response_body_ref = EXCLUDED.response_body_ref,
         expires_at = EXCLUDED.expires_at;
 
     RETURN v_response_body;
