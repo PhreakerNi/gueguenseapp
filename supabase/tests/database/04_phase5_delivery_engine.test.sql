@@ -85,8 +85,16 @@ SELECT col_has_check('public', 'delivery_events', 'actor_type', 'delivery_events
 -- ----------------------------------------------------------------------------
 -- 3. Row Level Security (RLS) Configuration
 -- ----------------------------------------------------------------------------
-SELECT table_is_rls_active('public', 'deliveries', 'RLS must be active on public.deliveries');
-SELECT table_is_rls_active('public', 'delivery_events', 'RLS must be active on public.delivery_events');
+SELECT is(
+    (SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'deliveries'),
+    true,
+    'public.deliveries has RLS enabled'
+);
+SELECT is(
+    (SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'delivery_events'),
+    true,
+    'public.delivery_events has RLS enabled'
+);
 
 -- ----------------------------------------------------------------------------
 -- 4. Function Security & Isolation Tests (SECURITY DEFINER & search_path='')
@@ -165,7 +173,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.business_members (id, business_id, user_id, role, status)
 VALUES
     ('m5000000-0000-4000-8000-000000000001', 'b5000000-0000-4000-8000-000000000001', '99000000-0000-4000-8000-000000000001', 'business_owner', 'ACTIVE'),
-    ('m5000000-0000-4000-8000-000000000002', 'b5000000-0000-4000-8000-000000000001', '99000000-0000-4000-8000-000000000002', 'manager', 'ACTIVE')
+    ('m5000000-0000-4000-8000-000000000002', 'b5000000-0000-4000-8000-000000000001', '99000000-0000-4000-8000-000000000002', 'business_manager', 'ACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.business_member_locations (business_member_id, business_location_id)

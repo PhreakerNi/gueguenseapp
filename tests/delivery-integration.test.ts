@@ -139,8 +139,8 @@ describe("Phase 5: Delivery Engine HTTP Integration Test Suite", () => {
       await client.query(`
         INSERT INTO public.business_members (id, business_id, user_id, role, status)
         VALUES
-          ('${mgrMemberId}', '${businessAId}', '${managerAUserId}', 'manager', 'ACTIVE'),
-          ('${empMemberId}', '${businessAId}', '${employeeAUserId}', 'employee', 'ACTIVE');
+          ('${mgrMemberId}', '${businessAId}', '${managerAUserId}', 'business_manager', 'ACTIVE'),
+          ('${empMemberId}', '${businessAId}', '${employeeAUserId}', 'business_employee', 'ACTIVE');
 
         -- Manager and employee only assigned to locationA1Id
         INSERT INTO public.business_member_locations (business_member_id, business_location_id)
