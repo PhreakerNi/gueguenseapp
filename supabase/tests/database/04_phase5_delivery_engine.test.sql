@@ -159,6 +159,14 @@ VALUES
     ('a5000000-0000-4000-8000-000000000003', 'driver_f5_test@gueguense.com')
 ON CONFLICT (id) DO NOTHING;
 
+INSERT INTO public.pricing_versions (id, name, currency, effective_from, is_active, quote_ttl_seconds)
+VALUES ('dd000000-0000-4000-8000-000000000001', 'Tarifa Estándar Managua 2026', 'NIO', now(), true, 300)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.pricing_rules (id, pricing_version_id, base_fee, per_km_rate, per_minute_rate, min_fare)
+VALUES ('ee000000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-000000000001', 35.00, 12.00, 1.50, 45.00)
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO public.businesses (id, legal_name, brand_name, tax_id, account_status)
 VALUES
     ('b5000000-0000-4000-8000-000000000001', 'F5 Business S.A.', 'F5 Store', 'J0310000005', 'ACTIVE')

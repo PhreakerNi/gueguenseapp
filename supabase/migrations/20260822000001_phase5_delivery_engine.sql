@@ -296,7 +296,7 @@ BEGIN
     IF v_quote.expires_at <= v_now THEN
         -- Mark as expired in DB
         UPDATE public.delivery_quotes
-        SET status = 'EXPIRED', updated_at = v_now
+        SET status = 'EXPIRED'
         WHERE id = p_quote_id;
         RAISE EXCEPTION 'QUOTE_EXPIRED: Quote % has expired', p_quote_id;
     END IF;
@@ -309,8 +309,7 @@ BEGIN
     -- 5. Mark Quote as CONSUMED
     UPDATE public.delivery_quotes
     SET status = 'CONSUMED',
-        consumed_at = v_now,
-        updated_at = v_now
+        consumed_at = v_now
     WHERE id = p_quote_id;
 
     -- 6. Insert new Delivery in SEARCHING_DRIVER state
