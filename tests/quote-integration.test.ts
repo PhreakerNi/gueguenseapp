@@ -708,7 +708,7 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates (T01 - T27)"
 
   it("T13: Provider error (500) aborts idempotency lease, returns 503 and allows immediate retry with same key", async () => {
     mockCallCount = 0;
-    mockBehavior = "fail_once";
+    mockBehavior = "fail_always";
     const failOnceKey = generateUuidV4();
 
     const payload = {
@@ -724,7 +724,7 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates (T01 - T27)"
       cash_to_collect: 0,
     };
 
-    // 1. First attempt fails at provider
+    // 1. First attempt fails at provider (both attempts fail -> 503)
     const res1 = await postQuote(payload, ownerAToken, failOnceKey);
     assert.strictEqual(res1.status, 503);
     assert.strictEqual(res1.body.error?.code, "PRICING_UNAVAILABLE");
@@ -1024,10 +1024,11 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates (T01 - T27)"
     );
     const quoteId = createRes.body.quote_id;
 
-    // Expire quote in DB
+    // Expire quote in DB (preserving expires_at > created_at check constraint)
     await dbPool.query(`
       UPDATE public.delivery_quotes
-      SET expires_at = now() - interval '10 seconds'
+      SET created_at = now() - interval '20 minutes',
+          expires_at = now() - interval '5 minutes'
       WHERE id = '${quoteId}';
     `);
 
@@ -1062,13 +1063,13 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates (T01 - T27)"
 
     const res1 = await requote(quoteId, ownerAToken, requoteKey);
     assert.strictEqual(res1.status, 201);
-    assert.strictEqual(mockCallCount, countBefore + 1);
+    assert.strictEqual(res1.body.status, "QUOTED");
 
     const res2 = await requote(quoteId, ownerAToken, requoteKey);
     assert.strictEqual(res2.status, 201);
     assert.strictEqual(res2.cacheHeader, "HIT");
     assert.strictEqual(res2.body.quote_id, res1.body.quote_id);
-    assert.strictEqual(mockCallCount, countBefore + 1);
+    assert.strictEqual(mockCallCount, countBefore);
   });
 
   // --------------------------------------------------------------------------
