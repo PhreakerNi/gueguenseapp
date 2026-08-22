@@ -1518,7 +1518,10 @@ Deno.serve(async (req: Request) => {
           p_recipient_name: recipientName,
           p_recipient_phone: recipientPhone,
           p_package_type: packageType,
-          p_cash_to_collect: cashToCollect,
+          p_cash_to_collect:
+            cashToCollect !== undefined && cashToCollect !== null
+              ? Number(cashToCollect)
+              : 0,
           p_distance_meters: routeMetrics.distanceMeters,
           p_duration_seconds: routeMetrics.durationSeconds,
           p_route_calculated_at: routeMetrics.calculatedAt,

@@ -748,7 +748,7 @@ export type Database = {
           p_recipient_phone: string
           p_request_fingerprint: string
           p_reservation_token: string
-          p_route_calculated_at?: string
+          p_route_calculated_at: string
         }
         Returns: Json
       }
@@ -772,7 +772,7 @@ export type Database = {
           p_quote_id: string
           p_request_fingerprint: string
           p_reservation_token: string
-          p_route_calculated_at?: string
+          p_route_calculated_at: string
         }
         Returns: Json
       }
