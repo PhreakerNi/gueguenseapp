@@ -436,6 +436,8 @@ SELECT is(
 -- ============================================================================
 -- 8. H26 - H30 Fencing Tokens, Lease Generation, Abort & Expiration Lifecycle
 -- ============================================================================
+SET LOCAL ROLE postgres;
+
 -- H26.1: Actor NULL uniqueness enforcement on private.idempotency_responses
 INSERT INTO private.idempotency_responses (
     actor_user_id, scope, key, request_fingerprint, response_status, response_body, expires_at

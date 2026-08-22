@@ -396,6 +396,8 @@ $$;
 -- ----------------------------------------------------------------------------
 -- 5. Atomic Quote Creation RPC (Lease Expiration Check)
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.create_delivery_quote_atomic(UUID, UUID, TEXT, NUMERIC, NUMERIC, TEXT, TEXT, TEXT, NUMERIC, INTEGER, INTEGER, TIMESTAMPTZ, TEXT, TEXT, UUID, BIGINT);
+
 CREATE OR REPLACE FUNCTION public.create_delivery_quote_atomic(
     p_actor_id UUID,
     p_location_id UUID,
@@ -406,8 +408,8 @@ CREATE OR REPLACE FUNCTION public.create_delivery_quote_atomic(
     p_recipient_phone TEXT,
     p_package_type TEXT,
     p_cash_to_collect NUMERIC,
-    p_distance_meters INTEGER,
-    p_duration_seconds INTEGER,
+    p_distance_meters BIGINT,
+    p_duration_seconds BIGINT,
     p_route_calculated_at TIMESTAMPTZ,
     p_idempotency_key TEXT,
     p_request_fingerprint TEXT,
@@ -739,11 +741,13 @@ $$;
 -- ----------------------------------------------------------------------------
 -- 6. Atomic Requote Creation RPC (State Transition, Expiration & Fencing)
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.create_delivery_requote_atomic(UUID, UUID, INTEGER, INTEGER, TIMESTAMPTZ, TEXT, TEXT, UUID, BIGINT);
+
 CREATE OR REPLACE FUNCTION public.create_delivery_requote_atomic(
     p_actor_id UUID,
     p_quote_id UUID,
-    p_distance_meters INTEGER,
-    p_duration_seconds INTEGER,
+    p_distance_meters BIGINT,
+    p_duration_seconds BIGINT,
     p_route_calculated_at TIMESTAMPTZ,
     p_idempotency_key TEXT,
     p_request_fingerprint TEXT,
@@ -1030,8 +1034,8 @@ GRANT EXECUTE ON FUNCTION public.complete_idempotent_external_operation(UUID, TE
 REVOKE ALL ON FUNCTION public.verify_requote_scope(UUID, UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.verify_requote_scope(UUID, UUID) TO service_role;
 
-REVOKE ALL ON FUNCTION public.create_delivery_quote_atomic(UUID, UUID, TEXT, NUMERIC, NUMERIC, TEXT, TEXT, TEXT, NUMERIC, INTEGER, INTEGER, TIMESTAMPTZ, TEXT, TEXT, UUID, BIGINT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.create_delivery_quote_atomic(UUID, UUID, TEXT, NUMERIC, NUMERIC, TEXT, TEXT, TEXT, NUMERIC, INTEGER, INTEGER, TIMESTAMPTZ, TEXT, TEXT, UUID, BIGINT) TO service_role;
+REVOKE ALL ON FUNCTION public.create_delivery_quote_atomic(UUID, UUID, TEXT, NUMERIC, NUMERIC, TEXT, TEXT, TEXT, NUMERIC, BIGINT, BIGINT, TIMESTAMPTZ, TEXT, TEXT, UUID, BIGINT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_delivery_quote_atomic(UUID, UUID, TEXT, NUMERIC, NUMERIC, TEXT, TEXT, TEXT, NUMERIC, BIGINT, BIGINT, TIMESTAMPTZ, TEXT, TEXT, UUID, BIGINT) TO service_role;
 
-REVOKE ALL ON FUNCTION public.create_delivery_requote_atomic(UUID, UUID, INTEGER, INTEGER, TIMESTAMPTZ, TEXT, TEXT, UUID, BIGINT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.create_delivery_requote_atomic(UUID, UUID, INTEGER, INTEGER, TIMESTAMPTZ, TEXT, TEXT, UUID, BIGINT) TO service_role;
+REVOKE ALL ON FUNCTION public.create_delivery_requote_atomic(UUID, UUID, BIGINT, BIGINT, TIMESTAMPTZ, TEXT, TEXT, UUID, BIGINT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_delivery_requote_atomic(UUID, UUID, BIGINT, BIGINT, TIMESTAMPTZ, TEXT, TEXT, UUID, BIGINT) TO service_role;

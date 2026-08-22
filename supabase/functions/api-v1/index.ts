@@ -1920,6 +1920,14 @@ Deno.serve(async (req: Request) => {
     // -------------------------------------------------------------
     const getQuoteMatch = path.match(/^\/(?:api\/v1\/)?quotes\/([^\/]+)$/);
     if (req.method === "GET" && getQuoteMatch) {
+      if (!userId) {
+        return errorResponse(
+          "AUTH_REQUIRED",
+          "Authentication token is required",
+          401,
+        );
+      }
+
       const quoteId = getQuoteMatch[1];
 
       const { data: quoteData, error: quoteErr } = await serviceClient.rpc(
@@ -1946,8 +1954,8 @@ Deno.serve(async (req: Request) => {
           );
         }
         return errorResponse(
-          "DATABASE_ERROR",
-          "Database operation failed",
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
           500,
         );
       }
