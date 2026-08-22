@@ -1335,15 +1335,15 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
     const client = await dbPool.connect();
     try {
       mockCallCount = 0;
-      mockDelayMs = 3000;
+      mockDelayMs = 4000;
       const pollKey = generateUuidV4();
 
       const payload = {
         location_id: locationA1Id,
         dropoff_address: {
           address_text: "Poll Fail Test",
-          latitude: 12.135,
-          longitude: -86.275,
+          latitude: 12.135123,
+          longitude: -86.275123,
         },
         recipient_name: "Poll Fail",
         recipient_phone: "+50588889999",
@@ -1354,11 +1354,15 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
       await new Promise((r) => setTimeout(r, 400));
 
       await client.query(`
-        REVOKE EXECUTE ON FUNCTION public.get_idempotent_response(UUID, TEXT, TEXT) FROM service_role;
+        REVOKE ALL ON FUNCTION public.get_idempotent_response(UUID, TEXT, TEXT) FROM service_role, PUBLIC, anon, authenticated;
       `);
 
       const p2Res = await postQuote(payload, ownerAToken, pollKey);
-      assert.strictEqual(p2Res.status, 500);
+      assert.strictEqual(
+        p2Res.status,
+        500,
+        `T31 p2Res failed: ${JSON.stringify(p2Res.body)}`,
+      );
       assert.strictEqual(p2Res.body.error?.code, "INTERNAL_SERVER_ERROR");
 
       await p1;
@@ -1366,6 +1370,7 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
     } finally {
       await client.query(`
         GRANT EXECUTE ON FUNCTION public.get_idempotent_response(UUID, TEXT, TEXT) TO service_role;
+        REVOKE ALL ON FUNCTION public.get_idempotent_response(UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
       `);
       client.release();
     }
