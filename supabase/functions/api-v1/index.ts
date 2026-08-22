@@ -1069,26 +1069,28 @@ Deno.serve(async (req: Request) => {
         distanceMeters: number;
         durationSeconds: number;
       } | null> {
-        const candidateUrls = [routesApiUrl];
+        const candidateUrls: string[] = [];
         if (isMockUrl) {
           if (routesApiUrl.includes("127.0.0.1")) {
             candidateUrls.push(
               routesApiUrl.replace("127.0.0.1", "host.docker.internal"),
-              routesApiUrl.replace("127.0.0.1", "172.17.0.1"),
-              routesApiUrl.replace("127.0.0.1", "localhost"),
+              routesApiUrl,
             );
           } else if (routesApiUrl.includes("localhost")) {
             candidateUrls.push(
-              routesApiUrl.replace("localhost", "127.0.0.1"),
               routesApiUrl.replace("localhost", "host.docker.internal"),
-              routesApiUrl.replace("localhost", "172.17.0.1"),
+              routesApiUrl,
             );
+          } else {
+            candidateUrls.push(routesApiUrl);
           }
+        } else {
+          candidateUrls.push(routesApiUrl);
         }
 
         for (const targetUrl of candidateUrls) {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const timeoutId = setTimeout(() => controller.abort(), 8000);
 
           try {
             const headers: Record<string, string> = {
