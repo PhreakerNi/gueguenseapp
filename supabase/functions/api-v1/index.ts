@@ -319,7 +319,6 @@ Deno.serve(async (req: Request) => {
         } else {
           errCode = "INTERNAL_SERVER_ERROR";
           errMsg = "An unexpected error occurred while processing the request";
-          statusCode = 500;
         }
 
         let statusCode = 400;
@@ -346,6 +345,8 @@ Deno.serve(async (req: Request) => {
           statusCode = 422;
         } else if (errCode === "PRICING_UNAVAILABLE") {
           statusCode = 503;
+        } else if (errCode === "INTERNAL_SERVER_ERROR") {
+          statusCode = 500;
         }
 
         return errorResponse(errCode, errMsg, statusCode);

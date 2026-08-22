@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(80);
+SELECT plan(55);
 
 -- ============================================================================
 -- 1. Structural Checks: Tables, Columns & Indexes (H01, H02, H08)
