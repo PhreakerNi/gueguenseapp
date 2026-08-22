@@ -1,4 +1,4 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert";
 import crypto from "node:crypto";
 import http from "node:http";
@@ -273,6 +273,11 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
       });
     }
     await dbPool.end();
+  });
+
+  beforeEach(() => {
+    mockBehavior = "success";
+    mockDelayMs = 0;
   });
 
   async function postQuote(
@@ -1241,6 +1246,11 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
       ownerAToken,
       generateUuidV4(),
     );
+    assert.strictEqual(
+      createRes.status,
+      201,
+      `T28 createRes failed: ${JSON.stringify(createRes.body)}`,
+    );
     const quoteId = createRes.body.quote_id;
 
     // Expire quote in DB
@@ -1484,7 +1494,11 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
       realBearerToken,
       generateUuidV4(),
     );
-    assert.strictEqual(res.status, 201);
+    assert.strictEqual(
+      res.status,
+      201,
+      `T34 postQuote failed: ${JSON.stringify(res.body)}`,
+    );
 
     // 2. Write sentinels to private temp file for CI check
     try {
