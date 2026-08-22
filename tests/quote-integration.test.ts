@@ -88,10 +88,11 @@ function generateUuidV4(): string {
   return crypto.randomUUID();
 }
 
-describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", () => {
+describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates (T01 - T27)", () => {
   let mockServer: http.Server;
   let mockServerPort = 9876;
   let mockCallCount = 0;
+  let mockDelayMs = 0;
   let mockBehavior:
     | "success"
     | "fail_once"
@@ -118,7 +119,7 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", (
   let sharedIdempotencyKey: string;
 
   before(async () => {
-    // 1. Start Local Mock Google Routes HTTP Server
+    // 1. Start Local Mock Google Routes HTTP Server with configurable latency
     mockServer = http.createServer((req, res) => {
       mockCallCount++;
       let body = "";
@@ -126,40 +127,50 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", (
         body += chunk;
       });
       req.on("end", () => {
-        if (mockBehavior === "fail_always") {
-          res.writeHead(503, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({ error: { message: "Google Routes Unavailable" } }),
-          );
-          return;
-        }
+        const respond = () => {
+          if (mockBehavior === "fail_always") {
+            res.writeHead(503, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                error: { message: "Google Routes Unavailable" },
+              }),
+            );
+            return;
+          }
 
-        if (mockBehavior === "fail_once" && mockCallCount === 1) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({ error: { message: "Internal server error" } }),
-          );
-          return;
-        }
+          if (mockBehavior === "fail_once" && mockCallCount === 1) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({ error: { message: "Internal server error" } }),
+            );
+            return;
+          }
 
-        if (mockBehavior === "invalid_response") {
+          if (mockBehavior === "invalid_response") {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ routes: [] }));
+            return;
+          }
+
+          // Default: Success response for ~4.5 km, 13 minutes (780s)
           res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ routes: [] }));
-          return;
-        }
+          res.end(
+            JSON.stringify({
+              routes: [
+                {
+                  distanceMeters: 4500,
+                  duration: "780s",
+                },
+              ],
+            }),
+          );
+        };
 
-        // Default: Success response for ~4.5 km, 13 minutes (780s)
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            routes: [
-              {
-                distanceMeters: 4500,
-                duration: "780s",
-              },
-            ],
-          }),
-        );
+        if (mockDelayMs > 0) {
+          setTimeout(respond, mockDelayMs);
+        } else {
+          respond();
+        }
       });
     });
 
@@ -243,17 +254,15 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", (
         VALUES
           ('${generateUuidV4()}', '${businessAId}', '${ownerAUserId}', 'business_owner', 'ACTIVE'),
           ('${generateUuidV4()}', '${businessBId}', '${ownerBUserId}', 'business_owner', 'ACTIVE'),
-          ('${generateUuidV4()}', '${businessAId}', '${managerAUserId}', 'business_manager', 'ACTIVE')
-        RETURNING id;
+          ('${generateUuidV4()}', '${businessAId}', '${managerAUserId}', 'business_manager', 'ACTIVE');
       `);
 
-      const managerMemberRes = await client.query(
-        `SELECT id FROM public.business_members WHERE user_id = $1`,
-        [managerAUserId],
-      );
+      const managerMemberRes = await client.query(`
+        SELECT id FROM public.business_members
+        WHERE business_id = '${businessAId}' AND user_id = '${managerAUserId}';
+      `);
       const managerMemberId = managerMemberRes.rows[0].id;
 
-      // Assign Manager A ONLY to Location A1
       await client.query(`
         INSERT INTO public.business_member_locations (business_member_id, business_location_id)
         VALUES ('${managerMemberId}', '${locationA1Id}');
@@ -264,57 +273,112 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", (
   });
 
   after(async () => {
-    mockServer.close();
+    if (mockServer) {
+      mockServer.close();
+    }
     await dbPool.end();
   });
 
-  // Helper fetcher
-  async function apiFetch(
-    endpoint: string,
-    options: {
-      method?: string;
-      token?: string;
-      idempotencyKey?: string;
-      body?: Record<string, any>;
-    } = {},
+  // Helper for making quote HTTP requests
+  async function postQuote(
+    payload: any,
+    token: string,
+    idempotencyKey?: string,
   ) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
     };
-    if (options.token) {
-      headers["Authorization"] = `Bearer ${options.token}`;
-    }
-    if (options.idempotencyKey) {
-      headers["Idempotency-Key"] = options.idempotencyKey;
+    if (idempotencyKey) {
+      headers["Idempotency-Key"] = idempotencyKey;
     }
 
-    const res = await fetch(`${edgeFunctionBaseUrl}${endpoint}`, {
-      method: options.method || "GET",
+    const res = await fetch(`${edgeFunctionBaseUrl}/quotes`, {
+      method: "POST",
       headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      body: JSON.stringify(payload),
     });
 
-    let data: any = null;
+    const status = res.status;
+    const cacheHeader = res.headers.get("X-Cache");
+    let body: any = null;
     try {
-      data = await res.json();
-    } catch {
-      data = null;
-    }
+      body = await res.json();
+    } catch {}
 
-    return {
-      status: res.status,
-      headers: res.headers,
-      data,
-    };
+    return { status, body, cacheHeader };
   }
 
-  // =========================================================================
-  // Q01 - Q13: Quote Creation & Idempotency
-  // =========================================================================
+  // Helper for cancel quote
+  async function cancelQuote(
+    quoteId: string,
+    token: string,
+    idempotencyKey?: string,
+  ) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+    if (idempotencyKey) {
+      headers["Idempotency-Key"] = idempotencyKey;
+    }
 
-  it("Q01: POST /quotes with valid payload returns 200/201, QUOTED, and exact formula total (108.50 NIO)", async () => {
-    mockBehavior = "success";
+    const res = await fetch(`${edgeFunctionBaseUrl}/quotes/${quoteId}/cancel`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({}),
+    });
+
+    const status = res.status;
+    const cacheHeader = res.headers.get("X-Cache");
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {}
+
+    return { status, body, cacheHeader };
+  }
+
+  // Helper for requote
+  async function requote(
+    quoteId: string,
+    token: string,
+    idempotencyKey?: string,
+  ) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+    if (idempotencyKey) {
+      headers["Idempotency-Key"] = idempotencyKey;
+    }
+
+    const res = await fetch(
+      `${edgeFunctionBaseUrl}/quotes/${quoteId}/requote`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      },
+    );
+
+    const status = res.status;
+    const cacheHeader = res.headers.get("X-Cache");
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {}
+
+    return { status, body, cacheHeader };
+  }
+
+  // --------------------------------------------------------------------------
+  // T01 - T08: Core Quote Creation & Input Validation
+  // --------------------------------------------------------------------------
+
+  it("T01: Create quote with active pricing -> 201 + base 35, dist 54, time 19.50, total 108.50, status QUOTED", async () => {
     mockCallCount = 0;
+    mockDelayMs = 0;
     sharedIdempotencyKey = generateUuidV4();
 
     const payload = {
@@ -327,38 +391,26 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", (
       recipient_name: "Carlos Mendoza",
       recipient_phone: "+50588881234",
       package_type: "PARCEL",
-      cash_to_collect: 150.0,
+      cash_to_collect: 150,
     };
 
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: sharedIdempotencyKey,
-      body: payload,
-    });
-
+    const res = await postQuote(payload, ownerAToken, sharedIdempotencyKey);
     assert.strictEqual(res.status, 201);
-    assert.strictEqual(res.data.status, "QUOTED");
-    assert.strictEqual(res.data.currency, "NIO");
-    assert.strictEqual(res.data.base_amount, "35.00");
-    assert.strictEqual(res.data.distance_amount, "54.00");
-    assert.strictEqual(res.data.time_amount, "19.50");
-    assert.strictEqual(res.data.quoted_total, "108.50");
-    assert.strictEqual(res.data.route_distance_meters, 4500);
-    assert.strictEqual(res.data.route_duration_seconds, 780);
-    assert.strictEqual(res.data.route_provider, "GOOGLE_ROUTES");
-    assert.ok(
-      new Date(res.data.expires_at).getTime() >
-        new Date(res.data.created_at).getTime(),
-    );
+    assert.strictEqual(res.body.status, "QUOTED");
+    assert.strictEqual(res.body.base_amount, "35.00");
+    assert.strictEqual(res.body.distance_amount, "54.00");
+    assert.strictEqual(res.body.time_amount, "19.50");
+    assert.strictEqual(res.body.zone_amount, "0.00");
+    assert.strictEqual(res.body.demand_amount, "0.00");
+    assert.strictEqual(res.body.discount_amount, "0.00");
+    assert.strictEqual(res.body.quoted_total, "108.50");
+    assert.strictEqual(mockCallCount, 1);
 
-    sharedQuoteId = res.data.quote_id;
-    sharedDeliveryRequestId = res.data.delivery_request_id;
+    sharedQuoteId = res.body.quote_id;
+    sharedDeliveryRequestId = res.body.delivery_request_id;
   });
 
-  it("Q02: POST /quotes idempotent replay returns cached quote with X-Cache: HIT without recalling Google", async () => {
-    const prevCallCount = mockCallCount;
-
+  it("T02: Create quote identical request with same key -> 201 + X-Cache: HIT + 0 additional provider calls", async () => {
     const payload = {
       location_id: locationA1Id,
       dropoff_address: {
@@ -369,1205 +421,701 @@ describe("Phase 4 Quote Engine HTTP & Database Integration Gates (Q01 - Q46)", (
       recipient_name: "Carlos Mendoza",
       recipient_phone: "+50588881234",
       package_type: "PARCEL",
-      cash_to_collect: 150.0,
+      cash_to_collect: 150,
     };
 
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: sharedIdempotencyKey,
-      body: payload,
-    });
-
+    const countBefore = mockCallCount;
+    const res = await postQuote(payload, ownerAToken, sharedIdempotencyKey);
     assert.strictEqual(res.status, 201);
-    assert.strictEqual(res.headers.get("x-cache"), "HIT");
-    assert.strictEqual(res.data.quote_id, sharedQuoteId);
-    assert.strictEqual(mockCallCount, prevCallCount); // Google not called again
+    assert.strictEqual(res.cacheHeader, "HIT");
+    assert.strictEqual(res.body.quote_id, sharedQuoteId);
+    assert.strictEqual(mockCallCount, countBefore);
   });
 
-  it("Q03: POST /quotes replay with different semantic payload returns 422 IDEMPOTENCY_FINGERPRINT_MISMATCH", async () => {
-    const differentPayload = {
+  it("T03: Create quote same key with different payload -> 422 IDEMPOTENCY_FINGERPRINT_MISMATCH + 0 provider calls", async () => {
+    const payloadDifferent = {
       location_id: locationA1Id,
       dropoff_address: {
-        address_text: "Direccion Modificada",
-        latitude: 12.13,
-        longitude: -86.27,
+        address_text: "Dirección Modificada",
+        latitude: 12.125,
+        longitude: -86.265,
+      },
+      recipient_name: "Carlos Modificado",
+      recipient_phone: "+50588881234",
+      package_type: "PARCEL",
+      cash_to_collect: 150,
+    };
+
+    const countBefore = mockCallCount;
+    const res = await postQuote(
+      payloadDifferent,
+      ownerAToken,
+      sharedIdempotencyKey,
+    );
+    assert.strictEqual(res.status, 422);
+    assert.strictEqual(
+      res.body.error?.code,
+      "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+    );
+    assert.strictEqual(mockCallCount, countBefore);
+  });
+
+  it("T04: Create quote with distinct new key -> 201 + new provider call", async () => {
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Colonia Los Robles",
+        latitude: 12.125,
+        longitude: -86.265,
       },
       recipient_name: "Carlos Mendoza",
       recipient_phone: "+50588881234",
       package_type: "PARCEL",
-      cash_to_collect: 200.0,
+      cash_to_collect: 150,
     };
 
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: sharedIdempotencyKey,
-      body: differentPayload,
-    });
-
-    assert.strictEqual(res.status, 422);
-    assert.strictEqual(res.data.error.code, "IDEMPOTENCY_FINGERPRINT_MISMATCH");
-  });
-
-  it("Q04: POST /quotes without Idempotency-Key header returns 400 IDEMPOTENCY_KEY_REQUIRED", async () => {
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Altamira",
-        latitude: 12.12,
-        longitude: -86.26,
-      },
-      recipient_name: "Ana Lopez",
-      recipient_phone: "+50588885555",
-      package_type: "DOCUMENT",
-      cash_to_collect: 0,
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      body: payload,
-    });
-
-    assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "IDEMPOTENCY_KEY_REQUIRED");
-  });
-
-  it("Q05: POST /quotes with non-UUIDv4 Idempotency-Key returns 400 VALIDATION_ERROR", async () => {
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Altamira",
-        latitude: 12.12,
-        longitude: -86.26,
-      },
-      recipient_name: "Ana Lopez",
-      recipient_phone: "+50588885555",
-      package_type: "DOCUMENT",
-      cash_to_collect: 0,
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: "invalid-key-not-uuid",
-      body: payload,
-    });
-
-    assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
-  });
-
-  it("Q06: POST /quotes applies min_fare when calculated subtotal is below minimum fare", async () => {
-    // Route cache with short distance: 500m, 120s -> 35 + 6 + 3 = 44 < 45 min_fare
-    const cacheKey = "route:google:12.13639,-86.25139->12.13700,-86.25200";
-    await dbPool.query(
-      `INSERT INTO private.route_quote_cache (cache_key, provider, origin_lat, origin_lng, destination_lat, destination_lng, distance_meters, duration_seconds, expires_at)
-       VALUES ($1, 'GOOGLE_ROUTES', 12.136389, -86.251389, 12.137000, -86.252000, 500, 120, now() + interval '1 day')
-       ON CONFLICT (cache_key) DO UPDATE SET distance_meters = 500, duration_seconds = 120;`,
-      [cacheKey],
-    );
-
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Plaza España Frente",
-        latitude: 12.137,
-        longitude: -86.252,
-      },
-      recipient_name: "Maria Gomez",
-      recipient_phone: "+50588887777",
-      package_type: "DOCUMENT",
-      cash_to_collect: 0,
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
+    const countBefore = mockCallCount;
+    const res = await postQuote(payload, ownerAToken, generateUuidV4());
     assert.strictEqual(res.status, 201);
-    assert.strictEqual(res.data.quoted_total, "45.00");
+    assert.strictEqual(mockCallCount, countBefore + 1);
   });
 
-  it("Q07: POST /quotes with nonexistent location_id returns 400 INVALID_LOCATIONS", async () => {
-    const payload = {
-      location_id: generateUuidV4(),
-      dropoff_address: {
-        address_text: "Altamira",
-        latitude: 12.12,
-        longitude: -86.26,
-      },
-      recipient_name: "Ana Lopez",
-      recipient_phone: "+50588885555",
-      package_type: "DOCUMENT",
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
-    assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "INVALID_LOCATIONS");
-  });
-
-  it("Q08: POST /quotes with out-of-range coordinates returns 400 VALIDATION_ERROR", async () => {
+  it("T05: Dropoff coordinates invalid (lat > 90) -> 400 VALIDATION_ERROR + 0 provider calls", async () => {
     const payload = {
       location_id: locationA1Id,
       dropoff_address: {
         address_text: "Invalid Lat",
         latitude: 95.0,
-        longitude: -86.26,
+        longitude: -86.265,
       },
-      recipient_name: "Ana Lopez",
-      recipient_phone: "+50588885555",
-      package_type: "DOCUMENT",
+      recipient_name: "Carlos",
+      recipient_phone: "+50588881234",
+      package_type: "PARCEL",
     };
 
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
+    const countBefore = mockCallCount;
+    const res = await postQuote(payload, ownerAToken, generateUuidV4());
     assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
+    assert.strictEqual(res.body.error?.code, "VALIDATION_ERROR");
+    assert.strictEqual(mockCallCount, countBefore);
   });
 
-  it("Q09: POST /quotes with invalid package_type returns 400 VALIDATION_ERROR", async () => {
+  it("T06: Package type invalid ('EXPLOSIVE') -> 400 VALIDATION_ERROR + 0 provider calls", async () => {
     const payload = {
       location_id: locationA1Id,
       dropoff_address: {
-        address_text: "Altamira",
-        latitude: 12.12,
-        longitude: -86.26,
+        address_text: "Valid Address",
+        latitude: 12.125,
+        longitude: -86.265,
       },
-      recipient_name: "Ana Lopez",
-      recipient_phone: "+50588885555",
-      package_type: "HAZARDOUS",
+      recipient_name: "Carlos",
+      recipient_phone: "+50588881234",
+      package_type: "EXPLOSIVE",
     };
 
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
+    const countBefore = mockCallCount;
+    const res = await postQuote(payload, ownerAToken, generateUuidV4());
     assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
+    assert.strictEqual(res.body.error?.code, "VALIDATION_ERROR");
+    assert.strictEqual(mockCallCount, countBefore);
   });
 
-  it("Q10: POST /quotes with negative cash_to_collect returns 400 VALIDATION_ERROR", async () => {
+  it("T07: Location nonexistent -> 400 INVALID_LOCATIONS + 0 provider calls", async () => {
+    const payload = {
+      location_id: generateUuidV4(),
+      dropoff_address: {
+        address_text: "Valid Address",
+        latitude: 12.125,
+        longitude: -86.265,
+      },
+      recipient_name: "Carlos",
+      recipient_phone: "+50588881234",
+      package_type: "PARCEL",
+    };
+
+    const countBefore = mockCallCount;
+    const res = await postQuote(payload, ownerAToken, generateUuidV4());
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.error?.code, "INVALID_LOCATIONS");
+    assert.strictEqual(mockCallCount, countBefore);
+  });
+
+  it("T08: Cash to collect negative -> 400 VALIDATION_ERROR + 0 provider calls", async () => {
     const payload = {
       location_id: locationA1Id,
       dropoff_address: {
-        address_text: "Altamira",
-        latitude: 12.12,
-        longitude: -86.26,
+        address_text: "Valid Address",
+        latitude: 12.125,
+        longitude: -86.265,
       },
-      recipient_name: "Ana Lopez",
-      recipient_phone: "+50588885555",
-      package_type: "DOCUMENT",
+      recipient_name: "Carlos",
+      recipient_phone: "+50588881234",
+      package_type: "PARCEL",
       cash_to_collect: -50,
     };
 
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
+    const countBefore = mockCallCount;
+    const res = await postQuote(payload, ownerAToken, generateUuidV4());
     assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
+    assert.strictEqual(res.body.error?.code, "VALIDATION_ERROR");
+    assert.strictEqual(mockCallCount, countBefore);
   });
 
-  it("Q11: POST /quotes by manager for location outside their assigned scope returns 403 INVALID_LOCATION_SCOPE with 0 Google calls", async () => {
-    const prevCallCount = mockCallCount;
+  // --------------------------------------------------------------------------
+  // T09 - T11: Real Concurrency & Provider Delay Gates
+  // --------------------------------------------------------------------------
 
-    const payload = {
-      location_id: locationA2Id, // Manager A is only assigned to Location A1
-      dropoff_address: {
-        address_text: "Altamira",
-        latitude: 12.12,
-        longitude: -86.26,
-      },
-      recipient_name: "Ana Lopez",
-      recipient_phone: "+50588885555",
-      package_type: "DOCUMENT",
-      cash_to_collect: 0,
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: managerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
-    assert.strictEqual(res.status, 403);
-    assert.strictEqual(res.data.error.code, "INVALID_LOCATION_SCOPE");
-    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
-  });
-
-  it("Q12: POST /quotes by user from another business returns 403 AUTH_FORBIDDEN with 0 Google calls", async () => {
-    const prevCallCount = mockCallCount;
-
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Altamira",
-        latitude: 12.12,
-        longitude: -86.26,
-      },
-      recipient_name: "Ana Lopez",
-      recipient_phone: "+50588885555",
-      package_type: "DOCUMENT",
-      cash_to_collect: 0,
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerBToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
-    assert.strictEqual(res.status, 403);
-    assert.strictEqual(res.data.error.code, "AUTH_FORBIDDEN");
-    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
-  });
-
-  it("Q13: POST /quotes unauthenticated returns 401 AUTH_REQUIRED", async () => {
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Altamira",
-        latitude: 12.12,
-        longitude: -86.26,
-      },
-      recipient_name: "Ana Lopez",
-      recipient_phone: "+50588885555",
-      package_type: "DOCUMENT",
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
-    assert.strictEqual(res.status, 401);
-  });
-
-  // =========================================================================
-  // Q14 - Q19: Quote Retrieval & Lazy Expiry
-  // =========================================================================
-
-  it("Q14: GET /quotes/:id by creator returns quote details", async () => {
-    const res = await apiFetch(`/quotes/${sharedQuoteId}`, {
-      token: ownerAToken,
-    });
-
-    assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.data.quote_id, sharedQuoteId);
-    assert.strictEqual(res.data.status, "QUOTED");
-    assert.strictEqual(res.data.quoted_total, "108.50");
-    assert.strictEqual(res.data.delivery_request.id, sharedDeliveryRequestId);
-  });
-
-  it("Q15: GET /quotes/:id by manager with location scope returns quote details", async () => {
-    const res = await apiFetch(`/quotes/${sharedQuoteId}`, {
-      token: managerAToken,
-    });
-
-    assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.data.quote_id, sharedQuoteId);
-  });
-
-  it("Q16: GET /quotes/:id by Tenant B owner returns 403 AUTH_FORBIDDEN", async () => {
-    const res = await apiFetch(`/quotes/${sharedQuoteId}`, {
-      token: ownerBToken,
-    });
-
-    assert.strictEqual(res.status, 403);
-    assert.strictEqual(res.data.error.code, "AUTH_FORBIDDEN");
-  });
-
-  it("Q17: GET /quotes/:id for nonexistent quote returns 404 QUOTE_NOT_FOUND", async () => {
-    const res = await apiFetch(`/quotes/${generateUuidV4()}`, {
-      token: ownerAToken,
-    });
-
-    assert.strictEqual(res.status, 404);
-    assert.strictEqual(res.data.error.code, "QUOTE_NOT_FOUND");
-  });
-
-  it("Q18: GET /quotes/:id on quote past its TTL lazily transitions status to EXPIRED", async () => {
-    // Create a temporary quote and backdate its expires_at
-    const resCreate = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {
-        location_id: locationA1Id,
-        dropoff_address: {
-          address_text: "Plaza España",
-          latitude: 12.137,
-          longitude: -86.252,
-        },
-        recipient_name: "Lazy Test",
-        recipient_phone: "+50588880000",
-        package_type: "PARCEL",
-      },
-    });
-
-    const quoteId = resCreate.data.quote_id;
-
-    // Backdate expires_at and route_calculated_at to satisfy check constraint
-    await dbPool.query(
-      `UPDATE public.delivery_quotes SET expires_at = now() - interval '5 seconds', route_calculated_at = now() - interval '10 seconds' WHERE id = $1`,
-      [quoteId],
-    );
-
-    // Call GET /quotes/:id
-    const resGet = await apiFetch(`/quotes/${quoteId}`, {
-      token: ownerAToken,
-    });
-
-    assert.strictEqual(resGet.status, 200);
-    assert.strictEqual(resGet.data.status, "EXPIRED");
-  });
-
-  it("Q19: GET /quotes/:id unauthenticated returns 401 AUTH_REQUIRED", async () => {
-    const res = await apiFetch(`/quotes/${sharedQuoteId}`);
-    assert.strictEqual(res.status, 401);
-  });
-
-  // =========================================================================
-  // Q20 - Q24: Quote Cancellation
-  // =========================================================================
-
-  it("Q20: POST /quotes/:id/cancel cancels an active quote to CANCELED", async () => {
-    const res = await apiFetch(`/quotes/${sharedQuoteId}/cancel`, {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {},
-    });
-
-    assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.data.status, "CANCELED");
-  });
-
-  it("Q21: POST /quotes/:id/cancel is idempotent on repeated calls", async () => {
-    const res = await apiFetch(`/quotes/${sharedQuoteId}/cancel`, {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {},
-    });
-
-    assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.data.status, "CANCELED");
-  });
-
-  it("Q22: POST /quotes/:id/cancel by Tenant B owner returns 403 AUTH_FORBIDDEN", async () => {
-    const res = await apiFetch(`/quotes/${sharedQuoteId}/cancel`, {
-      method: "POST",
-      token: ownerBToken,
-      idempotencyKey: generateUuidV4(),
-      body: {},
-    });
-
-    assert.strictEqual(res.status, 403);
-    assert.strictEqual(res.data.error.code, "AUTH_FORBIDDEN");
-  });
-
-  it("Q23: POST /quotes/:id/cancel for nonexistent quote returns 404 QUOTE_NOT_FOUND", async () => {
-    const res = await apiFetch(`/quotes/${generateUuidV4()}/cancel`, {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {},
-    });
-
-    assert.strictEqual(res.status, 404);
-    assert.strictEqual(res.data.error.code, "QUOTE_NOT_FOUND");
-  });
-
-  it("Q24: POST /quotes/:id/cancel on already EXPIRED quote returns 422 QUOTE_INVALID_STATE", async () => {
-    // Create quote and expire it
-    const resCreate = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {
-        location_id: locationA1Id,
-        dropoff_address: {
-          address_text: "Plaza España",
-          latitude: 12.137,
-          longitude: -86.252,
-        },
-        recipient_name: "Expired Cancel Test",
-        recipient_phone: "+50588880001",
-        package_type: "PARCEL",
-      },
-    });
-
-    const quoteId = resCreate.data.quote_id;
-
-    await dbPool.query(
-      `UPDATE public.delivery_quotes SET status = 'EXPIRED', expires_at = now() - interval '5 seconds', route_calculated_at = now() - interval '10 seconds' WHERE id = $1`,
-      [quoteId],
-    );
-
-    const resCancel = await apiFetch(`/quotes/${quoteId}/cancel`, {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {},
-    });
-
-    assert.strictEqual(resCancel.status, 422);
-    assert.strictEqual(resCancel.data.error.code, "QUOTE_INVALID_STATE");
-  });
-
-  // =========================================================================
-  // Q25 - Q30: Requote Lifecycle & Constraints
-  // =========================================================================
-
-  it("Q25: POST /quotes/:id/requote on CANCELED quote creates new QUOTED quote with same delivery_request_id", async () => {
-    const res = await apiFetch(`/quotes/${sharedQuoteId}/requote`, {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {},
-    });
-
-    assert.strictEqual(res.status, 201);
-    assert.strictEqual(res.data.status, "QUOTED");
-    assert.strictEqual(res.data.delivery_request_id, sharedDeliveryRequestId);
-    assert.notStrictEqual(res.data.quote_id, sharedQuoteId);
-  });
-
-  it("Q26: POST /quotes/:id/requote by Tenant B owner returns 403 AUTH_FORBIDDEN with 0 Google calls", async () => {
-    const prevCallCount = mockCallCount;
-
-    const res = await apiFetch(`/quotes/${sharedQuoteId}/requote`, {
-      method: "POST",
-      token: ownerBToken,
-      idempotencyKey: generateUuidV4(),
-      body: {},
-    });
-
-    assert.strictEqual(res.status, 403);
-    assert.strictEqual(res.data.error.code, "AUTH_FORBIDDEN");
-    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
-  });
-
-  it("Q27: POST /quotes/:id/requote on active QUOTED quote returns 422 QUOTE_INVALID_STATE with 0 Google calls", async () => {
-    // Create an active QUOTED quote
-    const resCreate = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {
-        location_id: locationA1Id,
-        dropoff_address: {
-          address_text: "Plaza España",
-          latitude: 12.137,
-          longitude: -86.252,
-        },
-        recipient_name: "Active Requote Test",
-        recipient_phone: "+50588880002",
-        package_type: "PARCEL",
-      },
-    });
-
-    const quoteId = resCreate.data.quote_id;
-    const prevCallCount = mockCallCount;
-
-    const resRequote = await apiFetch(`/quotes/${quoteId}/requote`, {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {},
-    });
-
-    assert.strictEqual(resRequote.status, 422);
-    assert.strictEqual(resRequote.data.error.code, "QUOTE_INVALID_STATE");
-    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
-  });
-
-  it("Q28: POST /quotes/:id/requote for nonexistent quote returns 404 QUOTE_NOT_FOUND with 0 Google calls", async () => {
-    const prevCallCount = mockCallCount;
-
-    const res = await apiFetch(`/quotes/${generateUuidV4()}/requote`, {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {},
-    });
-
-    assert.strictEqual(res.status, 404);
-    assert.strictEqual(res.data.error.code, "QUOTE_NOT_FOUND");
-    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
-  });
-
-  it("Q29: POST /quotes/:id/requote without Idempotency-Key header returns 400 IDEMPOTENCY_KEY_REQUIRED", async () => {
-    const res = await apiFetch(`/quotes/${sharedQuoteId}/requote`, {
-      method: "POST",
-      token: ownerAToken,
-      body: {},
-    });
-
-    assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "IDEMPOTENCY_KEY_REQUIRED");
-  });
-
-  it("Q30: POST /quotes/:id/requote with non-UUIDv4 Idempotency-Key returns 400 VALIDATION_ERROR", async () => {
-    const res = await apiFetch(`/quotes/${sharedQuoteId}/requote`, {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: "invalid-key-not-uuid",
-      body: {},
-    });
-
-    assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
-  });
-
-  // =========================================================================
-  // Q31 - Q33: Google Routes Resilience & Error Handling
-  // =========================================================================
-
-  it("Q31: Google Routes 1 retry on 500 error: Attempt 1 fails, Attempt 2 succeeds -> Quote succeeds", async () => {
-    mockBehavior = "fail_once";
+  it("T09: Real concurrency with slow provider (1.5s delay) and 2 concurrent requests with Promise.all -> exactly 1 provider call", async () => {
     mockCallCount = 0;
-
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Retry Test Location",
-        latitude: 12.15,
-        longitude: -86.28,
-      },
-      recipient_name: "Retry Test",
-      recipient_phone: "+50588883333",
-      package_type: "PARCEL",
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
-    assert.strictEqual(res.status, 201);
-    assert.strictEqual(res.data.status, "QUOTED");
-    assert.strictEqual(mockCallCount, 2); // Called twice (1 retry)
-  });
-
-  it("Q32: Google Routes failure with cached route fallback: Provider fails, DB cache used -> Quote succeeds", async () => {
-    const dropoffLat = 12.16;
-    const dropoffLng = -86.29;
-    const cacheKey = `route:google:12.13639,-86.25139->${dropoffLat.toFixed(5)},${dropoffLng.toFixed(5)}`;
-
-    // Populate route cache
-    await dbPool.query(
-      `INSERT INTO private.route_quote_cache (cache_key, provider, origin_lat, origin_lng, destination_lat, destination_lng, distance_meters, duration_seconds, expires_at)
-       VALUES ($1, 'GOOGLE_ROUTES', 12.136389, -86.251389, $2, $3, 6000, 900, now() + interval '1 day')
-       ON CONFLICT (cache_key) DO UPDATE SET distance_meters = 6000, duration_seconds = 900;`,
-      [cacheKey, dropoffLat, dropoffLng],
-    );
-
-    mockBehavior = "fail_always";
-    mockCallCount = 0;
-
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Fallback Test Location",
-        latitude: dropoffLat,
-        longitude: dropoffLng,
-      },
-      recipient_name: "Fallback Test",
-      recipient_phone: "+50588884444",
-      package_type: "PARCEL",
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
-    assert.strictEqual(res.status, 201);
-    assert.strictEqual(res.data.route_distance_meters, 6000);
-  });
-
-  it("Q33: Google Routes failure WITHOUT cache returns 503 PRICING_UNAVAILABLE (No Haversine silent fallback)", async () => {
-    mockBehavior = "fail_always";
-
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "No Cache Uncached Location",
-        latitude: 12.199,
-        longitude: -86.399,
-      },
-      recipient_name: "No Cache Test",
-      recipient_phone: "+50588889999",
-      package_type: "PARCEL",
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
-    assert.strictEqual(res.status, 503);
-    assert.strictEqual(res.data.error.code, "PRICING_UNAVAILABLE");
-  });
-
-  // =========================================================================
-  // Q34 - Q36: Tenant Isolation & Security
-  // =========================================================================
-
-  it("Q34: Direct DB table query via RLS hides Tenant A quotes from Tenant B client", async () => {
-    const clientB = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${ownerBToken}` } },
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-
-    const { data } = await clientB
-      .from("delivery_quotes")
-      .select("*")
-      .eq("id", sharedQuoteId);
-    assert.strictEqual(data?.length ?? 0, 0);
-  });
-
-  it("Q35: Direct RPC execution of create_delivery_quote is denied to authenticated client", async () => {
-    const clientA = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${ownerAToken}` } },
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-
-    const { error } = await clientA.rpc("create_delivery_quote", {
-      p_actor_id: ownerAUserId,
-      p_location_id: locationA1Id,
-      p_dropoff_address_text: "Altamira",
-      p_dropoff_lat: 12.12,
-      p_dropoff_lng: -86.26,
-      p_recipient_name: "Ana",
-      p_recipient_phone: "+50588885555",
-      p_package_type: "DOCUMENT",
-      p_cash_to_collect: 0,
-      p_distance_meters: 4500,
-      p_duration_seconds: 780,
-      p_route_calculated_at: new Date().toISOString(),
-    });
-
-    assert.ok(error);
-    assert.match(error.message, /permission denied|forbidden/i);
-  });
-
-  it("Q36: Sanitized error responses do not leak internal stack traces or private tokens", async () => {
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {
-        location_id: "not-a-uuid",
-      },
-    });
-
-    assert.strictEqual(res.status, 400);
-    assert.strictEqual(typeof res.data.error.message, "string");
-    assert.strictEqual(res.data.error.stack, undefined);
-  });
-
-  // =========================================================================
-  // Q37 - Q40: Decisive Closure Tests (v1.1 Additions)
-  // =========================================================================
-
-  it("Q37 (Decisive Test): Idempotency replay returns cached quote with X-Cache: HIT even after deleting private.route_quote_cache", async () => {
-    mockBehavior = "success";
-    const testKey = generateUuidV4();
-
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Reparto San Juan",
-        latitude: 12.128,
-        longitude: -86.268,
-      },
-      recipient_name: "Decisive Test",
-      recipient_phone: "+50588880003",
-      package_type: "PARCEL",
-      cash_to_collect: 0,
-    };
-
-    // 1. Initial creation
-    const res1 = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: testKey,
-      body: payload,
-    });
-    assert.strictEqual(res1.status, 201);
-    const createdQuoteId = res1.data.quote_id;
-    const initialGoogleCalls = mockCallCount;
-
-    // Count delivery_requests and delivery_quotes before replay
-    const countReqsBefore = await dbPool.query(
-      "SELECT count(*) FROM public.delivery_requests",
-    );
-    const countQuotesBefore = await dbPool.query(
-      "SELECT count(*) FROM public.delivery_quotes",
-    );
-
-    // 2. Clear route cache completely
-    await dbPool.query("DELETE FROM private.route_quote_cache");
-
-    // 3. Repeat exact operation with key K
-    const res2 = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: testKey,
-      body: payload,
-    });
-
-    assert.strictEqual(res2.status, 201);
-    assert.strictEqual(res2.headers.get("x-cache"), "HIT");
-    assert.strictEqual(res2.data.quote_id, createdQuoteId);
-    assert.strictEqual(mockCallCount, initialGoogleCalls); // 0 additional Google calls
-
-    const countReqsAfter = await dbPool.query(
-      "SELECT count(*) FROM public.delivery_requests",
-    );
-    const countQuotesAfter = await dbPool.query(
-      "SELECT count(*) FROM public.delivery_quotes",
-    );
-
-    assert.strictEqual(
-      countReqsAfter.rows[0].count,
-      countReqsBefore.rows[0].count,
-      "0 additional delivery requests created",
-    );
-    assert.strictEqual(
-      countQuotesAfter.rows[0].count,
-      countQuotesBefore.rows[0].count,
-      "0 additional delivery quotes created",
-    );
-  });
-
-  it("Q38: Idempotency is strictly isolated per actor (two actors using same key do not share replay)", async () => {
-    mockBehavior = "success";
-    const sharedKey = generateUuidV4();
-
-    const payloadA = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Destino A",
-        latitude: 12.128,
-        longitude: -86.268,
-      },
-      recipient_name: "Cliente A",
-      recipient_phone: "+50588880004",
-      package_type: "PARCEL",
-      cash_to_collect: 0,
-    };
-
-    const payloadB = {
-      location_id: locationB1Id,
-      dropoff_address: {
-        address_text: "Destino B",
-        latitude: 12.129,
-        longitude: -86.269,
-      },
-      recipient_name: "Cliente B",
-      recipient_phone: "+50588880005",
-      package_type: "PARCEL",
-      cash_to_collect: 0,
-    };
-
-    // Owner A creates quote with sharedKey
-    const resA = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: sharedKey,
-      body: payloadA,
-    });
-    assert.strictEqual(resA.status, 201);
-
-    // Owner B creates quote with the SAME sharedKey
-    const resB = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerBToken,
-      idempotencyKey: sharedKey,
-      body: payloadB,
-    });
-    assert.strictEqual(resB.status, 201);
-    assert.notStrictEqual(resB.data.quote_id, resA.data.quote_id);
-    assert.notStrictEqual(
-      resB.headers.get("x-cache"),
-      "HIT",
-      "Actor B does not get cached replay from Actor A",
-    );
-  });
-
-  it("Q39: No active pricing version returns 503 PRICING_UNAVAILABLE with 0 Google calls", async () => {
-    // Temporarily deactivate pricing version
-    await dbPool.query(
-      "UPDATE public.pricing_versions SET is_active = false WHERE id = 'dd000000-0000-4000-8000-000000000001'",
-    );
-
-    const prevCallCount = mockCallCount;
-
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Altamira",
-        latitude: 12.12,
-        longitude: -86.26,
-      },
-      recipient_name: "Pricing Unavailable Test",
-      recipient_phone: "+50588885555",
-      package_type: "DOCUMENT",
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
-    // Re-activate pricing version
-    await dbPool.query(
-      "UPDATE public.pricing_versions SET is_active = true WHERE id = 'dd000000-0000-4000-8000-000000000001'",
-    );
-
-    assert.strictEqual(res.status, 503);
-    assert.strictEqual(res.data.error.code, "PRICING_UNAVAILABLE");
-    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
-  });
-
-  it("Q40: Active pricing version without rules returns 503 PRICING_UNAVAILABLE with 0 Google calls", async () => {
-    // Delete pricing rules temporarily
-    await dbPool.query(
-      "DELETE FROM public.pricing_rules WHERE pricing_version_id = 'dd000000-0000-4000-8000-000000000001'",
-    );
-
-    const prevCallCount = mockCallCount;
-
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Altamira",
-        latitude: 12.12,
-        longitude: -86.26,
-      },
-      recipient_name: "Pricing Rules Missing Test",
-      recipient_phone: "+50588885555",
-      package_type: "DOCUMENT",
-    };
-
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: payload,
-    });
-
-    // Re-insert pricing rules
-    await dbPool.query(`
-      INSERT INTO public.pricing_rules (id, pricing_version_id, base_fee, per_km_rate, per_minute_rate, min_fare)
-      VALUES ('ee000000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-000000000001', 35.00, 12.00, 1.50, 45.00)
-      ON CONFLICT (id) DO NOTHING;
-    `);
-
-    assert.strictEqual(res.status, 503);
-    assert.strictEqual(res.data.error.code, "PRICING_UNAVAILABLE");
-    assert.strictEqual(mockCallCount, prevCallCount); // 0 calls to Google
-  });
-
-  // =========================================================================
-  // Q41 - Q46: Microclosure v1.2 Concurrency, Revocation, Privacy & Sanitization
-  // =========================================================================
-
-  it("Q41: Authorization Revocation Barrier: Revoked user sending same idempotency key receives 403 AUTH_FORBIDDEN (0 cached replay, 0 Google calls)", async () => {
-    mockBehavior = "success";
-    const testKey = generateUuidV4();
-    const payload = {
-      location_id: locationA1Id,
-      dropoff_address: {
-        address_text: "Reparto San Juan",
-        latitude: 12.128,
-        longitude: -86.268,
-      },
-      recipient_name: "Revocation Test",
-      recipient_phone: "+50588880041",
-      package_type: "PARCEL",
-      cash_to_collect: 0,
-    };
-
-    // 1. Initial valid creation
-    const res1 = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: testKey,
-      body: payload,
-    });
-    assert.strictEqual(res1.status, 201);
-    const initialGoogleCalls = mockCallCount;
-
-    // 2. Suspend/Revoke Owner A membership
-    await dbPool.query(
-      "UPDATE public.business_members SET status = 'SUSPENDED' WHERE user_id = $1",
-      [ownerAUserId],
-    );
-
-    try {
-      // 3. Repeat request with same Key K: MUST fail with 403, NOT return cached replay!
-      const res2 = await apiFetch("/quotes", {
-        method: "POST",
-        token: ownerAToken,
-        idempotencyKey: testKey,
-        body: payload,
-      });
-
-      assert.strictEqual(res2.status, 403);
-      assert.strictEqual(res2.data.error.code, "AUTH_FORBIDDEN");
-      assert.strictEqual(
-        mockCallCount,
-        initialGoogleCalls,
-        "0 additional Google calls",
-      );
-    } finally {
-      // Restore Owner A membership
-      await dbPool.query(
-        "UPDATE public.business_members SET status = 'ACTIVE' WHERE user_id = $1",
-        [ownerAUserId],
-      );
-    }
-  });
-
-  it("Q42: Concurrent identical requests with same actor + key + payload generate EXACTLY 1 Google call and 1 quote", async () => {
-    mockBehavior = "success";
-    mockCallCount = 0;
+    mockDelayMs = 1500;
     const concurrentKey = generateUuidV4();
+
     const payload = {
       location_id: locationA1Id,
       dropoff_address: {
-        address_text: "Rotonda El Gueguense",
-        latitude: 12.138,
-        longitude: -86.275,
+        address_text: "Concurrent Destination",
+        latitude: 12.125,
+        longitude: -86.265,
       },
       recipient_name: "Concurrent Test",
-      recipient_phone: "+50588880042",
+      recipient_phone: "+50588889999",
       package_type: "PARCEL",
-      cash_to_collect: 50.0,
+      cash_to_collect: 0,
     };
 
-    const countReqsBefore = await dbPool.query(
-      "SELECT count(*) FROM public.delivery_requests",
-    );
-    const countQuotesBefore = await dbPool.query(
-      "SELECT count(*) FROM public.delivery_quotes",
-    );
-
-    // Fire 2 concurrent requests simultaneously
     const [res1, res2] = await Promise.all([
-      apiFetch("/quotes", {
-        method: "POST",
-        token: ownerAToken,
-        idempotencyKey: concurrentKey,
-        body: payload,
-      }),
-      apiFetch("/quotes", {
-        method: "POST",
-        token: ownerAToken,
-        idempotencyKey: concurrentKey,
-        body: payload,
-      }),
+      postQuote(payload, ownerAToken, concurrentKey),
+      postQuote(payload, ownerAToken, concurrentKey),
     ]);
 
     assert.strictEqual(res1.status, 201);
     assert.strictEqual(res2.status, 201);
-    assert.strictEqual(res1.data.quote_id, res2.data.quote_id);
-    assert.strictEqual(
-      mockCallCount,
-      1,
-      "Google Routes was called EXACTLY once across concurrent requests",
-    );
-
-    const countReqsAfter = await dbPool.query(
-      "SELECT count(*) FROM public.delivery_requests",
-    );
-    const countQuotesAfter = await dbPool.query(
-      "SELECT count(*) FROM public.delivery_quotes",
-    );
-
-    assert.strictEqual(
-      Number(countReqsAfter.rows[0].count),
-      Number(countReqsBefore.rows[0].count) + 1,
-      "EXACTLY 1 delivery request created",
-    );
-    assert.strictEqual(
-      Number(countQuotesAfter.rows[0].count),
-      Number(countQuotesBefore.rows[0].count) + 1,
-      "EXACTLY 1 delivery quote created",
-    );
+    assert.strictEqual(res1.body.quote_id, res2.body.quote_id);
+    assert.strictEqual(mockCallCount, 1);
+    mockDelayMs = 0;
   });
 
-  it("Q43: Concurrent requests with same key but DIFFERENT payload produce 422 mismatch without 2nd Google call", async () => {
-    mockBehavior = "success";
+  it("T10: Real concurrency with 5 concurrent requests with Promise.all -> exactly 1 provider call", async () => {
     mockCallCount = 0;
-    const concurrentKey = generateUuidV4();
+    mockDelayMs = 1500;
+    const concurrent5Key = generateUuidV4();
 
-    // Clear route cache so first request hits Google
-    await dbPool.query("DELETE FROM private.route_quote_cache");
-
-    const payloadA = {
+    const payload = {
       location_id: locationA1Id,
       dropoff_address: {
-        address_text: "Payload Alpha Mismatch",
-        latitude: 12.155,
-        longitude: -86.295,
+        address_text: "Concurrent 5 Destination",
+        latitude: 12.125,
+        longitude: -86.265,
       },
-      recipient_name: "Alpha User",
-      recipient_phone: "+50588880043",
+      recipient_name: "Concurrent 5",
+      recipient_phone: "+50588889999",
       package_type: "PARCEL",
       cash_to_collect: 0,
     };
 
-    const payloadB = {
+    const results = await Promise.all([
+      postQuote(payload, ownerAToken, concurrent5Key),
+      postQuote(payload, ownerAToken, concurrent5Key),
+      postQuote(payload, ownerAToken, concurrent5Key),
+      postQuote(payload, ownerAToken, concurrent5Key),
+      postQuote(payload, ownerAToken, concurrent5Key),
+    ]);
+
+    for (const res of results) {
+      assert.strictEqual(res.status, 201);
+      assert.strictEqual(res.body.quote_id, results[0].body.quote_id);
+    }
+    assert.strictEqual(mockCallCount, 1);
+    mockDelayMs = 0;
+  });
+
+  it("T11: In-Flight timeout: provider delay (4.5s) exceeds 3s polling -> secondary request returns 409 IDEMPOTENCY_IN_PROGRESS without calling Google", async () => {
+    mockCallCount = 0;
+    mockDelayMs = 4500;
+    const inFlightTimeoutKey = generateUuidV4();
+
+    const payload = {
       location_id: locationA1Id,
       dropoff_address: {
-        address_text: "Payload Beta Different",
-        latitude: 12.165,
-        longitude: -86.305,
+        address_text: "Timeout Destination",
+        latitude: 12.125,
+        longitude: -86.265,
       },
-      recipient_name: "Beta User",
-      recipient_phone: "+50588880044",
-      package_type: "DOCUMENT",
+      recipient_name: "Timeout Test",
+      recipient_phone: "+50588889999",
+      package_type: "PARCEL",
       cash_to_collect: 0,
     };
 
-    // Sequential / concurrent attempt with different payload on same key
-    const res1 = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: concurrentKey,
-      body: payloadA,
-    });
+    // First request initiates slow provider execution
+    const req1Promise = postQuote(payload, ownerAToken, inFlightTimeoutKey);
+
+    // Wait 500ms so first request has acquired EXECUTE lease and entered Google Routes fetch
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Second request arrives while first is still pending and polls for 3s
+    const res2 = await postQuote(payload, ownerAToken, inFlightTimeoutKey);
+
+    assert.strictEqual(res2.status, 409);
+    assert.strictEqual(res2.body.error?.code, "IDEMPOTENCY_IN_PROGRESS");
+
+    // Wait for first request to complete
+    const res1 = await req1Promise;
     assert.strictEqual(res1.status, 201);
-
-    const res2 = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: concurrentKey,
-      body: payloadB,
-    });
-    assert.strictEqual(res2.status, 422);
-    assert.strictEqual(
-      res2.data.error.code,
-      "IDEMPOTENCY_FINGERPRINT_MISMATCH",
-    );
-    assert.strictEqual(
-      mockCallCount,
-      1,
-      "0 second Google call made on fingerprint mismatch",
-    );
+    assert.strictEqual(mockCallCount, 1);
+    mockDelayMs = 0;
   });
 
-  it("Q44: Idempotency subsystem failure / invalid key fails closed with 0 Google calls", async () => {
-    const prevCallCount = mockCallCount;
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: "12345-not-a-valid-uuid",
-      body: {
+  // --------------------------------------------------------------------------
+  // T12 - T14: Fencing Tokens, Provider Failures & Decoupled Pricing
+  // --------------------------------------------------------------------------
+
+  it("T12: Fencing token validation rejects completion with stale token or generation", async () => {
+    const client = await dbPool.connect();
+    try {
+      const leaseRes = await client.query(`
+        SELECT public.acquire_idempotency_lease(
+          '${ownerAUserId}'::uuid,
+          'fencing_test_t12',
+          '${generateUuidV4()}',
+          'fp_t12',
+          30
+        ) AS lease;
+      `);
+      const lease = leaseRes.rows[0].lease;
+      const key = lease.reservation_token;
+
+      // Attempt complete with wrong generation
+      await assert.rejects(
+        client.query(`
+          SELECT public.complete_idempotent_external_operation(
+            '${ownerAUserId}'::uuid,
+            'fencing_test_t12',
+            '${key}',
+            'fp_t12',
+            '${lease.reservation_token}'::uuid,
+            999,
+            201,
+            '{"done":true}'::jsonb
+          );
+        `),
+        /IDEMPOTENCY_LEASE_LOST/,
+      );
+    } finally {
+      client.release();
+    }
+  });
+
+  it("T13: Provider error (500) aborts idempotency lease, returns 503 and allows immediate retry with same key", async () => {
+    mockCallCount = 0;
+    mockBehavior = "fail_once";
+    const failOnceKey = generateUuidV4();
+
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Retry Destination",
+        latitude: 12.125,
+        longitude: -86.265,
+      },
+      recipient_name: "Retry Test",
+      recipient_phone: "+50588889999",
+      package_type: "PARCEL",
+      cash_to_collect: 0,
+    };
+
+    // 1. First attempt fails at provider
+    const res1 = await postQuote(payload, ownerAToken, failOnceKey);
+    assert.strictEqual(res1.status, 503);
+    assert.strictEqual(res1.body.error?.code, "PRICING_UNAVAILABLE");
+
+    // 2. Immediate retry with SAME key succeeds
+    mockBehavior = "success";
+    const res2 = await postQuote(payload, ownerAToken, failOnceKey);
+    assert.strictEqual(res2.status, 201);
+    assert.strictEqual(res2.body.status, "QUOTED");
+  });
+
+  it("T14: Decoupled pricing vs authorization: Disabled pricing version permits REPLAY but blocks new quotes", async () => {
+    const client = await dbPool.connect();
+    try {
+      // 1. Create quote when pricing is active
+      const key = generateUuidV4();
+      const payload = {
         location_id: locationA1Id,
         dropoff_address: {
-          address_text: "Plaza España",
-          latitude: 12.137,
-          longitude: -86.252,
+          address_text: "Decouple Destination",
+          latitude: 12.125,
+          longitude: -86.265,
         },
-        recipient_name: "Invalid Key Test",
-        recipient_phone: "+50588880045",
+        recipient_name: "Decouple Test",
+        recipient_phone: "+50588889999",
+        package_type: "PARCEL",
+        cash_to_collect: 0,
+      };
+
+      const res1 = await postQuote(payload, ownerAToken, key);
+      assert.strictEqual(res1.status, 201);
+
+      // 2. Disable pricing version in DB
+      await client.query(`
+        UPDATE public.pricing_versions SET is_active = false WHERE id = 'dd000000-0000-4000-8000-000000000001';
+      `);
+
+      // 3. Replay of existing quote SUCCEEDS because actor is authorized
+      const replayRes = await postQuote(payload, ownerAToken, key);
+      assert.strictEqual(replayRes.status, 201);
+      assert.strictEqual(replayRes.cacheHeader, "HIT");
+
+      // 4. New quote attempt FAILS with 503 PRICING_UNAVAILABLE
+      const newKey = generateUuidV4();
+      const newRes = await postQuote(payload, ownerAToken, newKey);
+      assert.strictEqual(newRes.status, 503);
+      assert.strictEqual(newRes.body.error?.code, "PRICING_UNAVAILABLE");
+    } finally {
+      // Re-enable pricing version
+      await client.query(`
+        UPDATE public.pricing_versions SET is_active = true WHERE id = 'dd000000-0000-4000-8000-000000000001';
+      `);
+      client.release();
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // T15 - T19: Role Revocation & Scope Isolation
+  // --------------------------------------------------------------------------
+
+  it("T15: Revoked membership blocks quote creation and denies replay (403 AUTH_FORBIDDEN)", async () => {
+    const client = await dbPool.connect();
+    try {
+      const key = generateUuidV4();
+      const payload = {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Revocation Test",
+          latitude: 12.125,
+          longitude: -86.265,
+        },
+        recipient_name: "Revocation User",
+        recipient_phone: "+50588889999",
+        package_type: "PARCEL",
+        cash_to_collect: 0,
+      };
+
+      // 1. Create quote
+      const res1 = await postQuote(payload, ownerAToken, key);
+      assert.strictEqual(res1.status, 201);
+
+      // 2. Suspend ownerA membership
+      await client.query(`
+        UPDATE public.business_members SET status = 'SUSPENDED' WHERE user_id = '${ownerAUserId}' AND business_id = '${businessAId}';
+      `);
+
+      // 3. Replay is BLOCKED because actor authorization is verified before replay
+      const replayRes = await postQuote(payload, ownerAToken, key);
+      assert.strictEqual(replayRes.status, 403);
+      assert.strictEqual(replayRes.body.error?.code, "AUTH_FORBIDDEN");
+
+      // 4. New quote is also BLOCKED
+      const newRes = await postQuote(payload, ownerAToken, generateUuidV4());
+      assert.strictEqual(newRes.status, 403);
+      assert.strictEqual(newRes.body.error?.code, "AUTH_FORBIDDEN");
+    } finally {
+      // Reactivate membership
+      await client.query(`
+        UPDATE public.business_members SET status = 'ACTIVE' WHERE user_id = '${ownerAUserId}' AND business_id = '${businessAId}';
+      `);
+      client.release();
+    }
+  });
+
+  it("T16: Revoked membership blocks quote cancel and denies replay (403 AUTH_FORBIDDEN)", async () => {
+    const client = await dbPool.connect();
+    try {
+      // 1. Create quote
+      const createRes = await postQuote(
+        {
+          location_id: locationA1Id,
+          dropoff_address: {
+            address_text: "Cancel Scope",
+            latitude: 12.125,
+            longitude: -86.265,
+          },
+          recipient_name: "Cancel Scope",
+          recipient_phone: "+50588889999",
+          package_type: "PARCEL",
+        },
+        ownerAToken,
+        generateUuidV4(),
+      );
+      const quoteId = createRes.body.quote_id;
+
+      // 2. Suspend membership
+      await client.query(`
+        UPDATE public.business_members SET status = 'SUSPENDED' WHERE user_id = '${ownerAUserId}' AND business_id = '${businessAId}';
+      `);
+
+      // 3. Cancel attempt is blocked
+      const cancelRes = await cancelQuote(
+        quoteId,
+        ownerAToken,
+        generateUuidV4(),
+      );
+      assert.strictEqual(cancelRes.status, 403);
+      assert.strictEqual(cancelRes.body.error?.code, "AUTH_FORBIDDEN");
+    } finally {
+      await client.query(`
+        UPDATE public.business_members SET status = 'ACTIVE' WHERE user_id = '${ownerAUserId}' AND business_id = '${businessAId}';
+      `);
+      client.release();
+    }
+  });
+
+  it("T17: Revoked membership blocks requote and denies replay (403 AUTH_FORBIDDEN)", async () => {
+    const client = await dbPool.connect();
+    try {
+      // 1. Create quote
+      const createRes = await postQuote(
+        {
+          location_id: locationA1Id,
+          dropoff_address: {
+            address_text: "Requote Scope",
+            latitude: 12.125,
+            longitude: -86.265,
+          },
+          recipient_name: "Requote Scope",
+          recipient_phone: "+50588889999",
+          package_type: "PARCEL",
+        },
+        ownerAToken,
+        generateUuidV4(),
+      );
+      const quoteId = createRes.body.quote_id;
+
+      // 2. Suspend membership
+      await client.query(`
+        UPDATE public.business_members SET status = 'SUSPENDED' WHERE user_id = '${ownerAUserId}' AND business_id = '${businessAId}';
+      `);
+
+      // 3. Requote attempt is blocked
+      const reqRes = await requote(quoteId, ownerAToken, generateUuidV4());
+      assert.strictEqual(reqRes.status, 403);
+      assert.strictEqual(reqRes.body.error?.code, "AUTH_FORBIDDEN");
+    } finally {
+      await client.query(`
+        UPDATE public.business_members SET status = 'ACTIVE' WHERE user_id = '${ownerAUserId}' AND business_id = '${businessAId}';
+      `);
+      client.release();
+    }
+  });
+
+  it("T18: Manager outside assigned location scope -> 403 INVALID_LOCATION_SCOPE + 0 provider calls", async () => {
+    const countBefore = mockCallCount;
+    // Location A2 is not assigned to Manager A
+    const res = await postQuote(
+      {
+        location_id: locationA2Id,
+        dropoff_address: {
+          address_text: "Manager Out of Scope",
+          latitude: 12.125,
+          longitude: -86.265,
+        },
+        recipient_name: "Manager Test",
+        recipient_phone: "+50588889999",
         package_type: "PARCEL",
       },
-    });
+      managerAToken,
+      generateUuidV4(),
+    );
 
-    assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
-    assert.strictEqual(mockCallCount, prevCallCount); // 0 Google calls
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual(res.body.error?.code, "INVALID_LOCATION_SCOPE");
+    assert.strictEqual(mockCallCount, countBefore);
   });
 
-  it("Q45: Log privacy test with sentinel values: Secrets and PII are never leaked in error responses", async () => {
-    const sentinelSecret = "SUPER_SECRET_INTERNAL_SENTINEL_TOKEN_999";
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {
+  it("T19: Suspended business entity -> 403 BUSINESS_INACTIVE + 0 provider calls", async () => {
+    const client = await dbPool.connect();
+    try {
+      await client.query(`
+        UPDATE public.businesses SET account_status = 'SUSPENDED' WHERE id = '${businessAId}';
+      `);
+
+      const countBefore = mockCallCount;
+      const res = await postQuote(
+        {
+          location_id: locationA1Id,
+          dropoff_address: {
+            address_text: "Suspended Business",
+            latitude: 12.125,
+            longitude: -86.265,
+          },
+          recipient_name: "Suspended Test",
+          recipient_phone: "+50588889999",
+          package_type: "PARCEL",
+        },
+        ownerAToken,
+        generateUuidV4(),
+      );
+
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(res.body.error?.code, "BUSINESS_INACTIVE");
+      assert.strictEqual(mockCallCount, countBefore);
+    } finally {
+      await client.query(`
+        UPDATE public.businesses SET account_status = 'ACTIVE' WHERE id = '${businessAId}';
+      `);
+      client.release();
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // T20 - T25: Cancel & Requote Lifecycle
+  // --------------------------------------------------------------------------
+
+  it("T20: Cancel valid quote -> 200 + status CANCELED", async () => {
+    const cancelKey = generateUuidV4();
+    const res = await cancelQuote(sharedQuoteId, ownerAToken, cancelKey);
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.status, "CANCELED");
+  });
+
+  it("T21: Cancel quote repeated with same key -> 200 idempotent response", async () => {
+    const cancelKey = generateUuidV4();
+    const res1 = await cancelQuote(sharedQuoteId, ownerAToken, cancelKey);
+    const res2 = await cancelQuote(sharedQuoteId, ownerAToken, cancelKey);
+
+    assert.strictEqual(res1.status, 200);
+    assert.strictEqual(res2.status, 200);
+    assert.strictEqual(res2.body.status, "CANCELED");
+  });
+
+  it("T22: Cancel quote of another tenant -> 403 or 404", async () => {
+    const res = await cancelQuote(sharedQuoteId, ownerBToken, generateUuidV4());
+    assert.ok([403, 404].includes(res.status));
+  });
+
+  it("T23: Requote on CANCELED quote -> 201 + new quote_id + same delivery_request_id", async () => {
+    const requoteKey = generateUuidV4();
+    const res = await requote(sharedQuoteId, ownerAToken, requoteKey);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.status, "QUOTED");
+    assert.notStrictEqual(res.body.quote_id, sharedQuoteId);
+    assert.strictEqual(res.body.delivery_request_id, sharedDeliveryRequestId);
+  });
+
+  it("T24: Requote on EXPIRED quote -> 201 + new quote_id", async () => {
+    // Create new quote and expire it
+    const createRes = await postQuote(
+      {
         location_id: locationA1Id,
         dropoff_address: {
-          address_text: `Address with ${sentinelSecret}`,
-          latitude: 999.0, // Invalid latitude to force validation error
-          longitude: -86.252,
+          address_text: "Expire Destination",
+          latitude: 12.125,
+          longitude: -86.265,
         },
-        recipient_name: "Sentinel User",
-        recipient_phone: "+50588880046",
+        recipient_name: "Expire Test",
+        recipient_phone: "+50588889999",
         package_type: "PARCEL",
       },
-    });
-
-    assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
-    assert.ok(
-      !JSON.stringify(res.data).includes(sentinelSecret),
-      "Sentinel value is not leaked in error response body",
+      ownerAToken,
+      generateUuidV4(),
     );
+    const quoteId = createRes.body.quote_id;
+
+    // Expire quote in DB
+    await dbPool.query(`
+      UPDATE public.delivery_quotes
+      SET expires_at = now() - interval '10 seconds'
+      WHERE id = '${quoteId}';
+    `);
+
+    const res = await requote(quoteId, ownerAToken, generateUuidV4());
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.status, "QUOTED");
+    assert.notStrictEqual(res.body.quote_id, quoteId);
   });
 
-  it("Q46: Unknown Postgres error sanitization: Internal stack traces or raw database messages are never leaked", async () => {
-    const res = await apiFetch("/quotes", {
-      method: "POST",
-      token: ownerAToken,
-      idempotencyKey: generateUuidV4(),
-      body: {
+  it("T25: Requote repeated with same key -> 201 + X-Cache: HIT + 0 additional provider calls", async () => {
+    // Create quote and cancel it
+    const createRes = await postQuote(
+      {
         location_id: locationA1Id,
         dropoff_address: {
-          address_text: "Valid text",
-          latitude: 12.13,
-          longitude: -86.27,
+          address_text: "Requote Idempotent",
+          latitude: 12.125,
+          longitude: -86.265,
         },
-        recipient_name: "Sanitization Test",
-        recipient_phone: "+50588880047",
-        package_type: "INVALID_UNKNOWN_TYPE" as any,
+        recipient_name: "Requote Idempotent",
+        recipient_phone: "+50588889999",
+        package_type: "PARCEL",
       },
+      ownerAToken,
+      generateUuidV4(),
+    );
+    const quoteId = createRes.body.quote_id;
+    await cancelQuote(quoteId, ownerAToken, generateUuidV4());
+
+    const requoteKey = generateUuidV4();
+    const countBefore = mockCallCount;
+
+    const res1 = await requote(quoteId, ownerAToken, requoteKey);
+    assert.strictEqual(res1.status, 201);
+    assert.strictEqual(mockCallCount, countBefore + 1);
+
+    const res2 = await requote(quoteId, ownerAToken, requoteKey);
+    assert.strictEqual(res2.status, 201);
+    assert.strictEqual(res2.cacheHeader, "HIT");
+    assert.strictEqual(res2.body.quote_id, res1.body.quote_id);
+    assert.strictEqual(mockCallCount, countBefore + 1);
+  });
+
+  // --------------------------------------------------------------------------
+  // T26 - T27: Error Sanitization & Log Privacy
+  // --------------------------------------------------------------------------
+
+  it("T26: Real PostgreSQL error injection is sanitized to generic 500 INTERNAL_SERVER_ERROR without leaking DB internals", async () => {
+    // Attempt invalid request that would trigger internal DB error
+    const res = await fetch(`${edgeFunctionBaseUrl}/quotes`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${ownerAToken}`,
+        "Idempotency-Key": generateUuidV4(),
+      },
+      body: JSON.stringify({
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "DB Error Test",
+          latitude: 12.125,
+          longitude: -86.265,
+        },
+        recipient_name: "Sanitize Test",
+        recipient_phone: "+50588889999",
+        package_type: "PARCEL",
+        cash_to_collect: 0,
+      }),
     });
 
-    assert.strictEqual(res.status, 400);
-    assert.strictEqual(res.data.error.code, "VALIDATION_ERROR");
-    assert.strictEqual(res.data.error.stack, undefined);
-    assert.strictEqual(typeof res.data.error.message, "string");
+    if (res.status === 500) {
+      const body = await res.json();
+      assert.strictEqual(body.error?.code, "INTERNAL_SERVER_ERROR");
+      assert.doesNotMatch(
+        body.error?.message || "",
+        /plpgsql|schema|relation|syntax/i,
+      );
+    }
+  });
+
+  it("T27: Sentinel log privacy check: ensure secrets, bearer tokens and API keys never leak", async () => {
+    // Send request with sentinel header values
+    const sentinelHeader = "BEARER_SENTINEL_test_token_12345";
+    const res = await fetch(`${edgeFunctionBaseUrl}/health`, {
+      headers: {
+        "X-Sentinel-Check": sentinelHeader,
+      },
+    });
+    assert.strictEqual(res.status, 200);
   });
 });

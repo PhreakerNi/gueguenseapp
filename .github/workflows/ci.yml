@@ -138,7 +138,7 @@ jobs:
       - name: Start Supabase Local Stack
         run: pnpm supabase:start
 
-      - name: Verify Migration Immutability (against main SHA ae90e55)
+      - name: Verify Migration Immutability
         run: |
           git fetch --depth=1 origin ae90e5582339afe8ff53b9a402d1ee24b04ae862
           git diff --exit-code ae90e5582339afe8ff53b9a402d1ee24b04ae862 -- \
@@ -149,6 +149,15 @@ jobs:
             supabase/migrations/20260819000002_phase3_closure_v1_2.sql \
             supabase/migrations/20260820000001_phase3_security_closure_v1_3.sql \
             supabase/migrations/20260820000002_phase3_security_microclosure_v1_4.sql
+          git fetch --depth=1 origin 576e09856febe7456b03239f3c5109057c17b292
+          git diff --exit-code 576e09856febe7456b03239f3c5109057c17b292 -- \
+            supabase/migrations/20260821000001_phase4_quote_engine.sql
+          git fetch --depth=1 origin 4c3604f3f866e74aea26078644e3797cdfe880f7
+          git diff --exit-code 4c3604f3f866e74aea26078644e3797cdfe880f7 -- \
+            supabase/migrations/20260821000002_phase4_quote_engine_closure_v1_1.sql
+          git fetch --depth=1 origin 1716962fe0a6c3d4d2072277b48780e5adfcd037
+          git diff --exit-code 1716962fe0a6c3d4d2072277b48780e5adfcd037 -- \
+            supabase/migrations/20260821000003_phase4_quote_engine_microclosure_v1_2.sql
 
       - name: Test Forward Migration Upgrade (F1-F3 -> F4)
         run: |
@@ -272,14 +281,17 @@ jobs:
           rm -f supabase_status.json
           pnpm supabase functions serve api-v1 --no-verify-jwt --env-file supabase/.env.local &
           echo "Waiting for api-v1 Edge Function to be ready..."
+          healthy=0
           for i in $(seq 1 30); do
             if curl -s http://127.0.0.1:54321/functions/v1/api-v1/health | grep -q '"status":"ok"'; then
               echo "api-v1 Edge Function is UP and healthy!"
+              healthy=1
               break
             fi
             echo "Waiting for api-v1 (attempt $i/30)..."
             sleep 1
           done
+          test "$healthy" -eq 1
 
       - name: Run Phase 3 Onboarding & Verification Integration Test Suite
         run: |
@@ -345,16 +357,19 @@ jobs:
           cp supabase/.env.local supabase/functions/api-v1/.env
           cp supabase/.env.local .env
           rm -f supabase_status.json
-          pnpm supabase functions serve api-v1 --no-verify-jwt --env-file supabase/.env.local &
+          pnpm supabase functions serve api-v1 --no-verify-jwt --env-file supabase/.env.local > edge.log 2>&1 &
           echo "Waiting for api-v1 Edge Function to be ready..."
+          healthy=0
           for i in $(seq 1 30); do
             if curl -s http://127.0.0.1:54321/functions/v1/api-v1/health | grep -q '"status":"ok"'; then
               echo "api-v1 Edge Function is UP and healthy!"
+              healthy=1
               break
             fi
             echo "Waiting for api-v1 (attempt $i/30)..."
             sleep 1
           done
+          test "$healthy" -eq 1
 
       - name: Run Phase 4 Quote Engine Integration Test Suite
         run: |
@@ -364,6 +379,14 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat quote_test.log >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Verify Log Privacy & Sentinel Leaks
+        run: |
+          set -eo pipefail
+          if grep -q "SECRET_SENTINEL" edge.log 2>/dev/null || grep -q "PHONE_SENTINEL" edge.log 2>/dev/null || grep -q "BEARER_SENTINEL" edge.log 2>/dev/null; then
+            echo "ERROR: Sentinel leaked in logs!"
+            exit 1
+          fi
 
       - name: Stop Supabase Stack
         if: always()

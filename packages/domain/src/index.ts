@@ -1,5 +1,6 @@
 export * from "./constants";
 export * from "./guards";
+export * from "./idempotency";
 
 export type DeliveryStatus =
   (typeof import("./constants").DELIVERY_STATUSES)[number];

@@ -1360,13 +1360,6 @@ Deno.serve(async (req: Request) => {
             403,
           );
         }
-        if (msg.includes("PRICING_UNAVAILABLE")) {
-          return errorResponse(
-            "PRICING_UNAVAILABLE",
-            "Active pricing version or rules unavailable",
-            503,
-          );
-        }
         return errorResponse(
           "VALIDATION_ERROR",
           msg.replace(/^[^:]+:\s*/, ""),
@@ -1428,7 +1421,7 @@ Deno.serve(async (req: Request) => {
         while (attempts < 30) {
           await new Promise((r) => setTimeout(r, 100));
           attempts++;
-          const { data: cached } = await serviceClient.rpc(
+          const { data: cached, error: pollErr } = await serviceClient.rpc(
             "get_idempotent_response",
             {
               p_actor_user_id: userId,
@@ -1436,6 +1429,13 @@ Deno.serve(async (req: Request) => {
               p_key: idempotencyKey,
             },
           );
+          if (pollErr) {
+            return errorResponse(
+              "INTERNAL_SERVER_ERROR",
+              "An unexpected error occurred while processing the request",
+              500,
+            );
+          }
           if (cached && cached.response_body) {
             polledResponse = cached;
             break;
@@ -1449,9 +1449,40 @@ Deno.serve(async (req: Request) => {
             { "X-Cache": "HIT" },
           );
         }
+
+        // Bloqueador A: Si sigue IN_FLIGHT tras agotarse el poll -> 409 IDEMPOTENCY_IN_PROGRESS (JAMÁS cae a Google!)
+        return errorResponse(
+          "IDEMPOTENCY_IN_PROGRESS",
+          "Operation is currently in progress, please retry with the same Idempotency-Key",
+          409,
+        );
       }
 
-      // 3. Fetch Google Routes metrics (Only executed if lease is granted)
+      // Action must be EXECUTE
+      const reservationToken = leaseData.reservation_token;
+      const leaseGeneration = leaseData.lease_generation;
+
+      // 3. Server-Only Active Pricing Verification (Only when action is EXECUTE)
+      const { error: pricingErr } = await serviceClient.rpc(
+        "get_active_pricing_rule",
+        { p_package_type: packageType },
+      );
+      if (pricingErr) {
+        await serviceClient.rpc("abort_idempotency_lease", {
+          p_actor_user_id: userId,
+          p_scope: "create_delivery_quote",
+          p_key: idempotencyKey,
+          p_reservation_token: reservationToken,
+          p_lease_generation: leaseGeneration,
+        });
+        return errorResponse(
+          "PRICING_UNAVAILABLE",
+          "Active pricing version or rules unavailable",
+          503,
+        );
+      }
+
+      // 4. Fetch Google Routes metrics (Only executed if lease is granted)
       let routeMetrics;
       try {
         routeMetrics = await fetchGoogleRoutes(
@@ -1461,6 +1492,13 @@ Deno.serve(async (req: Request) => {
           dropoffLng,
         );
       } catch (err: any) {
+        await serviceClient.rpc("abort_idempotency_lease", {
+          p_actor_user_id: userId,
+          p_scope: "create_delivery_quote",
+          p_key: idempotencyKey,
+          p_reservation_token: reservationToken,
+          p_lease_generation: leaseGeneration,
+        });
         return errorResponse(
           "PRICING_UNAVAILABLE",
           "Pricing version or routing service is currently unavailable",
@@ -1468,24 +1506,51 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // 4. Commit quote creation and idempotent record atomically (Returns 201)
-      return await runIdempotentOp(
-        "create_delivery_quote",
-        "create_delivery_quote",
-        {
-          location_id: locationId,
-          dropoff_address_text: dropoffAddressText,
-          dropoff_lat: dropoffLat,
-          dropoff_lng: dropoffLng,
-          recipient_name: recipientName,
-          recipient_phone: recipientPhone,
-          package_type: packageType,
-          cash_to_collect: cashToCollect,
-          distance_meters: routeMetrics.distanceMeters,
-          duration_seconds: routeMetrics.durationSeconds,
-          route_calculated_at: routeMetrics.calculatedAt,
-        },
-      );
+      // 5. Commit quote creation and idempotent record atomically with Fencing Token (Returns 201)
+      const { data: quoteCreated, error: quoteCreateErr } =
+        await serviceClient.rpc("create_delivery_quote_atomic", {
+          p_actor_id: userId,
+          p_location_id: locationId,
+          p_dropoff_address_text: dropoffAddressText,
+          p_dropoff_lat: dropoffLat,
+          p_dropoff_lng: dropoffLng,
+          p_recipient_name: recipientName,
+          p_recipient_phone: recipientPhone,
+          p_package_type: packageType,
+          p_cash_to_collect: cashToCollect,
+          p_distance_meters: routeMetrics.distanceMeters,
+          p_duration_seconds: routeMetrics.durationSeconds,
+          p_route_calculated_at: routeMetrics.calculatedAt,
+          p_idempotency_key: idempotencyKey,
+          p_request_fingerprint: fingerprint,
+          p_reservation_token: reservationToken,
+          p_lease_generation: leaseGeneration,
+        });
+
+      if (quoteCreateErr) {
+        const msg = quoteCreateErr.message || "";
+        if (msg.includes("IDEMPOTENCY_LEASE_LOST")) {
+          return errorResponse(
+            "IDEMPOTENCY_LEASE_LOST",
+            "Idempotency lease was lost or expired",
+            409,
+          );
+        }
+        if (msg.includes("IDEMPOTENCY_FINGERPRINT_MISMATCH")) {
+          return errorResponse(
+            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+            "Request payload fingerprint does not match original request",
+            422,
+          );
+        }
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
+        );
+      }
+
+      return jsonResponse(quoteCreated, 201);
     }
 
     // -------------------------------------------------------------
@@ -1512,6 +1577,45 @@ Deno.serve(async (req: Request) => {
         return errorResponse(
           "VALIDATION_ERROR",
           "Idempotency-Key must be a valid UUID v4",
+          400,
+        );
+      }
+
+      // Pre-authorization verification FIRST (Bloqueador D: revoked user receives NO cancel replay)
+      const { error: accessErr } = await serviceClient.rpc(
+        "verify_quote_access_scope",
+        {
+          p_actor_id: userId,
+          p_quote_id: quoteId,
+        },
+      );
+
+      if (accessErr) {
+        const msg = accessErr.message || "";
+        if (msg.includes("QUOTE_NOT_FOUND")) {
+          return errorResponse(
+            "QUOTE_NOT_FOUND",
+            "Delivery quote not found",
+            404,
+          );
+        }
+        if (msg.includes("AUTH_FORBIDDEN")) {
+          return errorResponse(
+            "AUTH_FORBIDDEN",
+            "User does not have access to this quote",
+            403,
+          );
+        }
+        if (msg.includes("BUSINESS_INACTIVE")) {
+          return errorResponse(
+            "BUSINESS_INACTIVE",
+            "Business or location is currently inactive",
+            403,
+          );
+        }
+        return errorResponse(
+          "VALIDATION_ERROR",
+          msg.replace(/^[^:]+:\s*/, ""),
           400,
         );
       }
@@ -1567,7 +1671,7 @@ Deno.serve(async (req: Request) => {
         `${userId}:${req.method}:${path}:${canonicalPayload}`,
       );
 
-      // 1. Pre-routing authorization & requote eligibility verification FIRST (0 calls to Google if unauthorized/invalid)
+      // 1. Pre-routing authorization & requote eligibility verification FIRST
       const { data: requoteScope, error: requoteScopeErr } =
         await serviceClient.rpc("verify_requote_scope", {
           p_actor_id: userId,
@@ -1609,13 +1713,6 @@ Deno.serve(async (req: Request) => {
             "QUOTE_INVALID_STATE",
             "Quote is not in a valid state for this operation",
             422,
-          );
-        }
-        if (msg.includes("PRICING_UNAVAILABLE")) {
-          return errorResponse(
-            "PRICING_UNAVAILABLE",
-            "Active pricing version or rules unavailable",
-            503,
           );
         }
         return errorResponse(
@@ -1668,7 +1765,7 @@ Deno.serve(async (req: Request) => {
         while (attempts < 30) {
           await new Promise((r) => setTimeout(r, 100));
           attempts++;
-          const { data: cached } = await serviceClient.rpc(
+          const { data: cached, error: pollErr } = await serviceClient.rpc(
             "get_idempotent_response",
             {
               p_actor_user_id: userId,
@@ -1676,6 +1773,13 @@ Deno.serve(async (req: Request) => {
               p_key: idempotencyKey,
             },
           );
+          if (pollErr) {
+            return errorResponse(
+              "INTERNAL_SERVER_ERROR",
+              "An unexpected error occurred while processing the request",
+              500,
+            );
+          }
           if (cached && cached.response_body) {
             polledResponse = cached;
             break;
@@ -1689,7 +1793,18 @@ Deno.serve(async (req: Request) => {
             { "X-Cache": "HIT" },
           );
         }
+
+        // Bloqueador A: Si sigue IN_FLIGHT tras agotarse el poll -> 409 IDEMPOTENCY_IN_PROGRESS (JAMÁS cae a Google!)
+        return errorResponse(
+          "IDEMPOTENCY_IN_PROGRESS",
+          "Operation is currently in progress, please retry with the same Idempotency-Key",
+          409,
+        );
       }
+
+      // Action must be EXECUTE
+      const reservationToken = leaseData.reservation_token;
+      const leaseGeneration = leaseData.lease_generation;
 
       const pickupLat = Number(requoteScope.pickup_lat);
       const pickupLng = Number(requoteScope.pickup_lng);
@@ -1709,7 +1824,27 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // 3. Fetch Google Routes metrics
+      // 3. Server-Only Active Pricing Verification (Only when action is EXECUTE)
+      const { error: pricingErr } = await serviceClient.rpc(
+        "get_active_pricing_rule",
+        { p_package_type: requoteScope.package_type || "PARCEL" },
+      );
+      if (pricingErr) {
+        await serviceClient.rpc("abort_idempotency_lease", {
+          p_actor_user_id: userId,
+          p_scope: `requote_quote:${quoteId}`,
+          p_key: idempotencyKey,
+          p_reservation_token: reservationToken,
+          p_lease_generation: leaseGeneration,
+        });
+        return errorResponse(
+          "PRICING_UNAVAILABLE",
+          "Active pricing version or rules unavailable",
+          503,
+        );
+      }
+
+      // 4. Fetch Google Routes metrics
       let routeMetrics;
       try {
         routeMetrics = await fetchGoogleRoutes(
@@ -1719,6 +1854,13 @@ Deno.serve(async (req: Request) => {
           dropoffLng,
         );
       } catch (err: any) {
+        await serviceClient.rpc("abort_idempotency_lease", {
+          p_actor_user_id: userId,
+          p_scope: `requote_quote:${quoteId}`,
+          p_key: idempotencyKey,
+          p_reservation_token: reservationToken,
+          p_lease_generation: leaseGeneration,
+        });
         return errorResponse(
           "PRICING_UNAVAILABLE",
           "Pricing version or routing service is currently unavailable",
@@ -1726,17 +1868,44 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // 4. Commit requote creation and idempotent record atomically (Returns 201)
-      return await runIdempotentOp(
-        `requote_quote:${quoteId}`,
-        "create_delivery_requote",
-        {
-          quote_id: quoteId,
-          distance_meters: routeMetrics.distanceMeters,
-          duration_seconds: routeMetrics.durationSeconds,
-          route_calculated_at: routeMetrics.calculatedAt,
-        },
-      );
+      // 5. Commit requote creation and idempotent record atomically with Fencing Token (Returns 201)
+      const { data: requoteCreated, error: requoteCreateErr } =
+        await serviceClient.rpc("create_delivery_requote_atomic", {
+          p_actor_id: userId,
+          p_quote_id: quoteId,
+          p_distance_meters: routeMetrics.distanceMeters,
+          p_duration_seconds: routeMetrics.durationSeconds,
+          p_route_calculated_at: routeMetrics.calculatedAt,
+          p_idempotency_key: idempotencyKey,
+          p_request_fingerprint: fingerprint,
+          p_reservation_token: reservationToken,
+          p_lease_generation: leaseGeneration,
+        });
+
+      if (requoteCreateErr) {
+        const msg = requoteCreateErr.message || "";
+        if (msg.includes("IDEMPOTENCY_LEASE_LOST")) {
+          return errorResponse(
+            "IDEMPOTENCY_LEASE_LOST",
+            "Idempotency lease was lost or expired",
+            409,
+          );
+        }
+        if (msg.includes("IDEMPOTENCY_FINGERPRINT_MISMATCH")) {
+          return errorResponse(
+            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+            "Request payload fingerprint does not match original request",
+            422,
+          );
+        }
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
+        );
+      }
+
+      return jsonResponse(requoteCreated, 201);
     }
 
     // -------------------------------------------------------------

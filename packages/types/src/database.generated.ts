@@ -617,6 +617,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      abort_idempotency_lease: {
+        Args: {
+          p_actor_user_id: string
+          p_key: string
+          p_lease_generation: number
+          p_reservation_token: string
+          p_scope: string
+        }
+        Returns: Json
+      }
       acquire_idempotency_lease: {
         Args: {
           p_actor_user_id: string
@@ -670,6 +680,19 @@ export type Database = {
         }
         Returns: Json
       }
+      complete_idempotent_external_operation: {
+        Args: {
+          p_actor_user_id: string
+          p_key: string
+          p_lease_generation: number
+          p_request_fingerprint: string
+          p_reservation_token: string
+          p_response_body: Json
+          p_response_status: number
+          p_scope: string
+        }
+        Returns: Json
+      }
       create_business: {
         Args: {
           p_actor_id: string
@@ -708,12 +731,47 @@ export type Database = {
         }
         Returns: Json
       }
+      create_delivery_quote_atomic: {
+        Args: {
+          p_actor_id: string
+          p_cash_to_collect: number
+          p_distance_meters: number
+          p_dropoff_address_text: string
+          p_dropoff_lat: number
+          p_dropoff_lng: number
+          p_duration_seconds: number
+          p_idempotency_key: string
+          p_lease_generation: number
+          p_location_id: string
+          p_package_type: string
+          p_recipient_name: string
+          p_recipient_phone: string
+          p_request_fingerprint: string
+          p_reservation_token: string
+          p_route_calculated_at?: string
+        }
+        Returns: Json
+      }
       create_delivery_requote: {
         Args: {
           p_actor_id: string
           p_distance_meters: number
           p_duration_seconds: number
           p_quote_id: string
+          p_route_calculated_at?: string
+        }
+        Returns: Json
+      }
+      create_delivery_requote_atomic: {
+        Args: {
+          p_actor_id: string
+          p_distance_meters: number
+          p_duration_seconds: number
+          p_idempotency_key: string
+          p_lease_generation: number
+          p_quote_id: string
+          p_request_fingerprint: string
+          p_reservation_token: string
           p_route_calculated_at?: string
         }
         Returns: Json
@@ -727,6 +785,10 @@ export type Database = {
           p_request_fingerprint: string
           p_scope: string
         }
+        Returns: Json
+      }
+      get_active_pricing_rule: {
+        Args: { p_package_type?: string }
         Returns: Json
       }
       get_admin_driver_verification_detail: {
@@ -785,6 +847,10 @@ export type Database = {
           p_ttl_seconds?: number
         }
         Returns: undefined
+      }
+      verify_quote_access_scope: {
+        Args: { p_actor_id: string; p_quote_id: string }
+        Returns: Json
       }
       verify_quote_creation_scope: {
         Args: { p_actor_id: string; p_location_id: string }

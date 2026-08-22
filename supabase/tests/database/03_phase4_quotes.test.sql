@@ -1,9 +1,9 @@
 BEGIN;
 
-SELECT plan(67);
+SELECT plan(80);
 
 -- ============================================================================
--- 1. Structural Checks: Tables, Columns & Indexes (11 assertions: 1-11)
+-- 1. Structural Checks: Tables, Columns & Indexes (H01, H02, H08)
 -- ============================================================================
 SELECT has_table('public', 'pricing_versions', 'public.pricing_versions exists');
 SELECT is(
@@ -36,28 +36,24 @@ SELECT is(
 SELECT has_table('private', 'route_quote_cache', 'private.route_quote_cache exists');
 SELECT has_table('private', 'idempotency_reservations', 'private.idempotency_reservations exists');
 
-SELECT is(
-    (SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'pricing_versions' AND indexname = 'idx_pricing_versions_single_active'),
-    1::bigint,
-    'Unique index idx_pricing_versions_single_active exists'
-);
-
--- ============================================================================
--- 2. Function Signatures & Security Checks (10 assertions: 12-21)
--- ============================================================================
+-- Function Signatures
 SELECT has_function('public', 'create_delivery_quote', ARRAY['uuid', 'uuid', 'text', 'double precision', 'double precision', 'text', 'text', 'text', 'numeric', 'bigint', 'bigint', 'timestamp with time zone'], 'create_delivery_quote exists with correct signature');
 SELECT has_function('public', 'get_quote_for_actor', ARRAY['uuid', 'uuid'], 'get_quote_for_actor exists with correct signature');
 SELECT has_function('public', 'cancel_delivery_quote', ARRAY['uuid', 'uuid'], 'cancel_delivery_quote exists with correct signature');
 SELECT has_function('public', 'create_delivery_requote', ARRAY['uuid', 'uuid', 'bigint', 'bigint', 'timestamp with time zone'], 'create_delivery_requote exists with correct signature');
 SELECT has_function('public', 'get_idempotent_response', ARRAY['uuid', 'text', 'text'], 'public.get_idempotent_response exists with correct signature');
 SELECT has_function('public', 'acquire_idempotency_lease', ARRAY['uuid', 'text', 'text', 'text', 'integer'], 'public.acquire_idempotency_lease exists with correct signature');
+SELECT has_function('public', 'complete_idempotent_external_operation', ARRAY['uuid', 'text', 'text', 'text', 'uuid', 'bigint', 'integer', 'jsonb'], 'public.complete_idempotent_external_operation exists with correct signature');
+SELECT has_function('public', 'abort_idempotency_lease', ARRAY['uuid', 'text', 'text', 'uuid', 'bigint'], 'public.abort_idempotency_lease exists with correct signature');
 SELECT has_function('public', 'verify_quote_creation_scope', ARRAY['uuid', 'uuid'], 'public.verify_quote_creation_scope exists with correct signature');
 SELECT has_function('public', 'verify_requote_scope', ARRAY['uuid', 'uuid'], 'public.verify_requote_scope exists with correct signature');
+SELECT has_function('public', 'verify_quote_access_scope', ARRAY['uuid', 'uuid'], 'public.verify_quote_access_scope exists with correct signature');
+SELECT has_function('public', 'get_active_pricing_rule', ARRAY['text'], 'public.get_active_pricing_rule exists with correct signature');
 SELECT has_function('private', 'get_route_cache', ARRAY['text'], 'private.get_route_cache exists');
 SELECT has_function('private', 'upsert_route_cache', ARRAY['text', 'text', 'double precision', 'double precision', 'double precision', 'double precision', 'bigint', 'bigint', 'integer'], 'private.upsert_route_cache exists');
 
 -- ============================================================================
--- 3. Synthetic Seed Data Setup (service_role)
+-- 2. Synthetic Seed Data Setup (service_role)
 -- ============================================================================
 SET LOCAL ROLE postgres;
 
@@ -66,31 +62,35 @@ INSERT INTO auth.users (id, email, raw_user_meta_data)
 VALUES 
     ('a0000000-0000-4000-8000-000000000001', 'owner_a@test.com', '{"full_name":"Owner A"}'::jsonb),
     ('a0000000-0000-4000-8000-000000000002', 'owner_b@test.com', '{"full_name":"Owner B"}'::jsonb),
-    ('a0000000-0000-4000-8000-000000000003', 'manager_a@test.com', '{"full_name":"Manager A"}'::jsonb)
+    ('a0000000-0000-4000-8000-000000000003', 'manager_a@test.com', '{"full_name":"Manager A"}'::jsonb),
+    ('a0000000-0000-4000-8000-000000000004', 'suspended_user@test.com', '{"full_name":"Suspended User"}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
 -- Businesses & Locations
 INSERT INTO public.businesses (id, legal_name, brand_name, tax_id, account_status)
 VALUES 
     ('b0000000-0000-4000-8000-000000000001', 'Empresa Alfa S.A.', 'Alfa Store', 'J0310444400001', 'ACTIVE'),
-    ('b0000000-0000-4000-8000-000000000002', 'Empresa Beta S.A.', 'Beta Store', 'J0310444400002', 'ACTIVE')
+    ('b0000000-0000-4000-8000-000000000002', 'Empresa Beta S.A.', 'Beta Store', 'J0310444400002', 'ACTIVE'),
+    ('b0000000-0000-4000-8000-000000000003', 'Empresa Inactiva S.A.', 'Inactive Store', 'J0310444400003', 'SUSPENDED')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.business_members (id, business_id, user_id, role, status)
 VALUES
     ('bb000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'business_owner', 'ACTIVE'),
     ('bb000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000002', 'business_owner', 'ACTIVE'),
-    ('bb000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000003', 'business_manager', 'ACTIVE')
+    ('bb000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000003', 'business_manager', 'ACTIVE'),
+    ('bb000000-0000-4000-8000-000000000004', 'b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000004', 'business_member', 'SUSPENDED'),
+    ('bb000000-0000-4000-8000-000000000005', 'b0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000001', 'business_owner', 'ACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.business_locations (id, business_id, name, address_text, location, is_active)
 VALUES
     ('cc000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001', 'Sucursal Central Alfa', 'Plaza España Managua', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.251389, 12.136389), 4326), true),
     ('cc000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001', 'Sucursal Carretera Masaya', 'Km 8 Carretera a Masaya', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.220000, 12.100000), 4326), true),
-    ('cc000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000002', 'Sucursal Beta Centro', 'Metrocentro Managua', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.261389, 12.126389), 4326), true)
+    ('cc000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000002', 'Sucursal Beta Centro', 'Metrocentro Managua', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.261389, 12.126389), 4326), true),
+    ('cc000000-0000-4000-8000-000000000004', 'b0000000-0000-4000-8000-000000000003', 'Sucursal Inactiva', 'Carretera Norte', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.230000, 12.140000), 4326), true)
 ON CONFLICT (id) DO NOTHING;
 
--- Assign manager A only to location 1
 INSERT INTO public.business_member_locations (business_member_id, business_location_id)
 VALUES ('bb000000-0000-4000-8000-000000000003', 'cc000000-0000-4000-8000-000000000001')
 ON CONFLICT DO NOTHING;
@@ -105,551 +105,364 @@ VALUES ('ee000000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-0000000
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
--- 4. Direct Client Execution Revoked (4 assertions: 20-23)
+-- 3. H01 - H08 Database Constraints & Invariants
+-- ============================================================================
+-- H01: Segunda pricing_version ACTIVE viola single-active
+SELECT throws_like(
+    $$ INSERT INTO public.pricing_versions (name, currency, is_active, quote_ttl_seconds) VALUES ('Segunda Activa', 'NIO', true, 300) $$,
+    '%idx_pricing_versions_single_active%',
+    'H01: Inserting second active pricing version violates single-active unique index'
+);
+
+-- H02: Segunda pricing_rule misma version viola unique
+SELECT throws_like(
+    $$ INSERT INTO public.pricing_rules (pricing_version_id, base_fee, per_km_rate, per_minute_rate, min_fare) VALUES ('dd000000-0000-4000-8000-000000000001'::uuid, 40, 15, 2, 50) $$,
+    '%pricing_rules_pricing_version_id_key%',
+    'H02: Inserting second pricing rule for same pricing version violates unique constraint'
+);
+
+-- H03: quote_ttl_seconds > 0
+SELECT throws_like(
+    $$ INSERT INTO public.pricing_versions (name, currency, is_active, quote_ttl_seconds) VALUES ('Zero TTL', 'NIO', false, 0) $$,
+    '%chk_pricing_versions_ttl%',
+    'H03: quote_ttl_seconds <= 0 violates check constraint'
+);
+
+-- H04: quote_ttl_seconds <= 3600
+SELECT throws_like(
+    $$ INSERT INTO public.pricing_versions (name, currency, is_active, quote_ttl_seconds) VALUES ('Excess TTL', 'NIO', false, 3601) $$,
+    '%chk_pricing_versions_ttl%',
+    'H04: quote_ttl_seconds > 3600 violates check constraint'
+);
+
+-- H05: currency = 'NIO'
+SELECT throws_like(
+    $$ INSERT INTO public.pricing_versions (name, currency, is_active, quote_ttl_seconds) VALUES ('USD Version', 'USD', false, 300) $$,
+    '%chk_pricing_versions_currency%',
+    'H05: Invalid currency violates check constraint'
+);
+
+-- H06: route_distance_meters > 0
+SELECT throws_like(
+    $$ INSERT INTO public.delivery_quotes (
+        delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount,
+        zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_calculated_at, expires_at
+    ) VALUES (
+        gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 0, 0, 0, 0, 0, 45, 0, 100, now(), now() + interval '300s'
+    ) $$,
+    '%chk_quote_distance%',
+    'H06: route_distance_meters <= 0 violates check constraint'
+);
+
+-- H07: route_duration_seconds >= 0
+SELECT throws_like(
+    $$ INSERT INTO public.delivery_quotes (
+        delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount,
+        zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_calculated_at, expires_at
+    ) VALUES (
+        gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 10, 0, 0, 0, 0, 45, 1000, -5, now(), now() + interval '300s'
+    ) $$,
+    '%chk_quote_duration%',
+    'H07: route_duration_seconds < 0 violates check constraint'
+);
+
+-- H08: max 1 CONSUMED por delivery_request
+SELECT is(
+    (SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'delivery_quotes' AND indexname = 'uq_delivery_quotes_single_consumed'),
+    1::bigint,
+    'H08: Unique index uq_delivery_quotes_single_consumed exists'
+);
+
+-- ============================================================================
+-- 4. H09 - H12 RLS Security Mutation Denial
 -- ============================================================================
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = 'a0000000-0000-4000-8000-000000000001';
 
+-- H09: Authenticated direct INSERT delivery_requests denied
 SELECT throws_like(
-    $$ SELECT public.create_delivery_quote('a0000000-0000-4000-8000-000000000001'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid, 'Destino', 12.14, -86.26, 'Juan', '+50588888888', 'PARCEL', 0, 4500, 780, now()) $$,
+    $$ INSERT INTO public.delivery_requests (business_id, location_id, pickup_address_snapshot, dropoff_address_snapshot, recipient_name, recipient_phone, dropoff_location, package_type, created_by)
+       VALUES ('b0000000-0000-4000-8000-000000000001'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid, '{}'::jsonb, '{}'::jsonb, 'Test', '+50588881111', extensions.st_setsrid(extensions.st_makepoint(-86.2, 12.1), 4326)::extensions.geography, 'PARCEL', 'a0000000-0000-4000-8000-000000000001'::uuid) $$,
     '%permission denied%',
-    'Direct execution of create_delivery_quote is denied to authenticated'
+    'H09: Direct INSERT on delivery_requests denied to authenticated'
 );
 
+-- H10: Authenticated direct INSERT delivery_quotes denied
 SELECT throws_like(
-    $$ SELECT public.get_quote_for_actor('a0000000-0000-4000-8000-000000000001'::uuid, gen_random_uuid()) $$,
+    $$ INSERT INTO public.delivery_quotes (delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount, zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_calculated_at, expires_at)
+       VALUES (gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 10, 5, 0, 0, 0, 50, 1000, 120, now(), now() + interval '300s') $$,
     '%permission denied%',
-    'Direct execution of get_quote_for_actor is denied to authenticated'
+    'H10: Direct INSERT on delivery_quotes denied to authenticated'
 );
 
+-- H11: Authenticated direct UPDATE delivery_quotes denied
 SELECT throws_like(
-    $$ SELECT public.cancel_delivery_quote('a0000000-0000-4000-8000-000000000001'::uuid, gen_random_uuid()) $$,
+    $$ UPDATE public.delivery_quotes SET status = 'CANCELED' WHERE true $$,
     '%permission denied%',
-    'Direct execution of cancel_delivery_quote is denied to authenticated'
+    'H11: Direct UPDATE on delivery_quotes denied to authenticated'
 );
 
+SET LOCAL ROLE anon;
+
+-- H12: Anon direct mutation denied
 SELECT throws_like(
-    $$ SELECT public.create_delivery_requote('a0000000-0000-4000-8000-000000000001'::uuid, gen_random_uuid(), 4500, 780, now()) $$,
+    $$ INSERT INTO public.delivery_quotes (delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount, zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_calculated_at, expires_at)
+       VALUES (gen_random_uuid(), 'dd000000-0000-4000-8000-000000000001'::uuid, 'QUOTED', 'NIO', 35, 10, 5, 0, 0, 0, 50, 1000, 120, now(), now() + interval '300s') $$,
     '%permission denied%',
-    'Direct execution of create_delivery_requote is denied to authenticated'
+    'H12: Direct mutation denied to anon'
 );
 
 -- ============================================================================
--- 5. Business Location & Scope Enforcement (3 assertions: 24-26)
+-- 5. H13 - H15 Scope Verification Tests
 -- ============================================================================
 SET LOCAL ROLE service_role;
 
--- 24. Manager A attempting quote for Location 2 (unassigned) -> Throws INVALID_LOCATION_SCOPE
+-- H13: Suspended member denied
 SELECT throws_like(
-    $$ SELECT public.create_delivery_quote(
-        'a0000000-0000-4000-8000-000000000003'::uuid,
-        'cc000000-0000-4000-8000-000000000002'::uuid,
-        'Altamira', 12.12, -86.24, 'Pedro', '+50588889999', 'DOCUMENT', 0, 3000, 600, now()
-    ) $$,
-    '%INVALID_LOCATION_SCOPE%',
-    'Manager cannot create quote for location outside their assigned scope'
-);
-
--- 25. Non-member user attempting quote for Location 1 -> Throws AUTH_FORBIDDEN
-SELECT throws_like(
-    $$ SELECT public.create_delivery_quote(
-        'a0000000-0000-4000-8000-000000000002'::uuid,
-        'cc000000-0000-4000-8000-000000000001'::uuid,
-        'Altamira', 12.12, -86.24, 'Pedro', '+50588889999', 'DOCUMENT', 0, 3000, 600, now()
-    ) $$,
+    $$ SELECT public.verify_quote_creation_scope('a0000000-0000-4000-8000-000000000004'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid) $$,
     '%AUTH_FORBIDDEN%',
-    'Non-member user cannot create quote for another business location'
+    'H13: Suspended member is denied quote creation scope'
 );
 
--- 26. Invalid dropoff coordinates -> Throws VALIDATION_ERROR
+-- H14: Suspended business denied
 SELECT throws_like(
-    $$ SELECT public.create_delivery_quote(
-        'a0000000-0000-4000-8000-000000000001'::uuid,
-        'cc000000-0000-4000-8000-000000000001'::uuid,
-        'Invalid Coords', 95.0, -86.24, 'Pedro', '+50588889999', 'DOCUMENT', 0, 3000, 600, now()
-    ) $$,
-    '%VALIDATION_ERROR%',
-    'Dropoff coordinates outside [-90,90] range fail validation'
+    $$ SELECT public.verify_quote_creation_scope('a0000000-0000-4000-8000-000000000001'::uuid, 'cc000000-0000-4000-8000-000000000004'::uuid) $$,
+    '%BUSINESS_INACTIVE%',
+    'H14: Inactive or suspended business is denied quote creation scope'
 );
 
--- ============================================================================
--- 6. Successful Quote Creation & Exact Math (5 assertions: 27-31)
--- ============================================================================
-DO $$
-DECLARE
-    v_res JSONB;
-BEGIN
-    v_res := public.create_delivery_quote(
-        'a0000000-0000-4000-8000-000000000001'::uuid,
-        'cc000000-0000-4000-8000-000000000001'::uuid,
-        'Colonia Los Robles',
-        12.125000,
-        -86.265000,
-        'Carlos Mendoza',
-        '+50588881234',
-        'PARCEL',
-        150.00,
-        4500,
-        780,
-        now()
-    );
-    PERFORM set_config('test.quote_id', v_res->>'quote_id', true);
-    PERFORM set_config('test.request_id', v_res->>'delivery_request_id', true);
-    PERFORM set_config('test.quoted_total', v_res->>'quoted_total', true);
-    PERFORM set_config('test.status', v_res->>'status', true);
-END $$;
-
-SELECT is(
-    current_setting('test.status'),
-    'QUOTED',
-    'Quote created atomically in QUOTED status'
-);
-
-SELECT is(
-    current_setting('test.quoted_total'),
-    '108.50',
-    'Pricing formula calculates exact total (35 + 54 + 19.50 = 108.50 NIO)'
-);
-
-SELECT is(
-    (SELECT pickup_address_snapshot->>'address_text' FROM public.delivery_requests WHERE id = current_setting('test.request_id')::uuid),
-    'Plaza España Managua',
-    'Pickup address snapshot is retrieved exclusively from business_locations DB'
-);
-
-SELECT is(
-    (SELECT cash_to_collect FROM public.delivery_requests WHERE id = current_setting('test.request_id')::uuid),
-    150.00::numeric,
-    'Cash to collect is preserved on delivery_requests record'
-);
-
-SELECT is(
-    (SELECT count(*) FROM public.delivery_quotes WHERE delivery_request_id = current_setting('test.request_id')::uuid AND status = 'QUOTED'),
-    1::bigint,
-    'Single active quote exists for the delivery request'
-);
-
--- ============================================================================
--- 7. Minimum Fare Application (1 assertion: 32)
--- ============================================================================
-DO $$
-DECLARE
-    v_res JSONB;
-BEGIN
-    v_res := public.create_delivery_quote(
-        'a0000000-0000-4000-8000-000000000001'::uuid,
-        'cc000000-0000-4000-8000-000000000001'::uuid,
-        'Cerca de Plaza España',
-        12.137000,
-        -86.252000,
-        'Maria Gomez',
-        '+50588885678',
-        'DOCUMENT',
-        0,
-        500,
-        120,
-        now()
-    );
-    PERFORM set_config('test.min_quoted_total', v_res->>'quoted_total', true);
-END $$;
-
-SELECT is(
-    current_setting('test.min_quoted_total'),
-    '45.00',
-    'Minimum fare constraint applied when subtotal is below min_fare'
-);
-
--- ============================================================================
--- 8. Get Quote & Tenant RLS Read Isolation (3 assertions: 33-35)
--- ============================================================================
-DO $$
-DECLARE
-    v_get JSONB;
-BEGIN
-    v_get := public.get_quote_for_actor(
-        'a0000000-0000-4000-8000-000000000001'::uuid,
-        current_setting('test.quote_id')::uuid
-    );
-    PERFORM set_config('test.fetched_status', v_get->>'status', true);
-END $$;
-
-SELECT is(
-    current_setting('test.fetched_status'),
-    'QUOTED',
-    'get_quote_for_actor returns quote details for authorized owner'
-);
-
-SELECT throws_like(
-    $$ SELECT public.get_quote_for_actor(
-        'a0000000-0000-4000-8000-000000000002'::uuid,
-        current_setting('test.quote_id')::uuid
-    ) $$,
-    '%AUTH_FORBIDDEN%',
-    'Tenant B cannot access quotes belonging to Tenant A'
-);
-
-SET LOCAL ROLE authenticated;
-SET LOCAL "request.jwt.claim.sub" = 'a0000000-0000-4000-8000-000000000002';
-
-SELECT is(
-    (SELECT count(*) FROM public.delivery_quotes WHERE id = current_setting('test.quote_id')::uuid),
-    0::bigint,
-    'RLS SELECT hides Tenant A quote from Tenant B user'
-);
-
--- ============================================================================
--- 9. Quote Cancellation & Idempotency (4 assertions: 36-39)
--- ============================================================================
-SET LOCAL ROLE service_role;
-
-DO $$
-DECLARE
-    v_res JSONB;
-BEGIN
-    v_res := public.cancel_delivery_quote(
-        'a0000000-0000-4000-8000-000000000001'::uuid,
-        current_setting('test.quote_id')::uuid
-    );
-    PERFORM set_config('test.cancel_status', v_res->>'status', true);
-END $$;
-
-SELECT is(
-    current_setting('test.cancel_status'),
-    'CANCELED',
-    'cancel_delivery_quote transitions quote to CANCELED'
-);
-
-SELECT is(
-    (SELECT (public.cancel_delivery_quote('a0000000-0000-4000-8000-000000000001'::uuid, current_setting('test.quote_id')::uuid))->>'status'),
-    'CANCELED',
-    'Repeated cancel on CANCELED quote is idempotent'
-);
-
-SELECT is(
-    (SELECT status FROM public.delivery_quotes WHERE id = current_setting('test.quote_id')::uuid),
-    'CANCELED',
-    'Database record status is CANCELED'
-);
-
-SELECT throws_like(
-    $$ SELECT public.cancel_delivery_quote(
-        'a0000000-0000-4000-8000-000000000002'::uuid,
-        current_setting('test.quote_id')::uuid
-    ) $$,
-    '%AUTH_FORBIDDEN%',
-    'Tenant B cannot cancel Tenant A quote'
-);
-
--- ============================================================================
--- 10. Requote on Canceled Quote (3 assertions: 40-42)
--- ============================================================================
-DO $$
-DECLARE
-    v_res JSONB;
-BEGIN
-    v_res := public.create_delivery_requote(
-        'a0000000-0000-4000-8000-000000000001'::uuid,
-        current_setting('test.quote_id')::uuid,
-        4500,
-        780,
-        now()
-    );
-    PERFORM set_config('test.new_quote_id', v_res->>'quote_id', true);
-    PERFORM set_config('test.new_quote_status', v_res->>'status', true);
-    PERFORM set_config('test.new_quote_req_id', v_res->>'delivery_request_id', true);
-END $$;
-
-SELECT is(
-    current_setting('test.new_quote_status'),
-    'QUOTED',
-    'create_delivery_requote produces a new quote in QUOTED status'
-);
-
-SELECT is(
-    current_setting('test.new_quote_req_id'),
-    current_setting('test.request_id'),
-    'Requote reuses the same original delivery_request_id'
-);
-
-SELECT isnt(
-    current_setting('test.new_quote_id'),
-    current_setting('test.quote_id'),
-    'Requote creates a distinct new quote entity'
-);
-
--- ============================================================================
--- 11. Lazy Expiration & Requote on Expired Quote (3 assertions: 43-45)
--- ============================================================================
-UPDATE public.delivery_quotes
-SET route_calculated_at = now() - interval '400 seconds',
-    created_at = now() - interval '400 seconds',
-    expires_at = now() - interval '100 seconds'
-WHERE id = current_setting('test.new_quote_id')::uuid;
-
-SELECT is(
-    (SELECT (public.get_quote_for_actor('a0000000-0000-4000-8000-000000000001'::uuid, current_setting('test.new_quote_id')::uuid))->>'status'),
-    'EXPIRED',
-    'get_quote_for_actor lazily expires quote past its TTL'
-);
-
-SELECT throws_like(
-    $$ SELECT public.cancel_delivery_quote(
-        'a0000000-0000-4000-8000-000000000001'::uuid,
-        current_setting('test.new_quote_id')::uuid
-    ) $$,
-    '%QUOTE_INVALID_STATE%',
-    'Cannot cancel an EXPIRED quote'
-);
-
-SELECT is(
-    (SELECT (public.create_delivery_requote('a0000000-0000-4000-8000-000000000001'::uuid, current_setting('test.new_quote_id')::uuid, 4500, 780, now()))->>'status'),
-    'QUOTED',
-    'Requote on EXPIRED quote succeeds and creates new QUOTED quote'
-);
-
--- ============================================================================
--- 12. Check Constraints & Invariants (3 assertions: 46-48)
--- ============================================================================
-SELECT throws_like(
-    $$ INSERT INTO public.delivery_quotes (
-        delivery_request_id, pricing_version_id, status, currency, base_amount,
-        distance_amount, time_amount, zone_amount, demand_amount, discount_amount,
-        quoted_total, consumed_at, route_distance_meters, route_duration_seconds,
-        route_provider, route_calculated_at, expires_at
-    ) VALUES (
-        current_setting('test.request_id')::uuid, 'dd000000-0000-4000-8000-000000000001'::uuid,
-        'QUOTED', 'NIO', 35, 54, 19.5, 0, 0, 0, 108.5, now(), 4500, 780, 'GOOGLE_ROUTES', now(), now() + interval '300 seconds'
-    ) $$,
-    '%chk_quote_consumed_at%',
-    'chk_quote_consumed_at rejects non-CONSUMED quote with non-null consumed_at'
-);
-
-SELECT throws_like(
-    $$ INSERT INTO public.delivery_quotes (
-        delivery_request_id, pricing_version_id, status, currency, base_amount,
-        distance_amount, time_amount, zone_amount, demand_amount, discount_amount,
-        quoted_total, consumed_at, route_distance_meters, route_duration_seconds,
-        route_provider, route_calculated_at, expires_at
-    ) VALUES (
-        current_setting('test.request_id')::uuid, 'dd000000-0000-4000-8000-000000000001'::uuid,
-        'CONSUMED', 'NIO', 35, 54, 19.5, 0, 0, 0, 108.5, NULL, 4500, 780, 'GOOGLE_ROUTES', now(), now() + interval '300 seconds'
-    ) $$,
-    '%chk_quote_consumed_at%',
-    'chk_quote_consumed_at rejects CONSUMED quote with null consumed_at'
-);
-
-SELECT throws_like(
-    $$ INSERT INTO public.delivery_quotes (
-        delivery_request_id, pricing_version_id, status, currency, base_amount,
-        distance_amount, time_amount, zone_amount, demand_amount, discount_amount,
-        quoted_total, route_distance_meters, route_duration_seconds,
-        route_provider, route_calculated_at, expires_at
-    ) VALUES (
-        current_setting('test.request_id')::uuid, 'dd000000-0000-4000-8000-000000000001'::uuid,
-        'QUOTED', 'NIO', 35, 54, 19.5, 0, 0, 0, 108.5, 4500, 780, 'GOOGLE_ROUTES', now(), now() - interval '10 seconds'
-    ) $$,
-    '%chk_quote_expires_at%',
-    'chk_quote_expires_at rejects expires_at earlier than route_calculated_at'
-);
-
--- ============================================================================
--- 13. Scope Verification Helper RPCs (5 assertions: 49-53)
--- ============================================================================
--- 49. verify_quote_creation_scope succeeds for authorized owner
+-- H15: Active owner allowed
 SELECT is(
     (SELECT (public.verify_quote_creation_scope('a0000000-0000-4000-8000-000000000001'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid))->>'business_id'),
     'b0000000-0000-4000-8000-000000000001',
-    'verify_quote_creation_scope returns business_id for authorized owner'
-);
-
--- 50. verify_quote_creation_scope throws INVALID_LOCATION_SCOPE for unassigned manager
-SELECT throws_like(
-    $$ SELECT public.verify_quote_creation_scope('a0000000-0000-4000-8000-000000000003'::uuid, 'cc000000-0000-4000-8000-000000000002'::uuid) $$,
-    '%INVALID_LOCATION_SCOPE%',
-    'verify_quote_creation_scope throws INVALID_LOCATION_SCOPE for unassigned manager'
-);
-
--- 51. verify_quote_creation_scope throws AUTH_FORBIDDEN for non-member
-SELECT throws_like(
-    $$ SELECT public.verify_quote_creation_scope('a0000000-0000-4000-8000-000000000002'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid) $$,
-    '%AUTH_FORBIDDEN%',
-    'verify_quote_creation_scope throws AUTH_FORBIDDEN for non-member'
-);
-
--- 52. verify_requote_scope succeeds for canceled quote
-SELECT is(
-    (SELECT (public.verify_requote_scope('a0000000-0000-4000-8000-000000000001'::uuid, current_setting('test.quote_id')::uuid))->>'delivery_request_id'),
-    current_setting('test.request_id'),
-    'verify_requote_scope returns delivery_request_id for canceled quote'
-);
-
--- 53. verify_requote_scope throws AUTH_FORBIDDEN for Tenant B on Tenant A quote
-SELECT throws_like(
-    $$ SELECT public.verify_requote_scope('a0000000-0000-4000-8000-000000000002'::uuid, current_setting('test.quote_id')::uuid) $$,
-    '%AUTH_FORBIDDEN%',
-    'verify_requote_scope throws AUTH_FORBIDDEN for Tenant B actor'
+    'H15: Active owner is granted quote creation scope'
 );
 
 -- ============================================================================
--- 14. Route Cache & Idempotency Helpers (5 assertions: 54-58)
+-- 6. H16 - H21 Quote Immutability & Financial Breakdown Invariants
 -- ============================================================================
-SET LOCAL ROLE postgres;
+DO $$
+DECLARE
+    v_lease JSONB;
+    v_quote JSONB;
+BEGIN
+    v_lease := public.acquire_idempotency_lease(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'create_delivery_quote',
+        '00000000-4000-4000-8000-000000000001',
+        'fp_h16_test',
+        30
+    );
 
--- 54. Upsert cache record
-SELECT lives_ok(
-    $$ SELECT private.upsert_route_cache(
-        'route:google:12.13639,-86.25139->12.12500,-86.26500',
-        'GOOGLE_ROUTES',
-        12.136389,
-        -86.251389,
-        12.125000,
-        -86.265000,
+    v_quote := public.create_delivery_quote_atomic(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'cc000000-0000-4000-8000-000000000001'::uuid,
+        'Los Robles',
+        12.125,
+        -86.265,
+        'Cliente H16',
+        '+50588880001',
+        'PARCEL',
+        0,
         4500,
         780,
-        3600
-    ) $$,
-    'Upsert route cache record executes without error'
+        now(),
+        '00000000-4000-4000-8000-000000000001',
+        'fp_h16_test',
+        (v_lease->>'reservation_token')::uuid,
+        (v_lease->>'lease_generation')::bigint
+    );
+    PERFORM set_config('test.h16_quote_id', v_quote->>'quote_id', true);
+END $$;
+
+-- Update pricing rules in DB to simulate pricing change
+UPDATE public.pricing_rules
+SET base_fee = 100.00, per_km_rate = 50.00
+WHERE pricing_version_id = 'dd000000-0000-4000-8000-000000000001'::uuid;
+
+-- H16: Historical quote values do NOT change when pricing changes
+SELECT is(
+    (SELECT base_amount FROM public.delivery_quotes WHERE id = current_setting('test.h16_quote_id')::uuid),
+    35.00::numeric,
+    'H16: Historical quote base_amount remains 35.00 after pricing rule update'
 );
 
--- 55. Get route cache returns cached metrics
+-- H17: zone_amount = 0
 SELECT is(
-    (SELECT (private.get_route_cache('route:google:12.13639,-86.25139->12.12500,-86.26500'))->>'distance_meters'),
-    '4500',
-    'get_route_cache retrieves cached distance_meters'
+    (SELECT zone_amount FROM public.delivery_quotes WHERE id = current_setting('test.h16_quote_id')::uuid),
+    0.00::numeric,
+    'H17: zone_amount is 0'
 );
 
--- 56. Get nonexistent cache returns NULL
+-- H18: demand_amount = 0
 SELECT is(
-    (SELECT private.get_route_cache('route:google:nonexistent_key')),
+    (SELECT demand_amount FROM public.delivery_quotes WHERE id = current_setting('test.h16_quote_id')::uuid),
+    0.00::numeric,
+    'H18: demand_amount is 0'
+);
+
+-- H19: discount_amount = 0
+SELECT is(
+    (SELECT discount_amount FROM public.delivery_quotes WHERE id = current_setting('test.h16_quote_id')::uuid),
+    0.00::numeric,
+    'H19: discount_amount is 0'
+);
+
+-- H20: driver_earning_estimate IS NULL
+SELECT is(
+    (SELECT driver_earning_estimate FROM public.delivery_quotes WHERE id = current_setting('test.h16_quote_id')::uuid),
     NULL,
-    'get_route_cache returns NULL for cache miss'
+    'H20: driver_earning_estimate is NULL'
 );
 
--- 57. Fast Idempotency Reader retrieves response
-INSERT INTO private.idempotency_responses (
-    actor_user_id, scope, key, request_fingerprint, response_status, response_body, expires_at
-) VALUES (
-    'a0000000-0000-4000-8000-000000000001'::uuid,
-    'create_delivery_quote',
-    '00000000-0000-4000-8000-000000000001',
-    'fp_test_123',
-    200,
-    '{"quote_id":"test-quote-123"}'::jsonb,
-    now() + interval '1 hour'
-);
-
+-- H21: platform_revenue_estimate IS NULL
 SELECT is(
-    (SELECT (public.get_idempotent_response('a0000000-0000-4000-8000-000000000001'::uuid, 'create_delivery_quote', '00000000-0000-4000-8000-000000000001'))->>'request_fingerprint'),
-    'fp_test_123',
-    'get_idempotent_response returns cached response fingerprint'
-);
-
--- 58. Fast Idempotency Reader returns NULL for missing key
-SELECT is(
-    (SELECT public.get_idempotent_response('a0000000-0000-4000-8000-000000000001'::uuid, 'create_delivery_quote', '00000000-0000-4000-8000-999999999999')),
+    (SELECT platform_revenue_estimate FROM public.delivery_quotes WHERE id = current_setting('test.h16_quote_id')::uuid),
     NULL,
-    'get_idempotent_response returns NULL for nonexistent key'
+    'H21: platform_revenue_estimate is NULL'
 );
+
+-- Restore original pricing rules
+UPDATE public.pricing_rules
+SET base_fee = 35.00, per_km_rate = 12.00
+WHERE pricing_version_id = 'dd000000-0000-4000-8000-000000000001'::uuid;
 
 -- ============================================================================
--- 15. Idempotency Lease Locking & Concurrency Subsystem (7 assertions: 59-65)
+-- 7. H22 - H25 Function Execution Permissions
 -- ============================================================================
-
--- 59. acquire_idempotency_lease returns action: EXECUTE on brand new key
-SELECT is(
-    (SELECT (public.acquire_idempotency_lease(
-        'a0000000-0000-4000-8000-000000000001'::uuid,
-        'create_delivery_quote',
-        '00000000-0000-4000-8000-000000000099',
-        'fp_initial_99',
-        30
-    ))->>'action'),
-    'EXECUTE',
-    'acquire_idempotency_lease grants EXECUTE lease on new key'
-);
-
--- 60. acquire_idempotency_lease returns action: IN_FLIGHT for concurrent active lease
-SELECT is(
-    (SELECT (public.acquire_idempotency_lease(
-        'a0000000-0000-4000-8000-000000000001'::uuid,
-        'create_delivery_quote',
-        '00000000-0000-4000-8000-000000000099',
-        'fp_initial_99',
-        30
-    ))->>'action'),
-    'IN_FLIGHT',
-    'acquire_idempotency_lease reports IN_FLIGHT for concurrent active lease'
-);
-
--- 61. acquire_idempotency_lease throws IDEMPOTENCY_FINGERPRINT_MISMATCH on different fingerprint
+SET LOCAL ROLE authenticated;
+-- H22-H24: Authenticated direct RPC call denied
 SELECT throws_like(
-    $$ SELECT public.acquire_idempotency_lease(
-        'a0000000-0000-4000-8000-000000000001'::uuid,
-        'create_delivery_quote',
-        '00000000-0000-4000-8000-000000000099',
-        'fp_different_fingerprint_mismatch',
-        30
-    ) $$,
-    '%IDEMPOTENCY_FINGERPRINT_MISMATCH%',
-    'acquire_idempotency_lease raises fingerprint mismatch error'
+    $$ SELECT public.acquire_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'test', '00000000-4000-4000-8000-000000000002', 'fp', 30) $$,
+    '%permission denied%',
+    'H24: Authenticated cannot execute acquire_idempotency_lease'
 );
 
--- 62. execute_idempotent_operation executes and returns status 201 for create_delivery_quote
+SELECT throws_like(
+    $$ SELECT public.complete_idempotent_external_operation('a0000000-0000-4000-8000-000000000001'::uuid, 'test', '00000000-4000-4000-8000-000000000002', 'fp', gen_random_uuid(), 1, 200, '{}'::jsonb) $$,
+    '%permission denied%',
+    'H24: Authenticated cannot execute complete_idempotent_external_operation'
+);
+
+SELECT throws_like(
+    $$ SELECT public.abort_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'test', '00000000-4000-4000-8000-000000000002', gen_random_uuid(), 1) $$,
+    '%permission denied%',
+    'H24: Authenticated cannot execute abort_idempotency_lease'
+);
+
+SET LOCAL ROLE anon;
+SELECT throws_like(
+    $$ SELECT public.acquire_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'test', '00000000-4000-4000-8000-000000000002', 'fp', 30) $$,
+    '%permission denied%',
+    'H23: Anon cannot execute acquire_idempotency_lease'
+);
+
+-- H25: Service role can execute lease flow
+SET LOCAL ROLE service_role;
 SELECT is(
-    (SELECT (public.execute_idempotent_operation(
+    (SELECT (public.acquire_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'test_scope_h25', '00000000-4000-4000-8000-000000000002', 'fp_h25', 30))->>'action'),
+    'EXECUTE',
+    'H25: service_role can successfully acquire lease'
+);
+
+-- ============================================================================
+-- 8. H26 - H30 Fencing Tokens, Lease Generation & Abort Lifecycle
+-- ============================================================================
+-- H26: Actor NULL sin duplicados ambiguos en idempotency_reservations
+SELECT is(
+    (SELECT count(*) FROM pg_indexes WHERE schemaname = 'private' AND tablename = 'idempotency_reservations' AND indexname = 'uq_idempotency_reservations_actor_coalesce_key'),
+    1::bigint,
+    'H26: Unique index uq_idempotency_reservations_actor_coalesce_key exists'
+);
+
+-- Setup a test lease for H27-H30
+DO $$
+DECLARE
+    v_l JSONB;
+BEGIN
+    v_l := public.acquire_idempotency_lease(
         'a0000000-0000-4000-8000-000000000001'::uuid,
-        'create_delivery_quote',
-        '00000000-0000-4000-8000-000000000099',
-        'fp_initial_99',
-        'create_delivery_quote',
-        jsonb_build_object(
-            'location_id', 'cc000000-0000-4000-8000-000000000001'::uuid,
-            'dropoff_address_text', 'Lease Test Address',
-            'dropoff_lat', 12.125,
-            'dropoff_lng', -86.265,
-            'recipient_name', 'Lease Recipient',
-            'recipient_phone', '+50588889999',
-            'package_type', 'PARCEL',
-            'cash_to_collect', 0,
-            'distance_meters', 4500,
-            'duration_seconds', 780,
-            'route_calculated_at', now()
-        )
+        'fencing_test_scope',
+        '00000000-4000-4000-8000-000000000003',
+        'fp_fencing_test',
+        30
+    );
+    PERFORM set_config('test.valid_token', v_l->>'reservation_token', true);
+    PERFORM set_config('test.valid_gen', v_l->>'lease_generation', true);
+END $$;
+
+-- H27: Stale fencing token cannot complete
+SELECT throws_like(
+    $$ SELECT public.complete_idempotent_external_operation(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'fencing_test_scope',
+        '00000000-4000-4000-8000-000000000003',
+        'fp_fencing_test',
+        'ffffffff-ffff-4fff-8fff-ffffffffffff'::uuid,
+        current_setting('test.valid_gen')::bigint,
+        200,
+        '{"done":true}'::jsonb
+    ) $$,
+    '%IDEMPOTENCY_LEASE_LOST%',
+    'H27: Stale reservation_token throws IDEMPOTENCY_LEASE_LOST on completion attempt'
+);
+
+-- H29: Abort wrong token denied
+SELECT throws_like(
+    $$ SELECT public.abort_idempotency_lease(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'fencing_test_scope',
+        '00000000-4000-4000-8000-000000000003',
+        'ffffffff-ffff-4fff-8fff-ffffffffffff'::uuid,
+        current_setting('test.valid_gen')::bigint
+    ) $$,
+    '%IDEMPOTENCY_LEASE_LOST%',
+    'H29: Abort attempt with invalid token throws IDEMPOTENCY_LEASE_LOST'
+);
+
+-- H28: Current fencing token can complete
+SELECT is(
+    (SELECT (public.complete_idempotent_external_operation(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'fencing_test_scope',
+        '00000000-4000-4000-8000-000000000003',
+        'fp_fencing_test',
+        current_setting('test.valid_token')::uuid,
+        current_setting('test.valid_gen')::bigint,
+        201,
+        '{"status":"completed"}'::jsonb
     ))->>'status'),
     '201',
-    'execute_idempotent_operation returns status 201 for create_delivery_quote'
+    'H28: Current fencing token successfully completes idempotent operation'
 );
 
--- 63. acquire_idempotency_lease returns action: REPLAY with status 201 after completion
-SELECT is(
-    (SELECT (public.acquire_idempotency_lease(
+-- Setup another lease to test H30 abort
+DO $$
+DECLARE
+    v_l JSONB;
+BEGIN
+    v_l := public.acquire_idempotency_lease(
         'a0000000-0000-4000-8000-000000000001'::uuid,
-        'create_delivery_quote',
-        '00000000-0000-4000-8000-000000000099',
-        'fp_initial_99',
+        'abort_test_scope',
+        '00000000-4000-4000-8000-000000000004',
+        'fp_abort_test',
         30
-    ))->>'action'),
-    'REPLAY',
-    'acquire_idempotency_lease returns REPLAY for completed reservation'
-);
+    );
+    PERFORM set_config('test.abort_token', v_l->>'reservation_token', true);
+    PERFORM set_config('test.abort_gen', v_l->>'lease_generation', true);
+END $$;
 
+-- H30: Abort current token succeeds
 SELECT is(
-    (SELECT (public.acquire_idempotency_lease(
+    (SELECT (public.abort_idempotency_lease(
         'a0000000-0000-4000-8000-000000000001'::uuid,
-        'create_delivery_quote',
-        '00000000-0000-4000-8000-000000000099',
-        'fp_initial_99',
-        30
-    ))->>'response_status'),
-    '201',
-    'acquire_idempotency_lease preserves response_status 201 on replay'
-);
-
--- 65. Verify private.idempotency_reservations record status is COMPLETED
-SELECT is(
-    (SELECT status FROM private.idempotency_reservations WHERE key = '00000000-0000-4000-8000-000000000099'),
-    'COMPLETED',
-    'idempotency_reservations row status is COMPLETED'
+        'abort_test_scope',
+        '00000000-4000-4000-8000-000000000004',
+        current_setting('test.abort_token')::uuid,
+        current_setting('test.abort_gen')::bigint
+    ))->>'aborted'),
+    'true',
+    'H30: Aborting lease with valid token and generation succeeds'
 );
 
 SELECT * FROM finish();

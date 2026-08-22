@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useAuth } from "../../src/context/auth-context";
 import { getSupabaseClient } from "../../src/supabase";
+import { IdempotentIntentManager } from "@gueguense/domain";
 import type { PackageType } from "@gueguense/types";
 import type { QuoteResponse } from "@gueguense/schemas";
 
@@ -21,19 +22,9 @@ const PACKAGE_TYPES: PackageType[] = [
   "BULKY",
 ];
 
-function generateUuidV4(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
 export default function BusinessDashboardScreen() {
   const { identity, session, signOut } = useAuth();
+  const intentManager = useRef(new IdempotentIntentManager()).current;
 
   // Locations state
   const [locations, setLocations] = useState<
@@ -50,8 +41,6 @@ export default function BusinessDashboardScreen() {
   const [dropoffLng, setDropoffLng] = useState("");
   const [packageType, setPackageType] = useState<PackageType>("PARCEL");
   const [cashToCollect, setCashToCollect] = useState("0");
-  const [idempotencyKey, setIdempotencyKey] =
-    useState<string>(generateUuidV4());
 
   // UI state
   const [submitting, setSubmitting] = useState(false);
@@ -119,20 +108,25 @@ export default function BusinessDashboardScreen() {
     setSubmitting(true);
     setErrorMessage(null);
 
-    try {
-      const payload = {
-        location_id: selectedLocationId,
-        dropoff_address: {
-          address_text: dropoffAddress.trim(),
-          latitude: lat,
-          longitude: lng,
-        },
-        recipient_name: recipientName.trim(),
-        recipient_phone: recipientPhone.trim(),
-        package_type: packageType,
-        cash_to_collect: parseFloat(cashToCollect) || 0,
-      };
+    const payload = {
+      location_id: selectedLocationId,
+      dropoff_address: {
+        address_text: dropoffAddress.trim(),
+        latitude: lat,
+        longitude: lng,
+      },
+      recipient_name: recipientName.trim(),
+      recipient_phone: recipientPhone.trim(),
+      package_type: packageType,
+      cash_to_collect: parseFloat(cashToCollect) || 0,
+    };
 
+    const idempotencyKey = intentManager.getOrCreateKey(
+      "quote:create",
+      payload,
+    );
+
+    try {
       const res = await fetch(
         `${process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321"}/functions/v1/api-v1/quotes`,
         {
@@ -153,11 +147,10 @@ export default function BusinessDashboardScreen() {
         );
       } else {
         setQuoteResult(data);
-        // Refresh key for next distinct quote intention
-        setIdempotencyKey(generateUuidV4());
+        intentManager.clear("quote:create");
       }
     } catch {
-      // On network failure, preserve idempotencyKey for retry attempt
+      // On network failure, the same idempotencyKey is preserved for the next retry with same payload
       setErrorMessage("Error de conexión al cotizar el envío");
     } finally {
       setSubmitting(false);
@@ -169,8 +162,13 @@ export default function BusinessDashboardScreen() {
     setActionLoading(true);
     setErrorMessage(null);
 
+    const cancelPayload = { quote_id: quoteResult.quote_id };
+    const idempotencyKey = intentManager.getOrCreateKey(
+      "quote:cancel",
+      cancelPayload,
+    );
+
     try {
-      const idempotencyKey = generateUuidV4();
       const res = await fetch(
         `${process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321"}/functions/v1/api-v1/quotes/${quoteResult.quote_id}/cancel`,
         {
@@ -191,8 +189,10 @@ export default function BusinessDashboardScreen() {
         );
       } else {
         setQuoteResult({ ...quoteResult, status: "CANCELED" });
+        intentManager.clear("quote:cancel");
       }
     } catch {
+      // Key is preserved in intentManager for network retry
       setErrorMessage("Error de conexión al cancelar la cotización");
     } finally {
       setActionLoading(false);
@@ -204,8 +204,13 @@ export default function BusinessDashboardScreen() {
     setActionLoading(true);
     setErrorMessage(null);
 
+    const requotePayload = { quote_id: quoteResult.quote_id };
+    const idempotencyKey = intentManager.getOrCreateKey(
+      "quote:requote",
+      requotePayload,
+    );
+
     try {
-      const idempotencyKey = generateUuidV4();
       const res = await fetch(
         `${process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321"}/functions/v1/api-v1/quotes/${quoteResult.quote_id}/requote`,
         {
@@ -224,8 +229,10 @@ export default function BusinessDashboardScreen() {
         setErrorMessage(data.error?.message || "No se pudo recotizar");
       } else {
         setQuoteResult(data);
+        intentManager.clear("quote:requote");
       }
     } catch {
+      // Key is preserved in intentManager for network retry
       setErrorMessage("Error de conexión al recotizar");
     } finally {
       setActionLoading(false);
@@ -235,6 +242,7 @@ export default function BusinessDashboardScreen() {
   const handleResetForm = () => {
     setQuoteResult(null);
     setErrorMessage(null);
+    intentManager.clear();
   };
 
   return (
