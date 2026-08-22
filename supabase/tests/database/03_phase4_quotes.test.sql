@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(65);
+SELECT plan(78);
 
 -- ============================================================================
 -- 1. Structural Checks: Tables, Columns & Indexes (H01 - H08)
@@ -357,7 +357,40 @@ WHERE pricing_version_id = 'dd000000-0000-4000-8000-000000000001'::uuid;
 -- ============================================================================
 -- 7. Exhaustive ACL Permissions Testing (PUBLIC, anon, authenticated, service_role)
 -- ============================================================================
--- 7.1 PUBLIC / Anon Permissions
+-- 7.1 PUBLIC Permissions (Catalog Inspection: 5/5 NO EXECUTE)
+SET LOCAL ROLE postgres;
+
+SELECT is(
+    has_function_privilege('public', 'public.acquire_idempotency_lease(uuid, text, text, text, integer)', 'EXECUTE'),
+    false,
+    'ACL PUBLIC: acquire_idempotency_lease denied'
+);
+
+SELECT is(
+    has_function_privilege('public', 'public.complete_idempotent_external_operation(uuid, text, text, text, uuid, bigint, integer, jsonb)', 'EXECUTE'),
+    false,
+    'ACL PUBLIC: complete_idempotent_external_operation denied'
+);
+
+SELECT is(
+    has_function_privilege('public', 'public.abort_idempotency_lease(uuid, text, text, uuid, bigint)', 'EXECUTE'),
+    false,
+    'ACL PUBLIC: abort_idempotency_lease denied'
+);
+
+SELECT is(
+    has_function_privilege('public', 'public.create_delivery_quote_atomic(uuid, uuid, text, double precision, double precision, text, text, text, numeric, bigint, bigint, timestamp with time zone, text, text, uuid, bigint)', 'EXECUTE'),
+    false,
+    'ACL PUBLIC: create_delivery_quote_atomic denied'
+);
+
+SELECT is(
+    has_function_privilege('public', 'public.create_delivery_requote_atomic(uuid, uuid, bigint, bigint, timestamp with time zone, text, text, uuid, bigint)', 'EXECUTE'),
+    false,
+    'ACL PUBLIC: create_delivery_requote_atomic denied'
+);
+
+-- 7.2 Anon Permissions (5/5 NO EXECUTE)
 SET LOCAL ROLE anon;
 
 SELECT throws_like(
@@ -390,7 +423,7 @@ SELECT throws_like(
     'ACL anon: create_delivery_requote_atomic denied'
 );
 
--- 7.2 Authenticated Permissions
+-- 7.3 Authenticated Permissions (5/5 NO EXECUTE)
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = 'a0000000-0000-4000-8000-000000000001';
 
@@ -424,13 +457,37 @@ SELECT throws_like(
     'ACL authenticated: create_delivery_requote_atomic denied'
 );
 
--- 7.3 service_role Permissions
+-- 7.4 service_role Permissions (5/5 EXECUTE)
 SET LOCAL ROLE service_role;
 
 SELECT is(
-    (SELECT (public.acquire_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'test_scope_acl_sr', '00000000-4000-4000-8000-000000000002', 'fp_acl_sr', 30))->>'action'),
-    'EXECUTE',
+    has_function_privilege('service_role', 'public.acquire_idempotency_lease(uuid, text, text, text, integer)', 'EXECUTE'),
+    true,
     'ACL service_role: acquire_idempotency_lease allowed'
+);
+
+SELECT is(
+    has_function_privilege('service_role', 'public.complete_idempotent_external_operation(uuid, text, text, text, uuid, bigint, integer, jsonb)', 'EXECUTE'),
+    true,
+    'ACL service_role: complete_idempotent_external_operation allowed'
+);
+
+SELECT is(
+    has_function_privilege('service_role', 'public.abort_idempotency_lease(uuid, text, text, uuid, bigint)', 'EXECUTE'),
+    true,
+    'ACL service_role: abort_idempotency_lease allowed'
+);
+
+SELECT is(
+    has_function_privilege('service_role', 'public.create_delivery_quote_atomic(uuid, uuid, text, double precision, double precision, text, text, text, numeric, bigint, bigint, timestamp with time zone, text, text, uuid, bigint)', 'EXECUTE'),
+    true,
+    'ACL service_role: create_delivery_quote_atomic allowed'
+);
+
+SELECT is(
+    has_function_privilege('service_role', 'public.create_delivery_requote_atomic(uuid, uuid, bigint, bigint, timestamp with time zone, text, text, uuid, bigint)', 'EXECUTE'),
+    true,
+    'ACL service_role: create_delivery_requote_atomic allowed'
 );
 
 -- ============================================================================
@@ -598,6 +655,86 @@ SELECT throws_like(
     ) $$,
     '%IDEMPOTENCY_LEASE_LOST%',
     'H31: Expired lease loses ownership and cannot complete'
+);
+
+-- H32: Lease Takeover after expiry increments generation and changes token
+DO $$
+DECLARE
+    v_l1 JSONB;
+    v_l2 JSONB;
+BEGIN
+    -- 1. Initial acquire
+    v_l1 := public.acquire_idempotency_lease(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'takeover_test_scope',
+        '00000000-4000-4000-8000-000000000006',
+        'fp_takeover_test',
+        1
+    );
+    PERFORM set_config('test.takeover_t1', v_l1->>'reservation_token', true);
+    PERFORM set_config('test.takeover_g1', v_l1->>'lease_generation', true);
+
+    -- 2. Expire lease in DB
+    UPDATE private.idempotency_reservations
+    SET lease_expires_at = now() - interval '5 seconds'
+    WHERE actor_user_id = 'a0000000-0000-4000-8000-000000000001'::uuid
+      AND scope = 'takeover_test_scope'
+      AND key = '00000000-4000-4000-8000-000000000006';
+
+    -- 3. Takeover acquire with same key & fingerprint
+    v_l2 := public.acquire_idempotency_lease(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'takeover_test_scope',
+        '00000000-4000-4000-8000-000000000006',
+        'fp_takeover_test',
+        30
+    );
+    PERFORM set_config('test.takeover_t2', v_l2->>'reservation_token', true);
+    PERFORM set_config('test.takeover_g2', v_l2->>'lease_generation', true);
+END $$;
+
+SELECT is(
+    (current_setting('test.takeover_t1') <> current_setting('test.takeover_t2')),
+    true,
+    'H32.1: Takeover generates a distinct reservation_token'
+);
+
+SELECT is(
+    current_setting('test.takeover_g2')::bigint,
+    current_setting('test.takeover_g1')::bigint + 1,
+    'H32.2: Takeover increments lease_generation by exactly 1'
+);
+
+-- Stale owner (token1, gen1) cannot complete
+SELECT throws_like(
+    $$ SELECT public.complete_idempotent_external_operation(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'takeover_test_scope',
+        '00000000-4000-4000-8000-000000000006',
+        'fp_takeover_test',
+        current_setting('test.takeover_t1')::uuid,
+        current_setting('test.takeover_g1')::bigint,
+        200,
+        '{"stale":true}'::jsonb
+    ) $$,
+    '%IDEMPOTENCY_LEASE_LOST%',
+    'H32.3: Stale owner cannot complete after takeover'
+);
+
+-- New owner (token2, gen2) completes successfully
+SELECT is(
+    (SELECT (public.complete_idempotent_external_operation(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'takeover_test_scope',
+        '00000000-4000-4000-8000-000000000006',
+        'fp_takeover_test',
+        current_setting('test.takeover_t2')::uuid,
+        current_setting('test.takeover_g2')::bigint,
+        201,
+        '{"new_owner":true}'::jsonb
+    ))->>'response_status'),
+    '201',
+    'H32.4: New owner completes successfully with incremented generation and fresh token'
 );
 
 SELECT * FROM finish();

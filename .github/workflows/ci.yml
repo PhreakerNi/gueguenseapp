@@ -161,6 +161,9 @@ jobs:
           git fetch --depth=1 origin 3d37018b45fa3557a9046f044b410558824424bf
           git diff --exit-code 3d37018b45fa3557a9046f044b410558824424bf -- \
             supabase/migrations/20260821000004_phase4_quote_engine_closure_v1_3.sql
+          git fetch --depth=1 origin 1bab869d6f623e9c7c102d8f57abbb1561325ed8
+          git diff --exit-code 1bab869d6f623e9c7c102d8f57abbb1561325ed8 -- \
+            supabase/migrations/20260821000005_phase4_quote_engine_final_closure_v1_4.sql
 
       - name: Test Forward Migration Upgrade (F1-F3 -> F4)
         run: |

@@ -598,6 +598,83 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
     assert.strictEqual(mockCallCount, countBefore);
   });
 
+  it("C01: Create quote with invalid latitude > 90 -> 400 VALIDATION_ERROR + provider delta 0 + delivery_requests delta 0 + delivery_quotes delta 0", async () => {
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Invalid Lat Address",
+        latitude: 91.0,
+        longitude: -86.265,
+      },
+      recipient_name: "Invalid Lat",
+      recipient_phone: "+50588881234",
+      package_type: "PARCEL",
+    };
+
+    const countReqBefore = (
+      await dbPool.query("SELECT count(*) FROM public.delivery_requests;")
+    ).rows[0].count;
+    const countQuoteBefore = (
+      await dbPool.query("SELECT count(*) FROM public.delivery_quotes;")
+    ).rows[0].count;
+    const countBefore = mockCallCount;
+
+    const res = await postQuote(payload, ownerAToken, generateUuidV4());
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.error?.code, "VALIDATION_ERROR");
+    assert.strictEqual(mockCallCount, countBefore);
+
+    const countReqAfter = (
+      await dbPool.query("SELECT count(*) FROM public.delivery_requests;")
+    ).rows[0].count;
+    const countQuoteAfter = (
+      await dbPool.query("SELECT count(*) FROM public.delivery_quotes;")
+    ).rows[0].count;
+    assert.strictEqual(countReqAfter, countReqBefore);
+    assert.strictEqual(countQuoteAfter, countQuoteBefore);
+  });
+
+  it("C02: Create quote with negative cash_to_collect -> 400 VALIDATION_ERROR + provider delta 0", async () => {
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Negative Cash Address",
+        latitude: 12.125,
+        longitude: -86.265,
+      },
+      recipient_name: "Negative Cash",
+      recipient_phone: "+50588881234",
+      package_type: "PARCEL",
+      cash_to_collect: -50,
+    };
+
+    const countBefore = mockCallCount;
+    const res = await postQuote(payload, ownerAToken, generateUuidV4());
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.error?.code, "VALIDATION_ERROR");
+    assert.strictEqual(mockCallCount, countBefore);
+  });
+
+  it("C03: Unauthenticated create quote -> 401 AUTH_REQUIRED + provider delta 0", async () => {
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Unauth Create Address",
+        latitude: 12.125,
+        longitude: -86.265,
+      },
+      recipient_name: "Unauth Create",
+      recipient_phone: "+50588881234",
+      package_type: "PARCEL",
+    };
+
+    const countBefore = mockCallCount;
+    const res = await postQuote(payload, undefined, generateUuidV4());
+    assert.strictEqual(res.status, 401);
+    assert.strictEqual(res.body.error?.code, "AUTH_REQUIRED");
+    assert.strictEqual(mockCallCount, countBefore);
+  });
+
   // --------------------------------------------------------------------------
   // T09 - T11: Real Concurrency & Provider Delay Gates
   // --------------------------------------------------------------------------
@@ -1096,6 +1173,54 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
     assert.ok([403, 404].includes(res.status));
   });
 
+  it("X01: Cancel nonexistent quote -> 404 QUOTE_NOT_FOUND", async () => {
+    const res = await cancelQuote(
+      generateUuidV4(),
+      ownerAToken,
+      generateUuidV4(),
+    );
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(res.body.error?.code, "QUOTE_NOT_FOUND");
+  });
+
+  it("X02: Cancel expired quote -> 422 QUOTE_INVALID_STATE + no mutation", async () => {
+    const createRes = await postQuote(
+      {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Cancel Expired Test",
+          latitude: 12.129,
+          longitude: -86.269,
+        },
+        recipient_name: "Cancel Expired",
+        recipient_phone: "+50588889999",
+        package_type: "PARCEL",
+      },
+      ownerAToken,
+      generateUuidV4(),
+    );
+    const quoteId = createRes.body.quote_id;
+
+    // Expire quote in DB
+    await dbPool.query(`
+      UPDATE public.delivery_quotes
+      SET route_calculated_at = now() - interval '20 minutes',
+          created_at = now() - interval '20 minutes',
+          expires_at = now() - interval '5 minutes'
+      WHERE id = '${quoteId}';
+    `);
+
+    const res = await cancelQuote(quoteId, ownerAToken, generateUuidV4());
+    assert.strictEqual(res.status, 422);
+    assert.strictEqual(res.body.error?.code, "QUOTE_INVALID_STATE");
+
+    // Verify DB quote is still EXPIRED and not mutated to CANCELED
+    const quoteDb = await dbPool.query(
+      `SELECT status FROM public.delivery_quotes WHERE id = '${quoteId}';`,
+    );
+    assert.strictEqual(quoteDb.rows[0].status, "EXPIRED");
+  });
+
   it("T23: Requote on CANCELED quote -> 201 + new quote_id + same delivery_request_id", async () => {
     const requoteKey = generateUuidV4();
     const res = await requote(sharedQuoteId, ownerAToken, requoteKey);
@@ -1206,6 +1331,79 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
     assert.strictEqual(mockCallCount, countBefore);
   });
 
+  it("RQ01: Requote quote of another tenant -> 403 or 404 + provider delta 0", async () => {
+    const countBefore = mockCallCount;
+    const res = await requote(sharedQuoteId, ownerBToken, generateUuidV4());
+    assert.ok([403, 404].includes(res.status));
+    assert.strictEqual(mockCallCount, countBefore);
+  });
+
+  it("RQ02: Requote nonexistent quote -> 404 QUOTE_NOT_FOUND + provider delta 0", async () => {
+    const countBefore = mockCallCount;
+    const res = await requote(generateUuidV4(), ownerAToken, generateUuidV4());
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(res.body.error?.code, "QUOTE_NOT_FOUND");
+    assert.strictEqual(mockCallCount, countBefore);
+  });
+
+  it("RQ03: Requote missing Idempotency-Key -> 400 IDEMPOTENCY_KEY_REQUIRED + provider delta 0", async () => {
+    const countBefore = mockCallCount;
+    const res = await requote(sharedQuoteId, ownerAToken, undefined);
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.error?.code, "IDEMPOTENCY_KEY_REQUIRED");
+    assert.strictEqual(mockCallCount, countBefore);
+  });
+
+  it("RQ04: Requote invalid Idempotency-Key format -> 400 VALIDATION_ERROR + provider delta 0", async () => {
+    const countBefore = mockCallCount;
+    const res = await requote(sharedQuoteId, ownerAToken, "not-a-valid-uuid");
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.error?.code, "VALIDATION_ERROR");
+    assert.strictEqual(mockCallCount, countBefore);
+  });
+
+  it("RQ05: Requote on CONSUMED quote is denied -> 422 QUOTE_INVALID_STATE + provider delta 0 + quote delta 0", async () => {
+    const createRes = await postQuote(
+      {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Consumed Requote Test",
+          latitude: 12.139,
+          longitude: -86.279,
+        },
+        recipient_name: "Consumed Test",
+        recipient_phone: "+50588889999",
+        package_type: "PARCEL",
+      },
+      ownerAToken,
+      generateUuidV4(),
+    );
+    const quoteId = createRes.body.quote_id;
+    assert.strictEqual(createRes.status, 201);
+
+    // Mark quote as CONSUMED in DB
+    await dbPool.query(`
+      UPDATE public.delivery_quotes
+      SET status = 'CONSUMED'
+      WHERE id = '${quoteId}';
+    `);
+
+    const countBefore = mockCallCount;
+    const quoteCountBefore = (
+      await dbPool.query("SELECT count(*) FROM public.delivery_quotes;")
+    ).rows[0].count;
+
+    const res = await requote(quoteId, ownerAToken, generateUuidV4());
+    assert.strictEqual(res.status, 422);
+    assert.strictEqual(res.body.error?.code, "QUOTE_INVALID_STATE");
+    assert.strictEqual(mockCallCount, countBefore);
+
+    const quoteCountAfter = (
+      await dbPool.query("SELECT count(*) FROM public.delivery_quotes;")
+    ).rows[0].count;
+    assert.strictEqual(quoteCountAfter, quoteCountBefore);
+  });
+
   // --------------------------------------------------------------------------
   // T27 - T30: GET Endpoint, Lazy Expiry, Route Cache & No Consume
   // --------------------------------------------------------------------------
@@ -1236,6 +1434,18 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
     // Unauthenticated request is denied
     const resUnauth = await getQuote(sharedQuoteId);
     assert.strictEqual(resUnauth.status, 401);
+  });
+
+  it("G01: GET nonexistent quote -> 404 QUOTE_NOT_FOUND", async () => {
+    const res = await getQuote(generateUuidV4(), ownerAToken);
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(res.body.error?.code, "QUOTE_NOT_FOUND");
+  });
+
+  it("G02: Unauthenticated GET quote -> 401 AUTH_REQUIRED", async () => {
+    const res = await getQuote(sharedQuoteId);
+    assert.strictEqual(res.status, 401);
+    assert.strictEqual(res.body.error?.code, "AUTH_REQUIRED");
   });
 
   it("T28: Lazy expiry: GET request on past expires_at returns status EXPIRED", async () => {
@@ -1286,6 +1496,418 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
       },
     );
     assert.strictEqual(res.status, 404);
+  });
+
+  // --------------------------------------------------------------------------
+  // R01 - R04: Google Routes, Retry & Cache Resiliency
+  // --------------------------------------------------------------------------
+
+  it("R01: Google mockBehavior = fail_once: internal retry succeeds on uncached route -> 201 QUOTED + exactly 2 provider attempts + route_provider GOOGLE_ROUTES", async () => {
+    mockBehavior = "fail_once";
+    mockCallCount = 0;
+
+    const res = await postQuote(
+      {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Retry Uncached Route",
+          latitude: 12.14123,
+          longitude: -86.27123,
+        },
+        recipient_name: "Retry User",
+        recipient_phone: "+50588880001",
+        package_type: "PARCEL",
+      },
+      ownerAToken,
+      generateUuidV4(),
+    );
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.status, "QUOTED");
+    assert.strictEqual(
+      mockCallCount,
+      2,
+      "Internal retry must make exactly 2 provider calls",
+    );
+
+    const quoteDb = await dbPool.query(
+      `SELECT route_provider FROM public.delivery_quotes WHERE id = '${res.body.quote_id}';`,
+    );
+    assert.strictEqual(quoteDb.rows[0].route_provider, "GOOGLE_ROUTES");
+    mockBehavior = "success";
+  });
+
+  it("R02: Valid route cache with provider down (fail_always) -> 201 from cache + 0 provider calls + route_provider GOOGLE_ROUTES (never HAVERSINE)", async () => {
+    // 1. Warm cache with successful call
+    const coords = { latitude: 12.14234, longitude: -86.27234 };
+    const warmRes = await postQuote(
+      {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Cached Route Warmup",
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        },
+        recipient_name: "Cache Warmup",
+        recipient_phone: "+50588880001",
+        package_type: "PARCEL",
+      },
+      ownerAToken,
+      generateUuidV4(),
+    );
+    assert.strictEqual(warmRes.status, 201);
+
+    // 2. Set provider to fail_always
+    mockBehavior = "fail_always";
+    mockCallCount = 0;
+
+    // 3. New quote with DIFFERENT key for SAME route
+    const cachedRes = await postQuote(
+      {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Cached Route Request",
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        },
+        recipient_name: "Cache User",
+        recipient_phone: "+50588880002",
+        package_type: "PARCEL",
+      },
+      ownerAToken,
+      generateUuidV4(),
+    );
+
+    assert.strictEqual(cachedRes.status, 201);
+    assert.strictEqual(cachedRes.body.status, "QUOTED");
+    assert.strictEqual(
+      mockCallCount,
+      0,
+      "Valid cache hit must make 0 provider calls",
+    );
+
+    const quoteDb = await dbPool.query(
+      `SELECT route_provider FROM public.delivery_quotes WHERE id = '${cachedRes.body.quote_id}';`,
+    );
+    assert.strictEqual(quoteDb.rows[0].route_provider, "GOOGLE_ROUTES");
+    mockBehavior = "success";
+  });
+
+  it("R03: Provider down (fail_always) with absent route cache -> 503 PRICING_UNAVAILABLE + 2 provider attempts + 0 requests + 0 quotes", async () => {
+    mockBehavior = "fail_always";
+    mockCallCount = 0;
+
+    const countReqBefore = (
+      await dbPool.query("SELECT count(*) FROM public.delivery_requests;")
+    ).rows[0].count;
+    const countQuoteBefore = (
+      await dbPool.query("SELECT count(*) FROM public.delivery_quotes;")
+    ).rows[0].count;
+
+    const res = await postQuote(
+      {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Provider Down Route",
+          latitude: 12.14345,
+          longitude: -86.27345,
+        },
+        recipient_name: "Down User",
+        recipient_phone: "+50588880001",
+        package_type: "PARCEL",
+      },
+      ownerAToken,
+      generateUuidV4(),
+    );
+
+    assert.strictEqual(res.status, 503);
+    assert.strictEqual(res.body.error?.code, "PRICING_UNAVAILABLE");
+    assert.strictEqual(
+      mockCallCount,
+      2,
+      "Provider failure after retry must make exactly 2 attempts",
+    );
+
+    const countReqAfter = (
+      await dbPool.query("SELECT count(*) FROM public.delivery_requests;")
+    ).rows[0].count;
+    const countQuoteAfter = (
+      await dbPool.query("SELECT count(*) FROM public.delivery_quotes;")
+    ).rows[0].count;
+    assert.strictEqual(countReqAfter, countReqBefore);
+    assert.strictEqual(countQuoteAfter, countQuoteBefore);
+    mockBehavior = "success";
+  });
+
+  it("R04: Provider down never falls back to Haversine (no quote created, no 201)", async () => {
+    mockBehavior = "fail_always";
+
+    const res = await postQuote(
+      {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "No Haversine Route",
+          latitude: 12.14456,
+          longitude: -86.27456,
+        },
+        recipient_name: "No Haversine",
+        recipient_phone: "+50588880001",
+        package_type: "PARCEL",
+      },
+      ownerAToken,
+      generateUuidV4(),
+    );
+
+    assert.strictEqual(res.status, 503);
+    assert.notStrictEqual(res.status, 201);
+
+    const haversineQuotes = await dbPool.query(
+      `SELECT count(*) FROM public.delivery_quotes WHERE route_provider = 'HAVERSINE';`,
+    );
+    assert.strictEqual(parseInt(haversineQuotes.rows[0].count, 10), 0);
+    mockBehavior = "success";
+  });
+
+  // --------------------------------------------------------------------------
+  // I01 - I02: Idempotency Isolation & Cold Replay
+  // --------------------------------------------------------------------------
+
+  it("I01: Same UUID idempotency key across different actors -> independent 201 executions without cross-actor collision", async () => {
+    const sharedKey = generateUuidV4();
+
+    const payloadA = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Tenant A Dropoff",
+        latitude: 12.125,
+        longitude: -86.265,
+      },
+      recipient_name: "Tenant A Recipient",
+      recipient_phone: "+50588880001",
+      package_type: "PARCEL",
+      cash_to_collect: 0,
+    };
+
+    const payloadB = {
+      location_id: locationB1Id,
+      dropoff_address: {
+        address_text: "Tenant B Dropoff",
+        latitude: 12.13,
+        longitude: -86.27,
+      },
+      recipient_name: "Tenant B Recipient",
+      recipient_phone: "+50588880002",
+      package_type: "DOCUMENT",
+      cash_to_collect: 0,
+    };
+
+    const resA = await postQuote(payloadA, ownerAToken, sharedKey);
+    const resB = await postQuote(payloadB, ownerBToken, sharedKey);
+
+    assert.strictEqual(resA.status, 201);
+    assert.strictEqual(resB.status, 201);
+    assert.notStrictEqual(resA.body.quote_id, resB.body.quote_id);
+    assert.notStrictEqual(
+      resA.body.delivery_request_id,
+      resB.body.delivery_request_id,
+    );
+
+    // Verify both requests exist and belong to their respective businesses
+    const reqA = await dbPool.query(
+      `SELECT business_id FROM public.delivery_requests WHERE id = '${resA.body.delivery_request_id}';`,
+    );
+    const reqB = await dbPool.query(
+      `SELECT business_id FROM public.delivery_requests WHERE id = '${resB.body.delivery_request_id}';`,
+    );
+    assert.strictEqual(reqA.rows[0].business_id, businessAId);
+    assert.strictEqual(reqB.rows[0].business_id, businessBId);
+  });
+
+  it("I02: Cold replay: replay quote with deleted route cache and provider fail_always -> 201 X-Cache: HIT + same quote_id + 0 provider calls", async () => {
+    const replayKey = generateUuidV4();
+    const payload = {
+      location_id: locationA1Id,
+      dropoff_address: {
+        address_text: "Cold Replay Dropoff",
+        latitude: 12.14567,
+        longitude: -86.27567,
+      },
+      recipient_name: "Cold Replay Recipient",
+      recipient_phone: "+50588880001",
+      package_type: "PARCEL",
+    };
+
+    // 1. Initial successful creation
+    mockBehavior = "success";
+    const initialRes = await postQuote(payload, ownerAToken, replayKey);
+    assert.strictEqual(initialRes.status, 201);
+    const quoteId = initialRes.body.quote_id;
+
+    // 2. Invalidate/delete route cache from DB
+    await dbPool.query("DELETE FROM private.route_quote_cache;");
+
+    // 3. Provider fails completely
+    mockBehavior = "fail_always";
+    mockCallCount = 0;
+
+    // 4. Replay exact same actor + payload + key
+    const replayRes = await postQuote(payload, ownerAToken, replayKey);
+    assert.strictEqual(replayRes.status, 201);
+    assert.strictEqual(replayRes.cacheHeader, "HIT");
+    assert.strictEqual(replayRes.body.quote_id, quoteId);
+    assert.strictEqual(
+      mockCallCount,
+      0,
+      "Cold idempotency replay must not call provider",
+    );
+    mockBehavior = "success";
+  });
+
+  // --------------------------------------------------------------------------
+  // P01, S01, S02: Pricing Snapshot & Dynamic Configuration
+  // --------------------------------------------------------------------------
+
+  it("P01: Active pricing version with missing pricing_rules -> 503 PRICING_UNAVAILABLE before provider + 0 provider calls", async () => {
+    const client = await dbPool.connect();
+    try {
+      // Temporarily remove pricing rules for active version
+      await client.query(`
+        DELETE FROM public.pricing_rules
+        WHERE pricing_version_id = 'dd000000-0000-4000-8000-000000000001';
+      `);
+
+      mockCallCount = 0;
+      const countReqBefore = (
+        await client.query("SELECT count(*) FROM public.delivery_requests;")
+      ).rows[0].count;
+      const countQuoteBefore = (
+        await client.query("SELECT count(*) FROM public.delivery_quotes;")
+      ).rows[0].count;
+
+      const res = await postQuote(
+        {
+          location_id: locationA1Id,
+          dropoff_address: {
+            address_text: "Missing Rules Address",
+            latitude: 12.125,
+            longitude: -86.265,
+          },
+          recipient_name: "Missing Rules",
+          recipient_phone: "+50588880001",
+          package_type: "PARCEL",
+        },
+        ownerAToken,
+        generateUuidV4(),
+      );
+
+      assert.strictEqual(res.status, 503);
+      assert.strictEqual(res.body.error?.code, "PRICING_UNAVAILABLE");
+      assert.strictEqual(
+        mockCallCount,
+        0,
+        "Missing pricing rule must fail before calling provider",
+      );
+
+      const countReqAfter = (
+        await client.query("SELECT count(*) FROM public.delivery_requests;")
+      ).rows[0].count;
+      const countQuoteAfter = (
+        await client.query("SELECT count(*) FROM public.delivery_quotes;")
+      ).rows[0].count;
+      assert.strictEqual(countReqAfter, countReqBefore);
+      assert.strictEqual(countQuoteAfter, countQuoteBefore);
+    } finally {
+      // Restore pricing rules
+      await client.query(`
+        INSERT INTO public.pricing_rules (
+          id, pricing_version_id, package_type, base_fee, per_km_rate, per_minute_rate, minimum_fare
+        ) VALUES 
+          ('ee000000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-000000000001', 'PARCEL', 35.00, 12.00, 1.50, 45.00),
+          ('ee000000-0000-4000-8000-000000000002', 'dd000000-0000-4000-8000-000000000001', 'DOCUMENT', 25.00, 10.00, 1.00, 35.00)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+      client.release();
+    }
+  });
+
+  it("S01: Pickup snapshot DB-authoritative: location_id, name, address_text and coords match business_locations in DB", async () => {
+    const res = await postQuote(
+      {
+        location_id: locationA1Id,
+        dropoff_address: {
+          address_text: "Snapshot Test Address",
+          latitude: 12.14678,
+          longitude: -86.27678,
+        },
+        recipient_name: "Snapshot Recipient",
+        recipient_phone: "+50588880001",
+        package_type: "PARCEL",
+      },
+      ownerAToken,
+      generateUuidV4(),
+    );
+    assert.strictEqual(res.status, 201);
+
+    const reqDb = await dbPool.query(
+      `SELECT pickup_address_snapshot FROM public.delivery_requests WHERE id = '${res.body.delivery_request_id}';`,
+    );
+    const snapshot = reqDb.rows[0].pickup_address_snapshot;
+
+    const locDb = await dbPool.query(
+      `SELECT id, name, address_text, extensions.ST_X(location::extensions.geometry) as lng, extensions.ST_Y(location::extensions.geometry) as lat FROM public.business_locations WHERE id = '${locationA1Id}';`,
+    );
+    const loc = locDb.rows[0];
+
+    assert.strictEqual(snapshot.location_id, loc.id);
+    assert.strictEqual(snapshot.name, loc.name);
+    assert.strictEqual(snapshot.address_text, loc.address_text);
+    assert.strictEqual(snapshot.latitude, parseFloat(loc.lat));
+    assert.strictEqual(snapshot.longitude, parseFloat(loc.lng));
+  });
+
+  it("S02: Configurable TTL: quote_ttl_seconds = 420 produces expires_at - route_calculated_at = 420s", async () => {
+    const client = await dbPool.connect();
+    try {
+      await client.query(`
+        UPDATE public.pricing_versions
+        SET quote_ttl_seconds = 420
+        WHERE id = 'dd000000-0000-4000-8000-000000000001';
+      `);
+
+      const res = await postQuote(
+        {
+          location_id: locationA1Id,
+          dropoff_address: {
+            address_text: "TTL Test Address",
+            latitude: 12.14789,
+            longitude: -86.27789,
+          },
+          recipient_name: "TTL Recipient",
+          recipient_phone: "+50588880001",
+          package_type: "PARCEL",
+        },
+        ownerAToken,
+        generateUuidV4(),
+      );
+
+      assert.strictEqual(res.status, 201);
+      const calculatedMs = new Date(res.body.route_calculated_at).getTime();
+      const expiresMs = new Date(res.body.expires_at).getTime();
+      const diffSec = Math.round((expiresMs - calculatedMs) / 1000);
+
+      assert.strictEqual(
+        diffSec,
+        420,
+        `Expected TTL 420s, got ${diffSec}s (${res.body.route_calculated_at} -> ${res.body.expires_at})`,
+      );
+    } finally {
+      await client.query(`
+        UPDATE public.pricing_versions
+        SET quote_ttl_seconds = 300
+        WHERE id = 'dd000000-0000-4000-8000-000000000001';
+      `);
+      client.release();
+    }
   });
 
   // --------------------------------------------------------------------------

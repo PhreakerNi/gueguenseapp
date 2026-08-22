@@ -105,6 +105,14 @@ export default function BusinessDashboardScreen() {
       return;
     }
 
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      setErrorMessage(
+        "Error de configuración: EXPO_PUBLIC_SUPABASE_URL no está definida.",
+      );
+      return;
+    }
+
     setSubmitting(true);
     setErrorMessage(null);
 
@@ -120,14 +128,6 @@ export default function BusinessDashboardScreen() {
       package_type: packageType,
       cash_to_collect: parseFloat(cashToCollect) || 0,
     };
-
-    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-    if (!supabaseUrl) {
-      setErrorMessage(
-        "Error de configuración: EXPO_PUBLIC_SUPABASE_URL no está definida.",
-      );
-      return;
-    }
 
     const idempotencyKey = intentManager.getOrCreateKey(
       "quote:create",
