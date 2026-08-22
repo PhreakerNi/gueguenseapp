@@ -1024,10 +1024,11 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates (T01 - T27)"
     );
     const quoteId = createRes.body.quote_id;
 
-    // Expire quote in DB (preserving expires_at > created_at check constraint)
+    // Expire quote in DB (preserving expires_at >= route_calculated_at check constraint)
     await dbPool.query(`
       UPDATE public.delivery_quotes
-      SET created_at = now() - interval '20 minutes',
+      SET route_calculated_at = now() - interval '20 minutes',
+          created_at = now() - interval '20 minutes',
           expires_at = now() - interval '5 minutes'
       WHERE id = '${quoteId}';
     `);
