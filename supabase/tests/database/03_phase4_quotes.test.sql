@@ -49,7 +49,7 @@ SELECT has_function('public', 'verify_quote_creation_scope', ARRAY['uuid', 'uuid
 SELECT has_function('public', 'verify_requote_scope', ARRAY['uuid', 'uuid'], 'public.verify_requote_scope exists with correct signature');
 SELECT has_function('public', 'verify_quote_access_scope', ARRAY['uuid', 'uuid'], 'public.verify_quote_access_scope exists with correct signature');
 SELECT has_function('public', 'get_active_pricing_rule', ARRAY['text'], 'public.get_active_pricing_rule exists with correct signature');
-SELECT has_function('public', 'create_delivery_quote_atomic', ARRAY['uuid', 'uuid', 'text', 'numeric', 'numeric', 'text', 'text', 'text', 'numeric', 'bigint', 'bigint', 'timestamp with time zone', 'text', 'text', 'uuid', 'bigint'], 'public.create_delivery_quote_atomic exists');
+SELECT has_function('public', 'create_delivery_quote_atomic', ARRAY['uuid', 'uuid', 'text', 'double precision', 'double precision', 'text', 'text', 'text', 'numeric', 'bigint', 'bigint', 'timestamp with time zone', 'text', 'text', 'uuid', 'bigint'], 'public.create_delivery_quote_atomic exists');
 SELECT has_function('public', 'create_delivery_requote_atomic', ARRAY['uuid', 'uuid', 'bigint', 'bigint', 'timestamp with time zone', 'text', 'text', 'uuid', 'bigint'], 'public.create_delivery_requote_atomic exists');
 SELECT has_function('private', 'get_route_cache', ARRAY['text'], 'private.get_route_cache exists');
 SELECT has_function('private', 'upsert_route_cache', ARRAY['text', 'text', 'double precision', 'double precision', 'double precision', 'double precision', 'bigint', 'bigint', 'integer'], 'private.upsert_route_cache exists');

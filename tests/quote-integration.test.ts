@@ -1213,12 +1213,20 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
   it("T27: GET quote by ID: creator & manager can access, other tenant denied", async () => {
     // Creator can access
     const resOwner = await getQuote(sharedQuoteId, ownerAToken);
-    assert.strictEqual(resOwner.status, 200);
+    assert.strictEqual(
+      resOwner.status,
+      200,
+      `T27 resOwner failed: ${JSON.stringify(resOwner.body)}`,
+    );
     assert.strictEqual(resOwner.body.quote_id, sharedQuoteId);
 
     // Manager in assigned location can access
     const resMgr = await getQuote(sharedQuoteId, managerAToken);
-    assert.strictEqual(resMgr.status, 200);
+    assert.strictEqual(
+      resMgr.status,
+      200,
+      `T27 resMgr failed: ${JSON.stringify(resMgr.body)}`,
+    );
     assert.strictEqual(resMgr.body.quote_id, sharedQuoteId);
 
     // Other tenant cannot access
