@@ -191,8 +191,8 @@ export type Database = {
           final_price: number | null
           id: string
           platform_revenue: number | null
-          quoted_price: number
           quote_id: string
+          quoted_price: number
           request_id: string
           status: string
           updated_at: string
@@ -206,8 +206,8 @@ export type Database = {
           final_price?: number | null
           id?: string
           platform_revenue?: number | null
-          quoted_price: number
           quote_id: string
+          quoted_price: number
           request_id: string
           status?: string
           updated_at?: string
@@ -221,8 +221,8 @@ export type Database = {
           final_price?: number | null
           id?: string
           platform_revenue?: number | null
-          quoted_price?: number
           quote_id?: string
+          quoted_price?: number
           request_id?: string
           status?: string
           updated_at?: string
@@ -280,13 +280,6 @@ export type Database = {
           metadata?: Json
         }
         Relationships: [
-          {
-            foreignKeyName: "delivery_events_actor_user_id_fkey"
-            columns: ["actor_user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "delivery_events_delivery_id_fkey"
             columns: ["delivery_id"]
@@ -939,10 +932,7 @@ export type Database = {
         Returns: Json
       }
       get_delivery_detail: {
-        Args: {
-          p_actor_id: string
-          p_delivery_id: string
-        }
+        Args: { p_actor_id: string; p_delivery_id: string }
         Returns: Json
       }
       get_driver_document_storage_path: {
@@ -1006,17 +996,11 @@ export type Database = {
         Returns: undefined
       }
       verify_delivery_cancel_scope: {
-        Args: {
-          p_actor_id: string
-          p_delivery_id: string
-        }
+        Args: { p_actor_id: string; p_delivery_id: string }
         Returns: Json
       }
       verify_delivery_creation_scope: {
-        Args: {
-          p_actor_id: string
-          p_quote_id: string
-        }
+        Args: { p_actor_id: string; p_quote_id: string }
         Returns: Json
       }
       verify_quote_access_scope: {

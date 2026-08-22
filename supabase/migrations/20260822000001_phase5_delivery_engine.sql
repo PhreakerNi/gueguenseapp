@@ -811,8 +811,8 @@ BEGIN
     FROM filtered f;
 
     RETURN pg_catalog.jsonb_build_object(
-        'deliveries', v_rows,
-        'count', pg_catalog.jsonb_array_length(v_rows)
+        'deliveries', COALESCE(v_rows, '[]'::jsonb),
+        'count', COALESCE(pg_catalog.jsonb_array_length(COALESCE(v_rows, '[]'::jsonb)), 0)
     );
 END;
 $$;
