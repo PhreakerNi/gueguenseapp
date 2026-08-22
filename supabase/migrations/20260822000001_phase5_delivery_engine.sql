@@ -716,7 +716,12 @@ DECLARE
     v_limit INTEGER;
     v_rows JSONB;
 BEGIN
-    v_limit := pg_catalog.least(pg_catalog.greatest(COALESCE(p_limit, 20), 1), 50);
+    v_limit := COALESCE(p_limit, 20);
+    IF v_limit < 1 THEN
+        v_limit := 1;
+    ELSIF v_limit > 50 THEN
+        v_limit := 50;
+    END IF;
 
     -- Verify actor access
     SELECT bm.id, bm.role, bm.status, b.account_status
