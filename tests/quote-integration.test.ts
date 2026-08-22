@@ -1204,7 +1204,8 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
     // Expire quote in DB
     await dbPool.query(`
       UPDATE public.delivery_quotes
-      SET route_calculated_at = now() - interval '20 minutes',
+      SET status = 'EXPIRED',
+          route_calculated_at = now() - interval '20 minutes',
           created_at = now() - interval '20 minutes',
           expires_at = now() - interval '5 minutes'
       WHERE id = '${quoteId}';
@@ -1384,7 +1385,8 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
     // Mark quote as CONSUMED in DB
     await dbPool.query(`
       UPDATE public.delivery_quotes
-      SET status = 'CONSUMED'
+      SET status = 'CONSUMED',
+          consumed_at = now()
       WHERE id = '${quoteId}';
     `);
 
