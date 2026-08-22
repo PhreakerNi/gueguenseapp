@@ -946,16 +946,16 @@ $$;
 -- 9. Grant & Revoke Execution Permissions (Strict ACL)
 -- ----------------------------------------------------------------------------
 REVOKE EXECUTE ON FUNCTION public.prevent_delivery_events_mutation() FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.create_delivery_from_quote_atomic(UUID, UUID, TEXT, TEXT, TEXT, INTEGER) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.cancel_delivery_atomic(UUID, UUID, TEXT, TEXT, TEXT, TEXT, INTEGER) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.create_delivery_from_quote_atomic(UUID, UUID, TEXT, TEXT, UUID, BIGINT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.cancel_delivery_atomic(UUID, UUID, TEXT, TEXT, TEXT, UUID, BIGINT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.get_delivery_detail(UUID, UUID) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.list_business_deliveries(UUID, UUID, UUID, TEXT, INTEGER, TIMESTAMPTZ, UUID) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.verify_delivery_creation_scope(UUID, UUID) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.verify_delivery_cancel_scope(UUID, UUID) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.prevent_delivery_events_mutation() TO service_role;
-GRANT EXECUTE ON FUNCTION public.create_delivery_from_quote_atomic(UUID, UUID, TEXT, TEXT, TEXT, INTEGER) TO service_role;
-GRANT EXECUTE ON FUNCTION public.cancel_delivery_atomic(UUID, UUID, TEXT, TEXT, TEXT, TEXT, INTEGER) TO service_role;
+GRANT EXECUTE ON FUNCTION public.create_delivery_from_quote_atomic(UUID, UUID, TEXT, TEXT, UUID, BIGINT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.cancel_delivery_atomic(UUID, UUID, TEXT, TEXT, TEXT, UUID, BIGINT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_delivery_detail(UUID, UUID) TO service_role;
 GRANT EXECUTE ON FUNCTION public.list_business_deliveries(UUID, UUID, UUID, TEXT, INTEGER, TIMESTAMPTZ, UUID) TO service_role;
 GRANT EXECUTE ON FUNCTION public.verify_delivery_creation_scope(UUID, UUID) TO service_role;
