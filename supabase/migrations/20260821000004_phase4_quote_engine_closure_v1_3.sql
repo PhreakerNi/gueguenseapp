@@ -353,7 +353,7 @@ BEGIN
     SELECT l.id, l.business_id, l.name, l.address_text,
            extensions.ST_Y(l.location::extensions.geometry) AS latitude,
            extensions.ST_X(l.location::extensions.geometry) AS longitude,
-           l.is_active, b.account_status AS business_status, b.tenant_id
+           l.is_active, b.account_status AS business_status
     INTO v_loc
     FROM public.business_locations l
     JOIN public.businesses b ON b.id = l.business_id
@@ -395,7 +395,6 @@ BEGIN
     RETURN pg_catalog.jsonb_build_object(
         'location_id', v_loc.id,
         'business_id', v_loc.business_id,
-        'tenant_id', v_loc.tenant_id,
         'location_name', v_loc.name,
         'address_text', v_loc.address_text,
         'pickup_lat', v_loc.latitude,
@@ -436,7 +435,6 @@ BEGIN
            extensions.ST_Y(dr.dropoff_location::extensions.geometry) AS dropoff_lat,
            extensions.ST_X(dr.dropoff_location::extensions.geometry) AS dropoff_lng,
            b.account_status AS business_status,
-           b.tenant_id,
            l.is_active AS location_is_active
     INTO v_orig
     FROM public.delivery_quotes q
@@ -474,13 +472,13 @@ BEGIN
         END IF;
     END IF;
 
-    -- 3. Check quote state eligibility for requote (QUOTED or EXPIRED)
+    -- 3. Check quote state eligibility for requote (QUOTED, EXPIRED, CANCELED)
     v_status := v_orig.status;
     IF v_status = 'QUOTED' AND v_orig.expires_at <= pg_catalog.clock_timestamp() THEN
         v_status := 'EXPIRED';
     END IF;
 
-    IF v_status NOT IN ('QUOTED', 'EXPIRED') THEN
+    IF v_status NOT IN ('QUOTED', 'EXPIRED', 'CANCELED') THEN
         RAISE EXCEPTION 'QUOTE_INVALID_STATE: Quote status % is not eligible for requote', v_status;
     END IF;
 
@@ -489,7 +487,6 @@ BEGIN
         'delivery_request_id', v_orig.delivery_request_id,
         'business_id', v_orig.business_id,
         'location_id', v_orig.location_id,
-        'tenant_id', v_orig.tenant_id,
         'package_type', v_orig.package_type,
         'cash_to_collect', v_orig.cash_to_collect,
         'recipient_name', v_orig.recipient_name,
