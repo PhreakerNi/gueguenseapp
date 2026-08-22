@@ -198,8 +198,8 @@ CREATE OR REPLACE FUNCTION public.create_delivery_from_quote_atomic(
     p_quote_id UUID,
     p_idempotency_key TEXT,
     p_request_fingerprint TEXT,
-    p_reservation_token TEXT,
-    p_lease_generation INTEGER
+    p_reservation_token UUID,
+    p_lease_generation BIGINT
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -208,20 +208,35 @@ SET search_path = ''
 AS $$
 DECLARE
     v_now TIMESTAMPTZ := pg_catalog.clock_timestamp();
+    v_exp TIMESTAMPTZ := v_now + INTERVAL '24 hours';
+    v_lock_key BIGINT;
+    v_res RECORD;
     v_quote RECORD;
     v_member RECORD;
     v_delivery_id UUID;
     v_response JSONB;
 BEGIN
-    -- 1. Validate Idempotency Fencing Token
-    PERFORM public.validate_idempotency_fencing(
-        p_actor_id,
-        'create_delivery:' || p_quote_id::text,
-        p_idempotency_key,
-        p_request_fingerprint,
-        p_reservation_token,
-        p_lease_generation
-    );
+    IF p_reservation_token IS NULL OR p_lease_generation IS NULL THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: reservation_token and lease_generation are required';
+    END IF;
+
+    -- 1. Validate fencing token under advisory lock
+    v_lock_key := ('x' || pg_catalog.substr(pg_catalog.md5(p_actor_id::text || ':create_delivery:' || p_quote_id::text || ':' || p_idempotency_key), 1, 16))::bit(64)::bigint;
+    PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
+
+    SELECT * INTO v_res
+    FROM private.idempotency_reservations
+    WHERE actor_user_id = p_actor_id
+      AND scope = 'create_delivery:' || p_quote_id::text
+      AND key = p_idempotency_key
+    FOR UPDATE;
+
+    IF v_res.key IS NULL OR v_res.status <> 'PENDING'
+       OR v_res.reservation_token <> p_reservation_token
+       OR v_res.lease_generation <> p_lease_generation
+       OR v_res.lease_expires_at <= v_now THEN
+        RAISE EXCEPTION 'IDEMPOTENCY_LEASE_LOST: Idempotency lease was lost, expired, or token mismatch';
+    END IF;
 
     -- 2. Lock Quote and fetch Request & Location Details
     SELECT
@@ -384,17 +399,27 @@ BEGIN
         'created_at', pg_catalog.to_jsonb(v_now)
     );
 
-    -- 9. Complete Idempotency Lease atomically
-    PERFORM public.commit_idempotency_response(
-        p_actor_id,
-        'create_delivery:' || p_quote_id::text,
-        p_idempotency_key,
-        p_request_fingerprint,
-        201,
-        v_response,
-        p_reservation_token,
-        p_lease_generation
-    );
+    -- 9. Commit Idempotency Response atomically
+    UPDATE private.idempotency_reservations
+    SET status = 'COMPLETED',
+        response_status = 201,
+        response_body = v_response,
+        expires_at = v_exp,
+        updated_at = v_now
+    WHERE id = v_res.id;
+
+    INSERT INTO private.idempotency_responses (
+        actor_user_id, scope, key, request_fingerprint,
+        response_status, response_body, expires_at, created_at
+    ) VALUES (
+        p_actor_id, 'create_delivery:' || p_quote_id::text, p_idempotency_key, p_request_fingerprint,
+        201, v_response, v_exp, v_now
+    )
+    ON CONFLICT (actor_user_id, scope, key) DO UPDATE SET
+        request_fingerprint = EXCLUDED.request_fingerprint,
+        response_status = EXCLUDED.response_status,
+        response_body = EXCLUDED.response_body,
+        expires_at = EXCLUDED.expires_at;
 
     RETURN v_response;
 END;
@@ -409,8 +434,8 @@ CREATE OR REPLACE FUNCTION public.cancel_delivery_atomic(
     p_reason TEXT,
     p_idempotency_key TEXT,
     p_request_fingerprint TEXT,
-    p_reservation_token TEXT,
-    p_lease_generation INTEGER
+    p_reservation_token UUID,
+    p_lease_generation BIGINT
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -419,6 +444,9 @@ SET search_path = ''
 AS $$
 DECLARE
     v_now TIMESTAMPTZ := pg_catalog.clock_timestamp();
+    v_exp TIMESTAMPTZ := v_now + INTERVAL '24 hours';
+    v_lock_key BIGINT;
+    v_res RECORD;
     v_clean_reason TEXT := pg_catalog.btrim(COALESCE(p_reason, ''));
     v_delivery RECORD;
     v_member RECORD;
@@ -428,15 +456,27 @@ BEGIN
         RAISE EXCEPTION 'REASON_REQUIRED: Cancellation reason is required';
     END IF;
 
-    -- 1. Validate Idempotency Fencing Token
-    PERFORM public.validate_idempotency_fencing(
-        p_actor_id,
-        'cancel_delivery:' || p_delivery_id::text,
-        p_idempotency_key,
-        p_request_fingerprint,
-        p_reservation_token,
-        p_lease_generation
-    );
+    IF p_reservation_token IS NULL OR p_lease_generation IS NULL THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: reservation_token and lease_generation are required';
+    END IF;
+
+    -- 1. Validate fencing token under advisory lock
+    v_lock_key := ('x' || pg_catalog.substr(pg_catalog.md5(p_actor_id::text || ':cancel_delivery:' || p_delivery_id::text || ':' || p_idempotency_key), 1, 16))::bit(64)::bigint;
+    PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
+
+    SELECT * INTO v_res
+    FROM private.idempotency_reservations
+    WHERE actor_user_id = p_actor_id
+      AND scope = 'cancel_delivery:' || p_delivery_id::text
+      AND key = p_idempotency_key
+    FOR UPDATE;
+
+    IF v_res.key IS NULL OR v_res.status <> 'PENDING'
+       OR v_res.reservation_token <> p_reservation_token
+       OR v_res.lease_generation <> p_lease_generation
+       OR v_res.lease_expires_at <= v_now THEN
+        RAISE EXCEPTION 'IDEMPOTENCY_LEASE_LOST: Idempotency lease was lost, expired, or token mismatch';
+    END IF;
 
     -- 2. Lock Delivery and fetch Request Details
     SELECT
@@ -519,7 +559,8 @@ BEGIN
         'DELIVERY_CANCELED',
         pg_catalog.jsonb_build_object(
             'reason', v_clean_reason,
-            'previous_status', 'SEARCHING_DRIVER'
+            'canceled_by', p_actor_id,
+            'previous_status', v_delivery.status
         ),
         v_now
     );
@@ -533,16 +574,26 @@ BEGIN
     );
 
     -- 8. Complete Idempotency Lease atomically
-    PERFORM public.commit_idempotency_response(
-        p_actor_id,
-        'cancel_delivery:' || p_delivery_id::text,
-        p_idempotency_key,
-        p_request_fingerprint,
-        200,
-        v_response,
-        p_reservation_token,
-        p_lease_generation
-    );
+    UPDATE private.idempotency_reservations
+    SET status = 'COMPLETED',
+        response_status = 200,
+        response_body = v_response,
+        expires_at = v_exp,
+        updated_at = v_now
+    WHERE id = v_res.id;
+
+    INSERT INTO private.idempotency_responses (
+        actor_user_id, scope, key, request_fingerprint,
+        response_status, response_body, expires_at, created_at
+    ) VALUES (
+        p_actor_id, 'cancel_delivery:' || p_delivery_id::text, p_idempotency_key, p_request_fingerprint,
+        200, v_response, v_exp, v_now
+    )
+    ON CONFLICT (actor_user_id, scope, key) DO UPDATE SET
+        request_fingerprint = EXCLUDED.request_fingerprint,
+        response_status = EXCLUDED.response_status,
+        response_body = EXCLUDED.response_body,
+        expires_at = EXCLUDED.expires_at;
 
     RETURN v_response;
 END;

@@ -100,8 +100,8 @@ SELECT is(
 -- 4. Function Security & Isolation Tests (SECURITY DEFINER & search_path='')
 -- ----------------------------------------------------------------------------
 SELECT is_definer('public', 'prevent_delivery_events_mutation', 'prevent_delivery_events_mutation is SECURITY DEFINER');
-SELECT is_definer('public', 'create_delivery_from_quote_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'INTEGER'], 'create_delivery_from_quote_atomic is SECURITY DEFINER');
-SELECT is_definer('public', 'cancel_delivery_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'TEXT', 'INTEGER'], 'cancel_delivery_atomic is SECURITY DEFINER');
+SELECT is_definer('public', 'create_delivery_from_quote_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'UUID', 'BIGINT'], 'create_delivery_from_quote_atomic is SECURITY DEFINER');
+SELECT is_definer('public', 'cancel_delivery_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'UUID', 'BIGINT'], 'cancel_delivery_atomic is SECURITY DEFINER');
 SELECT is_definer('public', 'get_delivery_detail', ARRAY['UUID', 'UUID'], 'get_delivery_detail is SECURITY DEFINER');
 SELECT is_definer('public', 'list_business_deliveries', ARRAY['UUID', 'UUID', 'UUID', 'TEXT', 'INTEGER', 'TIMESTAMPTZ', 'UUID'], 'list_business_deliveries is SECURITY DEFINER');
 SELECT is_definer('public', 'verify_delivery_creation_scope', ARRAY['UUID', 'UUID'], 'verify_delivery_creation_scope is SECURITY DEFINER');
@@ -118,14 +118,14 @@ SELECT throws_matching(
 );
 
 -- create_delivery_from_quote_atomic ACL
-SELECT function_privs_are('public', 'create_delivery_from_quote_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'INTEGER'], 'service_role', ARRAY['EXECUTE'], 'service_role has EXECUTE on create_delivery_from_quote_atomic');
-SELECT function_privs_are('public', 'create_delivery_from_quote_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'INTEGER'], 'anon', ARRAY[]::TEXT[], 'anon lacks EXECUTE on create_delivery_from_quote_atomic');
-SELECT function_privs_are('public', 'create_delivery_from_quote_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'INTEGER'], 'authenticated', ARRAY[]::TEXT[], 'authenticated lacks EXECUTE on create_delivery_from_quote_atomic');
+SELECT function_privs_are('public', 'create_delivery_from_quote_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'UUID', 'BIGINT'], 'service_role', ARRAY['EXECUTE'], 'service_role has EXECUTE on create_delivery_from_quote_atomic');
+SELECT function_privs_are('public', 'create_delivery_from_quote_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'UUID', 'BIGINT'], 'anon', ARRAY[]::TEXT[], 'anon lacks EXECUTE on create_delivery_from_quote_atomic');
+SELECT function_privs_are('public', 'create_delivery_from_quote_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'UUID', 'BIGINT'], 'authenticated', ARRAY[]::TEXT[], 'authenticated lacks EXECUTE on create_delivery_from_quote_atomic');
 
 -- cancel_delivery_atomic ACL
-SELECT function_privs_are('public', 'cancel_delivery_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'TEXT', 'INTEGER'], 'service_role', ARRAY['EXECUTE'], 'service_role has EXECUTE on cancel_delivery_atomic');
-SELECT function_privs_are('public', 'cancel_delivery_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'TEXT', 'INTEGER'], 'anon', ARRAY[]::TEXT[], 'anon lacks EXECUTE on cancel_delivery_atomic');
-SELECT function_privs_are('public', 'cancel_delivery_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'TEXT', 'INTEGER'], 'authenticated', ARRAY[]::TEXT[], 'authenticated lacks EXECUTE on cancel_delivery_atomic');
+SELECT function_privs_are('public', 'cancel_delivery_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'UUID', 'BIGINT'], 'service_role', ARRAY['EXECUTE'], 'service_role has EXECUTE on cancel_delivery_atomic');
+SELECT function_privs_are('public', 'cancel_delivery_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'UUID', 'BIGINT'], 'anon', ARRAY[]::TEXT[], 'anon lacks EXECUTE on cancel_delivery_atomic');
+SELECT function_privs_are('public', 'cancel_delivery_atomic', ARRAY['UUID', 'UUID', 'TEXT', 'TEXT', 'TEXT', 'UUID', 'BIGINT'], 'authenticated', ARRAY[]::TEXT[], 'authenticated lacks EXECUTE on cancel_delivery_atomic');
 
 -- get_delivery_detail ACL
 SELECT function_privs_are('public', 'get_delivery_detail', ARRAY['UUID', 'UUID'], 'service_role', ARRAY['EXECUTE'], 'service_role has EXECUTE on get_delivery_detail');
@@ -273,8 +273,8 @@ BEGIN
         'q5000000-0000-4000-8000-000000000001'::uuid,
         'a1000000-0000-4000-8000-000000000001',
         'fp_test_delivery_create',
-        v_lease->>'reservation_token',
-        (v_lease->>'lease_generation')::integer
+        (v_lease->>'reservation_token')::uuid,
+        (v_lease->>'lease_generation')::bigint
     );
 END;
 $$;
@@ -343,8 +343,8 @@ BEGIN
         'Cliente canceló orden',
         'a1000000-0000-4000-8000-000000000002',
         'fp_test_delivery_cancel',
-        v_lease->>'reservation_token',
-        (v_lease->>'lease_generation')::integer
+        (v_lease->>'reservation_token')::uuid,
+        (v_lease->>'lease_generation')::bigint
     );
 END;
 $$;
