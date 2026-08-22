@@ -511,3 +511,89 @@ export function canCancelQuote(status: string): boolean {
 export function canRequote(status: string): boolean {
   return status === "EXPIRED" || status === "CANCELED";
 }
+
+// ----------------------------------------------------------------------------
+// Phase 5: Delivery Lifecycle Guards
+// ----------------------------------------------------------------------------
+
+export function canCreateDeliveryFromQuote(
+  quoteStatus: string,
+  expiresAt: string | Date,
+  now: Date = new Date(),
+): { allowed: boolean; errorCode?: string; reason?: string } {
+  if (quoteStatus === "CANCELED") {
+    return {
+      allowed: false,
+      errorCode: "QUOTE_INVALID_STATE",
+      reason: "Quote is CANCELED",
+    };
+  }
+  if (quoteStatus === "CONSUMED") {
+    return {
+      allowed: false,
+      errorCode: "QUOTE_ALREADY_CONSUMED",
+      reason: "Quote has already been consumed",
+    };
+  }
+  if (quoteStatus !== "QUOTED") {
+    return {
+      allowed: false,
+      errorCode: "QUOTE_INVALID_STATE",
+      reason: `Quote is in status ${quoteStatus}`,
+    };
+  }
+  if (isQuoteExpired(expiresAt, now)) {
+    return {
+      allowed: false,
+      errorCode: "QUOTE_EXPIRED",
+      reason: "Quote has expired",
+    };
+  }
+  return { allowed: true };
+}
+
+export function isDeliveryInTransit(status: string): boolean {
+  return [
+    "DRIVER_ASSIGNED",
+    "TO_PICKUP",
+    "ARRIVED_PICKUP",
+    "PICKED_UP",
+    "TO_DROPOFF",
+    "ARRIVED_DROPOFF",
+    "RETURN_REQUIRED",
+    "RETURNING",
+  ].includes(status);
+}
+
+export function isDeliveryTerminal(status: string): boolean {
+  return ["DELIVERED", "RETURNED", "CANCELED", "FAILED"].includes(status);
+}
+
+export function canCancelDelivery(status: string): {
+  allowed: boolean;
+  errorCode?: string;
+  reason?: string;
+} {
+  if (status === "CANCELED") {
+    return {
+      allowed: false,
+      errorCode: "INVALID_DELIVERY_STATE",
+      reason: "Delivery is already CANCELED",
+    };
+  }
+  if (isDeliveryInTransit(status)) {
+    return {
+      allowed: false,
+      errorCode: "CANNOT_CANCEL_IN_TRANSIT",
+      reason: "In-transit deliveries cannot be canceled via this endpoint",
+    };
+  }
+  if (status !== "SEARCHING_DRIVER") {
+    return {
+      allowed: false,
+      errorCode: "INVALID_DELIVERY_STATE",
+      reason: `Delivery cannot be canceled in status ${status}`,
+    };
+  }
+  return { allowed: true };
+}

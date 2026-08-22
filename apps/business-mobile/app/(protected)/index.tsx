@@ -46,6 +46,15 @@ export default function BusinessDashboardScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [quoteResult, setQuoteResult] = useState<QuoteResponse | null>(null);
+  const [deliveryResult, setDeliveryResult] = useState<{
+    delivery_id: string;
+    request_id: string;
+    quote_id: string;
+    status: string;
+    currency: string;
+    quoted_price: string;
+    created_at: string;
+  } | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
@@ -101,7 +110,9 @@ export default function BusinessDashboardScreen() {
       lng < -180 ||
       lng > 180
     ) {
-      setErrorMessage("Coordenadas de entrega inválidas");
+      setErrorMessage(
+        "Coordenadas inválidas. Latitud [-90, 90], Longitud [-180, 180]",
+      );
       return;
     }
 
@@ -147,18 +158,111 @@ export default function BusinessDashboardScreen() {
 
       const data = await res.json();
       if (!res.ok) {
-        setErrorMessage(
-          data.error?.message || "No se pudo generar la cotización",
-        );
+        setErrorMessage(data.error?.message || "Error al calcular cotización");
       } else {
         setQuoteResult(data);
         intentManager.clear("quote:create");
       }
     } catch {
-      // On network failure, the same idempotencyKey is preserved for the next retry with same payload
-      setErrorMessage("Error de conexión al cotizar el envío");
+      // Key is preserved in intentManager for network retry
+      setErrorMessage("Error de conexión al servidor");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleConfirmDelivery = async () => {
+    if (!quoteResult) return;
+    setActionLoading(true);
+    setErrorMessage(null);
+
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      setErrorMessage(
+        "Error de configuración: EXPO_PUBLIC_SUPABASE_URL no está definida.",
+      );
+      setActionLoading(false);
+      return;
+    }
+
+    const payload = { quote_id: quoteResult.quote_id };
+    const idempotencyKey = intentManager.getOrCreateKey(
+      "delivery:create",
+      payload,
+    );
+
+    try {
+      const res = await fetch(`${supabaseUrl}/functions/v1/api-v1/deliveries`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`,
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMessage(data.error?.message || "No se pudo confirmar el envío");
+      } else {
+        setDeliveryResult(data);
+        intentManager.clear("delivery:create");
+      }
+    } catch {
+      // Key is preserved in intentManager for network retry
+      setErrorMessage("Error de conexión al confirmar el envío");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCancelDelivery = async () => {
+    if (!deliveryResult) return;
+    setActionLoading(true);
+    setErrorMessage(null);
+
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      setErrorMessage(
+        "Error de configuración: EXPO_PUBLIC_SUPABASE_URL no está definida.",
+      );
+      setActionLoading(false);
+      return;
+    }
+
+    const payload = { reason: "Cancelado por usuario desde app" };
+    const idempotencyKey = intentManager.getOrCreateKey(
+      "delivery:cancel",
+      payload,
+    );
+
+    try {
+      const res = await fetch(
+        `${supabaseUrl}/functions/v1/api-v1/deliveries/${deliveryResult.delivery_id}/cancel`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.access_token}`,
+            "Idempotency-Key": idempotencyKey,
+          },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMessage(data.error?.message || "No se pudo cancelar el envío");
+      } else {
+        setDeliveryResult({ ...deliveryResult, status: "CANCELED" });
+        intentManager.clear("delivery:cancel");
+      }
+    } catch {
+      // Key is preserved in intentManager for network retry
+      setErrorMessage("Error de conexión al cancelar el envío");
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -264,6 +368,7 @@ export default function BusinessDashboardScreen() {
 
   const handleResetForm = () => {
     setQuoteResult(null);
+    setDeliveryResult(null);
     setErrorMessage(null);
     intentManager.clear();
   };
@@ -271,7 +376,7 @@ export default function BusinessDashboardScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Cotizador de Envíos</Text>
+        <Text style={styles.title}>Gestión de Envíos</Text>
         <Text style={styles.subtitle}>
           {identity?.profile.fullName || identity?.email}
         </Text>
@@ -283,7 +388,74 @@ export default function BusinessDashboardScreen() {
         </View>
       ) : null}
 
-      {!quoteResult ? (
+      {deliveryResult ? (
+        <View style={styles.quoteCard}>
+          <View style={styles.quoteHeader}>
+            <Text style={styles.quoteTitle}>Envío Solicitado</Text>
+            <View
+              style={[
+                styles.badge,
+                deliveryResult.status === "SEARCHING_DRIVER" &&
+                  styles.badgeQuoted,
+                deliveryResult.status === "CANCELED" && styles.badgeCanceled,
+              ]}
+            >
+              <Text style={styles.badgeText}>
+                {deliveryResult.status === "SEARCHING_DRIVER"
+                  ? "BUSCANDO CONDUCTOR"
+                  : deliveryResult.status}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.priceHighlight}>
+            C$ {deliveryResult.quoted_price} {deliveryResult.currency}
+          </Text>
+
+          <View style={styles.breakdownContainer}>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>ID del Envío:</Text>
+              <Text style={styles.breakdownValue}>
+                {deliveryResult.delivery_id.slice(0, 8)}...
+              </Text>
+            </View>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Estado de Asignación:</Text>
+              <Text style={styles.breakdownValue}>
+                {deliveryResult.status === "SEARCHING_DRIVER"
+                  ? "En búsqueda de conductor cercano..."
+                  : deliveryResult.status}
+              </Text>
+            </View>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Fecha de Creación:</Text>
+              <Text style={styles.breakdownValue}>
+                {new Date(deliveryResult.created_at).toLocaleTimeString()}
+              </Text>
+            </View>
+          </View>
+
+          {deliveryResult.status === "SEARCHING_DRIVER" ? (
+            <TouchableOpacity
+              style={[
+                styles.cancelButton,
+                actionLoading && styles.buttonDisabled,
+              ]}
+              disabled={actionLoading}
+              onPress={handleCancelDelivery}
+            >
+              <Text style={styles.cancelButtonText}>Cancelar Envío</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleResetForm}
+          >
+            <Text style={styles.secondaryButtonText}>Nuevo Envío</Text>
+          </TouchableOpacity>
+        </View>
+      ) : !quoteResult ? (
         <View style={styles.formCard}>
           <Text style={styles.sectionHeader}>1. Origen y Destino</Text>
 
@@ -471,16 +643,35 @@ export default function BusinessDashboardScreen() {
           </View>
 
           {quoteResult.status === "QUOTED" ? (
-            <TouchableOpacity
-              style={[
-                styles.cancelButton,
-                actionLoading && styles.buttonDisabled,
-              ]}
-              disabled={actionLoading}
-              onPress={handleCancelQuote}
-            >
-              <Text style={styles.cancelButtonText}>Cancelar Cotización</Text>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  actionLoading && styles.buttonDisabled,
+                ]}
+                disabled={actionLoading}
+                onPress={handleConfirmDelivery}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>
+                    Confirmar y Solicitar Conductor
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.cancelButton,
+                  actionLoading && styles.buttonDisabled,
+                ]}
+                disabled={actionLoading}
+                onPress={handleCancelQuote}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar Cotización</Text>
+              </TouchableOpacity>
+            </>
           ) : null}
 
           {quoteResult.status === "EXPIRED" ||

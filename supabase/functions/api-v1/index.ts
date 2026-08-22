@@ -1963,6 +1963,726 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(quoteData);
     }
 
+    // -------------------------------------------------------------
+    // Route 16: Create Delivery from Quote (POST /deliveries)
+    // -------------------------------------------------------------
+    if (
+      req.method === "POST" &&
+      (path === "/deliveries" || path === "/api/v1/deliveries")
+    ) {
+      if (!userId) {
+        return errorResponse(
+          "AUTH_REQUIRED",
+          "Authentication token is required",
+          401,
+        );
+      }
+
+      const { quote_id: quoteId } = body;
+      if (!quoteId) {
+        return errorResponse("VALIDATION_ERROR", "quote_id is required", 400);
+      }
+
+      if (!UUID_V4_REGEX.test(quoteId)) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "quote_id must be a valid UUID v4",
+          400,
+        );
+      }
+
+      const idempotencyKey =
+        req.headers.get("Idempotency-Key") ||
+        req.headers.get("idempotency-key");
+
+      if (!idempotencyKey) {
+        return errorResponse(
+          "IDEMPOTENCY_KEY_REQUIRED",
+          "Idempotency-Key header is required for this operation",
+          400,
+        );
+      }
+
+      if (!UUID_V4_REGEX.test(idempotencyKey)) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "Idempotency-Key must be a valid UUID v4",
+          400,
+        );
+      }
+
+      const canonicalPayload = JSON.stringify(sortKeysRecursively(body));
+      const fingerprint = await sha256Hex(
+        `${userId}:${req.method}:${path}:${canonicalPayload}`,
+      );
+
+      // 1. Pre-routing Live Authorization & Scope Check (Mandatory: NO replay if revoked/forbidden)
+      const { error: scopeErr } = await serviceClient.rpc(
+        "verify_delivery_creation_scope",
+        {
+          p_actor_id: userId,
+          p_quote_id: quoteId,
+        },
+      );
+
+      if (scopeErr) {
+        const msg = scopeErr.message || "";
+        if (msg.includes("QUOTE_NOT_FOUND")) {
+          return errorResponse(
+            "QUOTE_NOT_FOUND",
+            "Specified quote does not exist",
+            404,
+          );
+        }
+        if (msg.includes("AUTH_FORBIDDEN")) {
+          return errorResponse(
+            "AUTH_FORBIDDEN",
+            "User does not have active access to this business",
+            403,
+          );
+        }
+        if (msg.includes("INVALID_LOCATION_SCOPE")) {
+          return errorResponse(
+            "INVALID_LOCATION_SCOPE",
+            "User lacks authority over quote location",
+            403,
+          );
+        }
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
+        );
+      }
+
+      // 2. Acquire Idempotency Lease
+      const scopeName = `create_delivery:${quoteId}`;
+      const { data: leaseData, error: leaseErr } = await serviceClient.rpc(
+        "acquire_idempotency_lease",
+        {
+          p_actor_user_id: userId,
+          p_scope: scopeName,
+          p_key: idempotencyKey,
+          p_request_fingerprint: fingerprint,
+          p_lease_seconds: 30,
+        },
+      );
+
+      if (leaseErr) {
+        const msg = leaseErr.message || "";
+        if (msg.includes("IDEMPOTENCY_FINGERPRINT_MISMATCH")) {
+          return errorResponse(
+            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+            "Request payload fingerprint does not match original request",
+            422,
+          );
+        }
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while acquiring idempotency lease",
+          500,
+        );
+      }
+
+      if (leaseData.action === "REPLAY") {
+        return jsonResponse(
+          leaseData.response_body,
+          leaseData.response_status || 201,
+          { "X-Cache": "HIT" },
+        );
+      }
+
+      if (leaseData.action === "IN_FLIGHT") {
+        let polledResponse: any = null;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          const { data: pollData, error: pollErr } = await serviceClient.rpc(
+            "get_idempotent_response",
+            {
+              p_actor_user_id: userId,
+              p_scope: scopeName,
+              p_key: idempotencyKey,
+              p_request_fingerprint: fingerprint,
+            },
+          );
+
+          if (pollErr) {
+            return errorResponse(
+              "INTERNAL_SERVER_ERROR",
+              "An unexpected error occurred while awaiting in-flight request",
+              500,
+            );
+          }
+
+          if (pollData && pollData.status === "COMPLETED") {
+            polledResponse = pollData;
+            break;
+          }
+        }
+
+        if (polledResponse) {
+          return jsonResponse(
+            polledResponse.response_body,
+            polledResponse.response_status || 201,
+            { "X-Cache": "HIT" },
+          );
+        }
+
+        return errorResponse(
+          "IDEMPOTENCY_IN_PROGRESS",
+          "Operation is currently in progress, please retry with the same Idempotency-Key",
+          409,
+        );
+      }
+
+      // Action is EXECUTE
+      const reservationToken = leaseData.reservation_token;
+      const leaseGeneration = leaseData.lease_generation;
+
+      const { data: deliveryCreated, error: createErr } =
+        await serviceClient.rpc("create_delivery_from_quote_atomic", {
+          p_actor_id: userId,
+          p_quote_id: quoteId,
+          p_idempotency_key: idempotencyKey,
+          p_request_fingerprint: fingerprint,
+          p_reservation_token: reservationToken,
+          p_lease_generation: leaseGeneration,
+        });
+
+      if (createErr) {
+        const msg = createErr.message || "";
+        if (msg.includes("IDEMPOTENCY_LEASE_LOST")) {
+          return errorResponse(
+            "IDEMPOTENCY_LEASE_LOST",
+            "Idempotency lease was lost or expired",
+            409,
+          );
+        }
+        if (msg.includes("IDEMPOTENCY_FINGERPRINT_MISMATCH")) {
+          return errorResponse(
+            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+            "Request payload fingerprint does not match original request",
+            422,
+          );
+        }
+        if (msg.includes("QUOTE_NOT_FOUND")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "QUOTE_NOT_FOUND",
+            "Specified quote does not exist",
+            404,
+          );
+        }
+        if (msg.includes("QUOTE_EXPIRED")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "QUOTE_EXPIRED",
+            "Quote has expired and cannot be converted to delivery",
+            422,
+          );
+        }
+        if (msg.includes("QUOTE_ALREADY_CONSUMED")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "QUOTE_ALREADY_CONSUMED",
+            "Quote has already been consumed for another delivery",
+            422,
+          );
+        }
+        if (msg.includes("QUOTE_INVALID_STATE")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "QUOTE_INVALID_STATE",
+            "Quote is in an invalid state to create a delivery",
+            422,
+          );
+        }
+        if (msg.includes("AUTH_FORBIDDEN")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "AUTH_FORBIDDEN",
+            "User does not have active access to this business",
+            403,
+          );
+        }
+        if (msg.includes("INVALID_LOCATION_SCOPE")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "INVALID_LOCATION_SCOPE",
+            "User lacks authority over quote location",
+            403,
+          );
+        }
+
+        await serviceClient.rpc("abort_idempotency_lease", {
+          p_actor_user_id: userId,
+          p_scope: scopeName,
+          p_key: idempotencyKey,
+          p_reservation_token: reservationToken,
+          p_lease_generation: leaseGeneration,
+        });
+
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
+        );
+      }
+
+      return jsonResponse(deliveryCreated, 201);
+    }
+
+    // -------------------------------------------------------------
+    // Route 17: Get Delivery Detail (GET /deliveries/:id)
+    // -------------------------------------------------------------
+    const getDeliveryMatch = path.match(
+      /^\/(?:api\/v1\/)?deliveries\/([^\/]+)$/,
+    );
+    if (req.method === "GET" && getDeliveryMatch) {
+      if (!userId) {
+        return errorResponse(
+          "AUTH_REQUIRED",
+          "Authentication token is required",
+          401,
+        );
+      }
+
+      const deliveryId = getDeliveryMatch[1];
+      if (!UUID_V4_REGEX.test(deliveryId)) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "delivery_id must be a valid UUID v4",
+          400,
+        );
+      }
+
+      const { data: deliveryData, error: deliveryErr } =
+        await serviceClient.rpc("get_delivery_detail", {
+          p_actor_id: userId,
+          p_delivery_id: deliveryId,
+        });
+
+      if (deliveryErr) {
+        const msg = deliveryErr.message || "";
+        if (msg.includes("DELIVERY_NOT_FOUND")) {
+          return errorResponse("DELIVERY_NOT_FOUND", "Delivery not found", 404);
+        }
+        if (msg.includes("AUTH_FORBIDDEN")) {
+          return errorResponse(
+            "AUTH_FORBIDDEN",
+            "User does not have access to this delivery",
+            403,
+          );
+        }
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
+        );
+      }
+
+      return jsonResponse(deliveryData, 200);
+    }
+
+    // -------------------------------------------------------------
+    // Route 18: List Business Deliveries (GET /businesses/:id/deliveries)
+    // -------------------------------------------------------------
+    const listBusinessDeliveriesMatch = path.match(
+      /^\/(?:api\/v1\/)?businesses\/([^\/]+)\/deliveries$/,
+    );
+    if (req.method === "GET" && listBusinessDeliveriesMatch) {
+      if (!userId) {
+        return errorResponse(
+          "AUTH_REQUIRED",
+          "Authentication token is required",
+          401,
+        );
+      }
+
+      const businessId = listBusinessDeliveriesMatch[1];
+      if (!UUID_V4_REGEX.test(businessId)) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "business_id must be a valid UUID v4",
+          400,
+        );
+      }
+
+      const locationId = url.searchParams.get("location_id") || undefined;
+      const status = url.searchParams.get("status") || undefined;
+      const limitStr = url.searchParams.get("limit");
+      const limit = limitStr ? parseInt(limitStr, 10) : 20;
+      const cursorCreatedAt =
+        url.searchParams.get("cursor_created_at") || undefined;
+      const cursorId = url.searchParams.get("cursor_id") || undefined;
+
+      const { data: listData, error: listErr } = await serviceClient.rpc(
+        "list_business_deliveries",
+        {
+          p_actor_id: userId,
+          p_business_id: businessId,
+          p_location_id: locationId || null,
+          p_status: status || null,
+          p_limit: limit,
+          p_cursor_created_at: cursorCreatedAt || null,
+          p_cursor_id: cursorId || null,
+        },
+      );
+
+      if (listErr) {
+        const msg = listErr.message || "";
+        if (msg.includes("AUTH_FORBIDDEN")) {
+          return errorResponse(
+            "AUTH_FORBIDDEN",
+            "User does not have access to this business or location",
+            403,
+          );
+        }
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
+        );
+      }
+
+      return jsonResponse(listData, 200);
+    }
+
+    // -------------------------------------------------------------
+    // Route 19: Cancel Delivery (POST /deliveries/:id/cancel)
+    // -------------------------------------------------------------
+    const cancelDeliveryMatch = path.match(
+      /^\/(?:api\/v1\/)?deliveries\/([^\/]+)\/cancel$/,
+    );
+    if (req.method === "POST" && cancelDeliveryMatch) {
+      if (!userId) {
+        return errorResponse(
+          "AUTH_REQUIRED",
+          "Authentication token is required",
+          401,
+        );
+      }
+
+      const deliveryId = cancelDeliveryMatch[1];
+      if (!UUID_V4_REGEX.test(deliveryId)) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "delivery_id must be a valid UUID v4",
+          400,
+        );
+      }
+
+      const { reason } = body;
+      if (!reason || typeof reason !== "string" || !reason.trim()) {
+        return errorResponse(
+          "REASON_REQUIRED",
+          "Cancellation reason is required",
+          400,
+        );
+      }
+
+      const idempotencyKey =
+        req.headers.get("Idempotency-Key") ||
+        req.headers.get("idempotency-key");
+
+      if (!idempotencyKey) {
+        return errorResponse(
+          "IDEMPOTENCY_KEY_REQUIRED",
+          "Idempotency-Key header is required for this operation",
+          400,
+        );
+      }
+
+      if (!UUID_V4_REGEX.test(idempotencyKey)) {
+        return errorResponse(
+          "VALIDATION_ERROR",
+          "Idempotency-Key must be a valid UUID v4",
+          400,
+        );
+      }
+
+      const canonicalPayload = JSON.stringify(sortKeysRecursively(body));
+      const fingerprint = await sha256Hex(
+        `${userId}:${req.method}:${path}:${canonicalPayload}`,
+      );
+
+      // 1. Pre-routing Live Authorization & Scope Check
+      const { error: scopeErr } = await serviceClient.rpc(
+        "verify_delivery_cancel_scope",
+        {
+          p_actor_id: userId,
+          p_delivery_id: deliveryId,
+        },
+      );
+
+      if (scopeErr) {
+        const msg = scopeErr.message || "";
+        if (msg.includes("DELIVERY_NOT_FOUND")) {
+          return errorResponse(
+            "DELIVERY_NOT_FOUND",
+            "Specified delivery does not exist",
+            404,
+          );
+        }
+        if (msg.includes("AUTH_FORBIDDEN")) {
+          return errorResponse(
+            "AUTH_FORBIDDEN",
+            "User does not have active access to this business",
+            403,
+          );
+        }
+        if (msg.includes("INVALID_LOCATION_SCOPE")) {
+          return errorResponse(
+            "INVALID_LOCATION_SCOPE",
+            "User lacks authority over delivery location",
+            403,
+          );
+        }
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
+        );
+      }
+
+      // 2. Acquire Idempotency Lease
+      const scopeName = `cancel_delivery:${deliveryId}`;
+      const { data: leaseData, error: leaseErr } = await serviceClient.rpc(
+        "acquire_idempotency_lease",
+        {
+          p_actor_user_id: userId,
+          p_scope: scopeName,
+          p_key: idempotencyKey,
+          p_request_fingerprint: fingerprint,
+          p_lease_seconds: 30,
+        },
+      );
+
+      if (leaseErr) {
+        const msg = leaseErr.message || "";
+        if (msg.includes("IDEMPOTENCY_FINGERPRINT_MISMATCH")) {
+          return errorResponse(
+            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+            "Request payload fingerprint does not match original request",
+            422,
+          );
+        }
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while acquiring idempotency lease",
+          500,
+        );
+      }
+
+      if (leaseData.action === "REPLAY") {
+        return jsonResponse(
+          leaseData.response_body,
+          leaseData.response_status || 200,
+          { "X-Cache": "HIT" },
+        );
+      }
+
+      if (leaseData.action === "IN_FLIGHT") {
+        let polledResponse: any = null;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          const { data: pollData, error: pollErr } = await serviceClient.rpc(
+            "get_idempotent_response",
+            {
+              p_actor_user_id: userId,
+              p_scope: scopeName,
+              p_key: idempotencyKey,
+              p_request_fingerprint: fingerprint,
+            },
+          );
+
+          if (pollErr) {
+            return errorResponse(
+              "INTERNAL_SERVER_ERROR",
+              "An unexpected error occurred while awaiting in-flight request",
+              500,
+            );
+          }
+
+          if (pollData && pollData.status === "COMPLETED") {
+            polledResponse = pollData;
+            break;
+          }
+        }
+
+        if (polledResponse) {
+          return jsonResponse(
+            polledResponse.response_body,
+            polledResponse.response_status || 200,
+            { "X-Cache": "HIT" },
+          );
+        }
+
+        return errorResponse(
+          "IDEMPOTENCY_IN_PROGRESS",
+          "Operation is currently in progress, please retry with the same Idempotency-Key",
+          409,
+        );
+      }
+
+      // Action is EXECUTE
+      const reservationToken = leaseData.reservation_token;
+      const leaseGeneration = leaseData.lease_generation;
+
+      const { data: cancelResult, error: cancelErr } = await serviceClient.rpc(
+        "cancel_delivery_atomic",
+        {
+          p_actor_id: userId,
+          p_delivery_id: deliveryId,
+          p_reason: reason.trim(),
+          p_idempotency_key: idempotencyKey,
+          p_request_fingerprint: fingerprint,
+          p_reservation_token: reservationToken,
+          p_lease_generation: leaseGeneration,
+        },
+      );
+
+      if (cancelErr) {
+        const msg = cancelErr.message || "";
+        if (msg.includes("IDEMPOTENCY_LEASE_LOST")) {
+          return errorResponse(
+            "IDEMPOTENCY_LEASE_LOST",
+            "Idempotency lease was lost or expired",
+            409,
+          );
+        }
+        if (msg.includes("IDEMPOTENCY_FINGERPRINT_MISMATCH")) {
+          return errorResponse(
+            "IDEMPOTENCY_FINGERPRINT_MISMATCH",
+            "Request payload fingerprint does not match original request",
+            422,
+          );
+        }
+        if (msg.includes("DELIVERY_NOT_FOUND")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "DELIVERY_NOT_FOUND",
+            "Specified delivery does not exist",
+            404,
+          );
+        }
+        if (msg.includes("CANNOT_CANCEL_IN_TRANSIT")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "CANNOT_CANCEL_IN_TRANSIT",
+            "In-transit deliveries cannot be canceled via this endpoint",
+            422,
+          );
+        }
+        if (msg.includes("INVALID_DELIVERY_STATE")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "INVALID_DELIVERY_STATE",
+            "Delivery cannot be canceled in its current state",
+            422,
+          );
+        }
+        if (msg.includes("AUTH_FORBIDDEN")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "AUTH_FORBIDDEN",
+            "User does not have active access to this business",
+            403,
+          );
+        }
+        if (msg.includes("INVALID_LOCATION_SCOPE")) {
+          await serviceClient.rpc("abort_idempotency_lease", {
+            p_actor_user_id: userId,
+            p_scope: scopeName,
+            p_key: idempotencyKey,
+            p_reservation_token: reservationToken,
+            p_lease_generation: leaseGeneration,
+          });
+          return errorResponse(
+            "INVALID_LOCATION_SCOPE",
+            "User lacks authority over delivery location",
+            403,
+          );
+        }
+
+        await serviceClient.rpc("abort_idempotency_lease", {
+          p_actor_user_id: userId,
+          p_scope: scopeName,
+          p_key: idempotencyKey,
+          p_reservation_token: reservationToken,
+          p_lease_generation: leaseGeneration,
+        });
+
+        return errorResponse(
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
+        );
+      }
+
+      return jsonResponse(cancelResult, 200);
+    }
+
     // 404 Route Not Found
     return errorResponse(
       "NOT_FOUND",

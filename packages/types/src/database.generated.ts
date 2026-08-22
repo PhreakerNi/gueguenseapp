@@ -181,6 +181,121 @@ export type Database = {
         }
         Relationships: []
       }
+      deliveries: {
+        Row: {
+          created_at: string
+          currency: string
+          delivered_at: string | null
+          driver_earning: number | null
+          driver_id: string | null
+          final_price: number | null
+          id: string
+          platform_revenue: number | null
+          quoted_price: number
+          quote_id: string
+          request_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          currency?: string
+          delivered_at?: string | null
+          driver_earning?: number | null
+          driver_id?: string | null
+          final_price?: number | null
+          id?: string
+          platform_revenue?: number | null
+          quoted_price: number
+          quote_id: string
+          request_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          currency?: string
+          delivered_at?: string | null
+          driver_earning?: number | null
+          driver_id?: string | null
+          final_price?: number | null
+          id?: string
+          platform_revenue?: number | null
+          quoted_price?: number
+          quote_id?: string
+          request_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deliveries_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "drivers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: true
+            referencedRelation: "delivery_quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "delivery_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_events: {
+        Row: {
+          actor_type: string
+          actor_user_id: string | null
+          created_at: string
+          delivery_id: string
+          event_type: string
+          id: number
+          metadata: Json
+        }
+        Insert: {
+          actor_type: string
+          actor_user_id?: string | null
+          created_at?: string
+          delivery_id: string
+          event_type: string
+          id?: never
+          metadata?: Json
+        }
+        Update: {
+          actor_type?: string
+          actor_user_id?: string | null
+          created_at?: string
+          delivery_id?: string
+          event_type?: string
+          id?: never
+          metadata?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_events_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_events_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       delivery_quotes: {
         Row: {
           base_amount: number
@@ -666,6 +781,18 @@ export type Database = {
         }
         Returns: Json
       }
+      cancel_delivery_atomic: {
+        Args: {
+          p_actor_id: string
+          p_delivery_id: string
+          p_idempotency_key: string
+          p_lease_generation: number
+          p_reason: string
+          p_request_fingerprint: string
+          p_reservation_token: string
+        }
+        Returns: Json
+      }
       cancel_delivery_quote: {
         Args: { p_actor_id: string; p_quote_id: string }
         Returns: Json
@@ -711,6 +838,17 @@ export type Database = {
           p_location_name: string
           p_longitude: number
           p_pickup_instructions?: string
+        }
+        Returns: Json
+      }
+      create_delivery_from_quote_atomic: {
+        Args: {
+          p_actor_id: string
+          p_idempotency_key: string
+          p_lease_generation: number
+          p_quote_id: string
+          p_request_fingerprint: string
+          p_reservation_token: string
         }
         Returns: Json
       }
@@ -800,6 +938,13 @@ export type Database = {
         Args: { p_location_id: string }
         Returns: Json
       }
+      get_delivery_detail: {
+        Args: {
+          p_actor_id: string
+          p_delivery_id: string
+        }
+        Returns: Json
+      }
       get_driver_document_storage_path: {
         Args: { p_document_id: string }
         Returns: Json
@@ -815,6 +960,18 @@ export type Database = {
       get_requote_route_info: { Args: { p_quote_id: string }; Returns: Json }
       get_route_cache: { Args: { p_cache_key: string }; Returns: Json }
       get_user_platform_role: { Args: { p_user_id: string }; Returns: string }
+      list_business_deliveries: {
+        Args: {
+          p_actor_id: string
+          p_business_id: string
+          p_cursor_created_at?: string
+          p_cursor_id?: string
+          p_limit?: number
+          p_location_id?: string
+          p_status?: string
+        }
+        Returns: Json
+      }
       register_driver: {
         Args: {
           p_actor_id: string
@@ -847,6 +1004,20 @@ export type Database = {
           p_ttl_seconds?: number
         }
         Returns: undefined
+      }
+      verify_delivery_cancel_scope: {
+        Args: {
+          p_actor_id: string
+          p_delivery_id: string
+        }
+        Returns: Json
+      }
+      verify_delivery_creation_scope: {
+        Args: {
+          p_actor_id: string
+          p_quote_id: string
+        }
+        Returns: Json
       }
       verify_quote_access_scope: {
         Args: { p_actor_id: string; p_quote_id: string }

@@ -323,3 +323,57 @@ export const quoteResponseSchema = z.object({
 });
 
 export type QuoteResponse = z.infer<typeof quoteResponseSchema>;
+
+// Phase 5: Delivery Engine Schemas
+
+export const deliveryStatusSchema = z.enum([
+  "SEARCHING_DRIVER",
+  "DRIVER_ASSIGNED",
+  "TO_PICKUP",
+  "ARRIVED_PICKUP",
+  "PICKED_UP",
+  "TO_DROPOFF",
+  "ARRIVED_DROPOFF",
+  "DELIVERED",
+  "RETURN_REQUIRED",
+  "RETURNING",
+  "RETURNED",
+  "CANCELED",
+  "FAILED",
+]);
+
+export type DeliveryStatus = z.infer<typeof deliveryStatusSchema>;
+
+export const createDeliverySchema = z.object({
+  quote_id: z.string().uuid("Invalid quote ID"),
+});
+
+export type CreateDeliveryInput = z.infer<typeof createDeliverySchema>;
+
+export const cancelDeliverySchema = z.object({
+  reason: z.string().trim().min(1, "Cancellation reason is required"),
+});
+
+export type CancelDeliveryInput = z.infer<typeof cancelDeliverySchema>;
+
+export const deliveryResponseSchema = z.object({
+  delivery_id: z.string().uuid(),
+  request_id: z.string().uuid(),
+  quote_id: z.string().uuid(),
+  status: deliveryStatusSchema,
+  currency: z.string(),
+  quoted_price: z.string(),
+  created_at: z.string(),
+});
+
+export type DeliveryResponse = z.infer<typeof deliveryResponseSchema>;
+
+export const deliveryListQuerySchema = z.object({
+  location_id: z.string().uuid().optional(),
+  status: deliveryStatusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor_created_at: z.string().optional(),
+  cursor_id: z.string().uuid().optional(),
+});
+
+export type DeliveryListQuery = z.infer<typeof deliveryListQuerySchema>;

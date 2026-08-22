@@ -1,12 +1,12 @@
 # Güegüense — Roadmap de Desarrollo Incremental (20 Fases: 0–19)
 
-**Versión:** 1.0.0-phase3  
-**Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — ✅ APROBADA | FASE 3 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase3_Correccion_v1_1.md`
+**Versión:** 1.0.0-phase5  
+**Estado General:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — ✅ APROBADA | FASE 3 — ✅ APROBADA | FASE 4 — ✅ APROBADA | FASE 5 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN | FASE 6 — ⏳ NO INICIADA  
+**Directiva Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase5_Delivery_Engine_v1_0.md`
 
 ---
 
-## 🛠️ Stack Tecnológico Congelado (Fase 3 v1.1)
+## 🛠️ Stack Tecnológico Congelado (Fase 5 v1.0)
 
 - **Node.js:** `24.18.0 LTS`
 - **Gestor de Paquetes:** `pnpm@11.17.0` (Workspaces monorepo con un único `pnpm-lock.yaml`)
@@ -39,16 +39,18 @@
 
 ### Fase 3 — Onboarding B2B y Registro de Conductores
 
-- **Estado:** 🟡 **EN REVISIÓN / CANDIDATA A APROBACIÓN** (`phase/3-onboarding-b2b-drivers`)
-- **Objetivo:** Edge Function canónica `api-v1` con Idempotency-Key transaccional race-safe, creación atómica de Business (`PENDING`) y separación de Branch (`business_locations`) con N:M (`business_member_locations`), registro de Driver personal separado de vehículo, flujo seguro de subida de documentos con signed upload URL y verificación de almacenamiento, bloqueo de bypass de storage, cola de verificación administrativa con MFA TOTP AAL2, auditoría canónica (`DRIVER_VERIFIED`, `DRIVER_REJECTED`), pgTAP tests 35/35 (total 95/95) y suite de integración HTTP 100% sobre `api-v1`.
+- **Estado:** ✅ **APROBADA** (Commit `ae90e55` / Run `32490520268`)
+- **Entregables:** Edge Function canónica `api-v1` con Idempotency-Key transaccional race-safe, creación atómica de Business (`PENDING`) y separación de Branch (`business_locations`) con N:M (`business_member_locations`), registro de Driver personal separado de vehículo, flujo seguro de subida de documentos con signed upload URL y verificación de almacenamiento, bloqueo de bypass de storage, cola de verificación administrativa con MFA TOTP AAL2, auditoría canónica (`DRIVER_VERIFIED`, `DRIVER_REJECTED`), pgTAP tests 64/64 y suite de integración HTTP 42/42 sobre `api-v1`.
 
 ### Fase 4 — Gestión de Cotización de Envíos (Quote Engine)
 
-- **Estado:** ⏳ Pendiente (No iniciada)
+- **Estado:** ✅ **APROBADA** (Commit `848990a` / Run `32556499988`)
+- **Entregables:** Pricing matrix con versionado inmutable, fallback OSRM/Haversine ante falla de Google Routes, cache L2 con expiración, atomic quote generation y requoting, validación de coordenadas, pgTAP tests 78/78 y suite de integración HTTP 55/55 sobre `api-v1`.
 
 ### Fase 5 — Creación y Ciclo de Vida del Envío (Delivery Engine)
 
-- **Estado:** ⏳ Pendiente (No iniciada)
+- **Estado:** 🟡 **EN REVISIÓN / CANDIDATA A APROBACIÓN** (`phase/5-delivery-engine`)
+- **Objetivo:** Tablas `public.deliveries` y `public.delivery_events` (append-only estricto), transición atómica `QUOTED -> CONSUMED -> SEARCHING_DRIVER`, cancelación `SEARCHING_DRIVER -> CANCELED`, live authorization y location scope antes de replay idempotente, endpoints REST `/deliveries`, `/deliveries/:id`, `/businesses/:id/deliveries`, `/deliveries/:id/cancel`, pgTAP test suite y suite de integración HTTP con 46 tests.
 
 ### Fase 6 — Motor de Despacho e Ingesta de Ofertas (Dispatch Engine)
 

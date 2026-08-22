@@ -1,10 +1,10 @@
 # GÜEGÜENSE — Plataforma Logística y Delivery B2B Bajo Demanda
 
-**Versión:** 1.0.0-phase3  
-**Estado:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — ✅ APROBADA | FASE 3 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN  
-**Rama de Desarrollo:** `phase/3-onboarding-b2b-drivers`  
+**Versión:** 1.0.0-phase5  
+**Estado:** FASE 0 — ✅ APROBADA | FASE 1 — ✅ APROBADA | FASE 2 — ✅ APROBADA | FASE 3 — ✅ APROBADA | FASE 4 — ✅ APROBADA | FASE 5 — 🟡 EN REVISIÓN / CANDIDATA A APROBACIÓN | FASE 6 — ⏳ NO INICIADA  
+**Rama de Desarrollo:** `phase/5-delivery-engine`  
 **Repositorio Oficial:** `https://github.com/PhreakerNi/gueguenseapp.git`  
-**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase3_Correccion_v1_1.md`
+**Directiva Arquitectónica Vigente:** `Gueguense_Paquete_Unico_Cerebro_Agente_Fase5_Delivery_Engine_v1_0.md`
 
 ---
 

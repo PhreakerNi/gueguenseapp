@@ -9,6 +9,7 @@ on:
         phase/2-auth-identity-sessions,
         phase/3-onboarding-b2b-drivers,
         phase/4-quote-engine,
+        phase/5-delivery-engine,
       ]
   pull_request:
     branches:
@@ -18,6 +19,7 @@ on:
         phase/2-auth-identity-sessions,
         phase/3-onboarding-b2b-drivers,
         phase/4-quote-engine,
+        phase/5-delivery-engine,
       ]
 
 jobs:
@@ -140,37 +142,27 @@ jobs:
 
       - name: Verify Migration Immutability
         run: |
-          git fetch --depth=1 origin ae90e5582339afe8ff53b9a402d1ee24b04ae862
-          git diff --exit-code ae90e5582339afe8ff53b9a402d1ee24b04ae862 -- \
+          git fetch --depth=1 origin 848990a3110249f77afd4e577b3b22ed9cf74c48
+          git diff --exit-code 848990a3110249f77afd4e577b3b22ed9cf74c48 -- \
             supabase/migrations/20260811000001_foundation_extensions_schema.sql \
             supabase/migrations/20260811000002_foundation_identity_business.sql \
             supabase/migrations/20260811000003_foundation_driver.sql \
             supabase/migrations/20260819000001_phase3_onboarding_and_verification.sql \
             supabase/migrations/20260819000002_phase3_closure_v1_2.sql \
             supabase/migrations/20260820000001_phase3_security_closure_v1_3.sql \
-            supabase/migrations/20260820000002_phase3_security_microclosure_v1_4.sql
-          git fetch --depth=1 origin 576e09856febe7456b03239f3c5109057c17b292
-          git diff --exit-code 576e09856febe7456b03239f3c5109057c17b292 -- \
-            supabase/migrations/20260821000001_phase4_quote_engine.sql
-          git fetch --depth=1 origin 4c3604f3f866e74aea26078644e3797cdfe880f7
-          git diff --exit-code 4c3604f3f866e74aea26078644e3797cdfe880f7 -- \
-            supabase/migrations/20260821000002_phase4_quote_engine_closure_v1_1.sql
-          git fetch --depth=1 origin 1716962fe0a6c3d4d2072277b48780e5adfcd037
-          git diff --exit-code 1716962fe0a6c3d4d2072277b48780e5adfcd037 -- \
-            supabase/migrations/20260821000003_phase4_quote_engine_microclosure_v1_2.sql
-          git fetch --depth=1 origin 3d37018b45fa3557a9046f044b410558824424bf
-          git diff --exit-code 3d37018b45fa3557a9046f044b410558824424bf -- \
-            supabase/migrations/20260821000004_phase4_quote_engine_closure_v1_3.sql
-          git fetch --depth=1 origin 1bab869d6f623e9c7c102d8f57abbb1561325ed8
-          git diff --exit-code 1bab869d6f623e9c7c102d8f57abbb1561325ed8 -- \
+            supabase/migrations/20260820000002_phase3_security_microclosure_v1_4.sql \
+            supabase/migrations/20260821000001_phase4_quote_engine.sql \
+            supabase/migrations/20260821000002_phase4_quote_engine_closure_v1_1.sql \
+            supabase/migrations/20260821000003_phase4_quote_engine_microclosure_v1_2.sql \
+            supabase/migrations/20260821000004_phase4_quote_engine_closure_v1_3.sql \
             supabase/migrations/20260821000005_phase4_quote_engine_final_closure_v1_4.sql
 
-      - name: Test Forward Migration Upgrade (F1-F3 -> F4)
+      - name: Test Forward Migration Upgrade (F1-F4 -> F5)
         run: |
-          mkdir -p /tmp/f4_migrations
-          mv supabase/migrations/20260821*.sql /tmp/f4_migrations/
+          mkdir -p /tmp/f5_migrations
+          mv supabase/migrations/20260822*.sql /tmp/f5_migrations/
           pnpm supabase:reset
-          mv /tmp/f4_migrations/* supabase/migrations/
+          mv /tmp/f5_migrations/* supabase/migrations/
           pnpm supabase migration up --local
           pnpm supabase:reset
 
@@ -393,6 +385,101 @@ jobs:
             while IFS= read -r sentinel; do
               if [ -n "$sentinel" ]; then
                 if grep -F -q "$sentinel" edge.log 2>/dev/null || grep -F -q "$sentinel" quote_test.log 2>/dev/null; then
+                  echo "ERROR: Privacy sentinel leaked in log files!"
+                  rm -f /tmp/privacy_sentinels.txt
+                  exit 1
+                fi
+              fi
+            done < /tmp/privacy_sentinels.txt
+            rm -f /tmp/privacy_sentinels.txt
+          fi
+          echo "Log privacy verification SUCCESS: 0 privacy sentinels leaked."
+
+      - name: Stop Supabase Stack
+        if: always()
+        run: pnpm supabase:stop
+
+  delivery-integration-gates:
+    name: Phase 5 Delivery Engine Integration Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24.18.0 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.18.0"
+
+      - name: Setup pnpm 11.17.0
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.17.0"
+
+      - name: Install Monorepo Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Supabase CLI Exact Version
+        run: pnpm supabase --version
+
+      - name: Start Supabase Local Stack
+        run: pnpm supabase:start
+
+      - name: Reset Database & Apply Migrations
+        run: pnpm supabase:reset
+
+      - name: Serve and Healthcheck api-v1 Edge Function
+        run: |
+          set -eo pipefail
+          node -e "const { execSync } = require('node:child_process'); const raw = execSync('pnpm supabase status -o json', { encoding: 'utf8' }); const match = raw.match(/\{[\s\S]*\}/); require('node:fs').writeFileSync('supabase_status.json', match ? match[0] : '{}');"
+          export SUPABASE_URL=$(jq -r '.API_URL // .api_url // "http://127.0.0.1:54321"' supabase_status.json)
+          export SUPABASE_ANON_KEY=$(jq -r '.ANON_KEY // .anon_key // empty' supabase_status.json)
+          export SUPABASE_SERVICE_ROLE_KEY=$(jq -r '.SERVICE_ROLE_KEY // .service_role_key // empty' supabase_status.json)
+          export DB_URL=$(jq -r '.DB_URL // .db_url // "postgresql://postgres:postgres@127.0.0.1:54322/postgres"' supabase_status.json)
+          echo "SUPABASE_URL=$SUPABASE_URL" >> $GITHUB_ENV
+          echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> $GITHUB_ENV
+          echo "SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY" >> $GITHUB_ENV
+          echo "DB_URL=$DB_URL" >> $GITHUB_ENV
+          mkdir -p supabase/functions/api-v1
+          echo "API_URL=$SUPABASE_URL" > supabase/.env.local
+          echo "SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY" >> supabase/.env.local
+          echo "ANON_KEY=$SUPABASE_ANON_KEY" >> supabase/.env.local
+          echo "GOOGLE_MAPS_ROUTES_API_KEY=mock-routes-ci-key" >> supabase/.env.local
+          echo "GOOGLE_ROUTES_API_URL=http://127.0.0.1:9876/directions/v2:computeRoutes" >> supabase/.env.local
+          cp supabase/.env.local supabase/functions/.env
+          cp supabase/.env.local supabase/functions/api-v1/.env
+          cp supabase/.env.local .env
+          rm -f supabase_status.json
+          pnpm supabase functions serve api-v1 --no-verify-jwt --env-file supabase/.env.local > edge.log 2>&1 &
+          echo "Waiting for api-v1 Edge Function to be ready..."
+          healthy=0
+          for i in $(seq 1 30); do
+            if curl -s http://127.0.0.1:54321/functions/v1/api-v1/health | grep -q '"status":"ok"'; then
+              echo "api-v1 Edge Function is UP and healthy!"
+              healthy=1
+              break
+            fi
+            echo "Waiting for api-v1 (attempt $i/30)..."
+            sleep 1
+          done
+          test "$healthy" -eq 1
+
+      - name: Run Phase 5 Delivery Engine Integration Test Suite
+        run: |
+          set -eo pipefail
+          pnpm test:delivery-integration 2>&1 | tee delivery_test.log
+          echo "### Phase 5 Delivery Engine Integration Test Suite" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat delivery_test.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Verify Log Privacy & Sentinel Leaks
+        run: |
+          set -eo pipefail
+          if [ -f /tmp/privacy_sentinels.txt ]; then
+            while IFS= read -r sentinel; do
+              if [ -n "$sentinel" ]; then
+                if grep -F -q "$sentinel" edge.log 2>/dev/null || grep -F -q "$sentinel" delivery_test.log 2>/dev/null; then
                   echo "ERROR: Privacy sentinel leaked in log files!"
                   rm -f /tmp/privacy_sentinels.txt
                   exit 1
