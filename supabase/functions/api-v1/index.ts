@@ -2366,7 +2366,10 @@ Deno.serve(async (req: Request) => {
       );
 
       if (listErr) {
-        console.error("[list_business_deliveries error]", JSON.stringify(listErr));
+        console.error(
+          "[list_business_deliveries error]",
+          JSON.stringify(listErr),
+        );
         const msg = listErr.message || "";
         if (msg.includes("AUTH_FORBIDDEN")) {
           return errorResponse(

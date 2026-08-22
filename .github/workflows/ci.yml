@@ -467,7 +467,11 @@ jobs:
       - name: Run Phase 5 Delivery Engine Integration Test Suite
         run: |
           set -eo pipefail
-          pnpm test:delivery-integration 2>&1 | tee delivery_test.log
+          if ! pnpm test:delivery-integration 2>&1 | tee delivery_test.log; then
+            echo "=== EDGE LOG ==="
+            cat edge.log || true
+            exit 1
+          fi
           echo "### Phase 5 Delivery Engine Integration Test Suite" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat delivery_test.log >> $GITHUB_STEP_SUMMARY
