@@ -221,13 +221,13 @@ BEGIN
     END IF;
 
     -- 1. Validate fencing token under advisory lock
-    v_lock_key := ('x' || pg_catalog.substr(pg_catalog.md5(p_actor_id::text || ':create_delivery:' || p_quote_id::text || ':' || p_idempotency_key), 1, 16))::bit(64)::bigint;
+    v_lock_key := ('x' || pg_catalog.substr(pg_catalog.md5(p_actor_id::text || ':create_delivery:' || p_idempotency_key), 1, 16))::bit(64)::bigint;
     PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
 
     SELECT * INTO v_res
     FROM private.idempotency_reservations
     WHERE actor_user_id = p_actor_id
-      AND scope = 'create_delivery:' || p_quote_id::text
+      AND scope = 'create_delivery'
       AND key = p_idempotency_key
     FOR UPDATE;
 
@@ -411,7 +411,7 @@ BEGIN
         actor_user_id, scope, key, request_fingerprint,
         response_status, response_body, expires_at, created_at
     ) VALUES (
-        p_actor_id, 'create_delivery:' || p_quote_id::text, p_idempotency_key, p_request_fingerprint,
+        p_actor_id, 'create_delivery', p_idempotency_key, p_request_fingerprint,
         201, v_response, v_exp, v_now
     )
     ON CONFLICT (actor_user_id, scope, key) DO UPDATE SET

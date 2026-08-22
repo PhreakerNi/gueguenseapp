@@ -2056,7 +2056,7 @@ Deno.serve(async (req: Request) => {
       }
 
       // 2. Acquire Idempotency Lease
-      const scopeName = `create_delivery:${quoteId}`;
+      const scopeName = "create_delivery";
       const { data: leaseData, error: leaseErr } = await serviceClient.rpc(
         "acquire_idempotency_lease",
         {
