@@ -1820,11 +1820,10 @@ describe("Phase 4 Quote Engine HTTP & Concurrency Integration Gates", () => {
       // Restore pricing rules
       await client.query(`
         INSERT INTO public.pricing_rules (
-          id, pricing_version_id, package_type, base_fee, per_km_rate, per_minute_rate, minimum_fare
+          id, pricing_version_id, base_fee, per_km_rate, per_minute_rate, min_fare
         ) VALUES 
-          ('ee000000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-000000000001', 'PARCEL', 35.00, 12.00, 1.50, 45.00),
-          ('ee000000-0000-4000-8000-000000000002', 'dd000000-0000-4000-8000-000000000001', 'DOCUMENT', 25.00, 10.00, 1.00, 35.00)
-        ON CONFLICT (id) DO NOTHING;
+          ('ee000000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-000000000001', 35.00, 12.00, 1.50, 45.00)
+        ON CONFLICT (id) DO UPDATE SET base_fee = 35.00, per_km_rate = 12.00, per_minute_rate = 1.50, min_fare = 45.00;
       `);
       client.release();
     }
