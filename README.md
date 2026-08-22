@@ -34,11 +34,11 @@ gueguenseapp/
 ├── supabase/
 │   ├── functions/api-v1/   # Edge Function REST API canónica (Idempotency-Key, Storage verification, Service Role)
 │   ├── migrations/         # Migraciones SQL de fundación y Fase 3 (B2B, Drivers, Storage, Audit Logs, Idempotency)
-│   ├── tests/database/     # Suite de pruebas pgTAP (Foundation 60/60 + Phase 3 35/35 = 95/95)
+│   ├── tests/database/     # Suite de pruebas pgTAP (Foundation 60/60 + Phase 3 64/64 + Phase 4 78/78 + Phase 5 63/63 = 265/265)
 │   ├── seed.sql            # Semilla sintética de desarrollo
 │   └── config.toml         # Configuración del CLI local de Supabase
 │
-└── .github/workflows/ci.yml # 5 Jobs: Quality, Mobile, Foundation DB, F2 Auth Integration, F3 Onboarding Integration
+└── .github/workflows/ci.yml # 7 Jobs: Quality, Mobile, Foundation DB, F2 Auth, F3 Onboarding, F4 Quote Engine, F5 Delivery Engine
 ```
 
 ---
