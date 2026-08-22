@@ -709,32 +709,33 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-    v_member RECORD;
+    v_member_id UUID;
+    v_member_role TEXT;
+    v_member_status TEXT;
+    v_business_status TEXT;
     v_limit INTEGER;
     v_rows JSONB;
-    v_next_cursor_created_at TIMESTAMPTZ;
-    v_next_cursor_id UUID;
 BEGIN
     v_limit := pg_catalog.least(pg_catalog.greatest(COALESCE(p_limit, 20), 1), 50);
 
     -- Verify actor access
-    SELECT bm.id, bm.role, bm.status, b.account_status AS business_status
-    INTO v_member
+    SELECT bm.id, bm.role, bm.status, b.account_status
+    INTO v_member_id, v_member_role, v_member_status, v_business_status
     FROM public.business_members bm
     JOIN public.businesses b ON b.id = bm.business_id
     WHERE bm.user_id = p_actor_id
       AND bm.business_id = p_business_id;
 
-    IF v_member.id IS NULL OR v_member.status <> 'ACTIVE' OR v_member.business_status <> 'ACTIVE' THEN
+    IF v_member_id IS NULL OR v_member_status <> 'ACTIVE' OR v_business_status <> 'ACTIVE' THEN
         RAISE EXCEPTION 'AUTH_FORBIDDEN: User does not have access to this business';
     END IF;
 
     -- If location_id is provided, verify scope
     IF p_location_id IS NOT NULL THEN
-        IF v_member.role <> 'business_owner' THEN
+        IF v_member_role <> 'business_owner' THEN
             IF NOT EXISTS (
                 SELECT 1 FROM public.business_member_locations bml
-                WHERE bml.business_member_id = v_member.id
+                WHERE bml.business_member_id = v_member_id
                   AND bml.business_location_id = p_location_id
             ) THEN
                 RAISE EXCEPTION 'AUTH_FORBIDDEN: User lacks authority over specified location';
@@ -765,10 +766,10 @@ BEGIN
         JOIN public.delivery_requests r ON r.id = d.request_id
         WHERE r.business_id = p_business_id
           AND (
-              v_member.role = 'business_owner'
+              v_member_role = 'business_owner'
               OR EXISTS (
                   SELECT 1 FROM public.business_member_locations bml
-                  WHERE bml.business_member_id = v_member.id
+                  WHERE bml.business_member_id = v_member_id
                     AND bml.business_location_id = r.location_id
               )
           )
@@ -777,7 +778,7 @@ BEGIN
           AND (
               p_cursor_created_at IS NULL
               OR (d.created_at < p_cursor_created_at)
-              OR (d.created_at = p_cursor_created_at AND d.id < p_cursor_id)
+              OR (d.created_at = p_cursor_created_at AND (p_cursor_id IS NULL OR d.id < p_cursor_id))
           )
         ORDER BY d.created_at DESC, d.id DESC
         LIMIT v_limit

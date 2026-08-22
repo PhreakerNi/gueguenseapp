@@ -5,7 +5,7 @@
 
 BEGIN;
 
-SELECT plan(60);
+SELECT plan(63);
 
 -- ----------------------------------------------------------------------------
 -- 1. Schema & Table Structure Tests
