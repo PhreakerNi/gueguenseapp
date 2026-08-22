@@ -121,24 +121,29 @@ export default function BusinessDashboardScreen() {
       cash_to_collect: parseFloat(cashToCollect) || 0,
     };
 
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      setErrorMessage(
+        "Error de configuración: EXPO_PUBLIC_SUPABASE_URL no está definida.",
+      );
+      return;
+    }
+
     const idempotencyKey = intentManager.getOrCreateKey(
       "quote:create",
       payload,
     );
 
     try {
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321"}/functions/v1/api-v1/quotes`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session?.access_token}`,
-            "Idempotency-Key": idempotencyKey,
-          },
-          body: JSON.stringify(payload),
+      const res = await fetch(`${supabaseUrl}/functions/v1/api-v1/quotes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`,
+          "Idempotency-Key": idempotencyKey,
         },
-      );
+        body: JSON.stringify(payload),
+      });
 
       const data = await res.json();
       if (!res.ok) {
@@ -162,6 +167,15 @@ export default function BusinessDashboardScreen() {
     setActionLoading(true);
     setErrorMessage(null);
 
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      setErrorMessage(
+        "Error de configuración: EXPO_PUBLIC_SUPABASE_URL no está definida.",
+      );
+      setActionLoading(false);
+      return;
+    }
+
     const cancelPayload = { quote_id: quoteResult.quote_id };
     const idempotencyKey = intentManager.getOrCreateKey(
       "quote:cancel",
@@ -170,7 +184,7 @@ export default function BusinessDashboardScreen() {
 
     try {
       const res = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321"}/functions/v1/api-v1/quotes/${quoteResult.quote_id}/cancel`,
+        `${supabaseUrl}/functions/v1/api-v1/quotes/${quoteResult.quote_id}/cancel`,
         {
           method: "POST",
           headers: {
@@ -204,6 +218,15 @@ export default function BusinessDashboardScreen() {
     setActionLoading(true);
     setErrorMessage(null);
 
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      setErrorMessage(
+        "Error de configuración: EXPO_PUBLIC_SUPABASE_URL no está definida.",
+      );
+      setActionLoading(false);
+      return;
+    }
+
     const requotePayload = { quote_id: quoteResult.quote_id };
     const idempotencyKey = intentManager.getOrCreateKey(
       "quote:requote",
@@ -212,7 +235,7 @@ export default function BusinessDashboardScreen() {
 
     try {
       const res = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321"}/functions/v1/api-v1/quotes/${quoteResult.quote_id}/requote`,
+        `${supabaseUrl}/functions/v1/api-v1/quotes/${quoteResult.quote_id}/requote`,
         {
           method: "POST",
           headers: {

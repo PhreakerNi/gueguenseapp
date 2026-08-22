@@ -1,9 +1,9 @@
 BEGIN;
 
-SELECT plan(55);
+SELECT plan(65);
 
 -- ============================================================================
--- 1. Structural Checks: Tables, Columns & Indexes (H01, H02, H08)
+-- 1. Structural Checks: Tables, Columns & Indexes (H01 - H08)
 -- ============================================================================
 SELECT has_table('public', 'pricing_versions', 'public.pricing_versions exists');
 SELECT is(
@@ -49,6 +49,8 @@ SELECT has_function('public', 'verify_quote_creation_scope', ARRAY['uuid', 'uuid
 SELECT has_function('public', 'verify_requote_scope', ARRAY['uuid', 'uuid'], 'public.verify_requote_scope exists with correct signature');
 SELECT has_function('public', 'verify_quote_access_scope', ARRAY['uuid', 'uuid'], 'public.verify_quote_access_scope exists with correct signature');
 SELECT has_function('public', 'get_active_pricing_rule', ARRAY['text'], 'public.get_active_pricing_rule exists with correct signature');
+SELECT has_function('public', 'create_delivery_quote_atomic', ARRAY['uuid', 'uuid', 'text', 'numeric', 'numeric', 'text', 'text', 'text', 'numeric', 'integer', 'integer', 'timestamp with time zone', 'text', 'text', 'uuid', 'bigint'], 'public.create_delivery_quote_atomic exists');
+SELECT has_function('public', 'create_delivery_requote_atomic', ARRAY['uuid', 'uuid', 'integer', 'integer', 'timestamp with time zone', 'text', 'text', 'uuid', 'bigint'], 'public.create_delivery_requote_atomic exists');
 SELECT has_function('private', 'get_route_cache', ARRAY['text'], 'private.get_route_cache exists');
 SELECT has_function('private', 'upsert_route_cache', ARRAY['text', 'text', 'double precision', 'double precision', 'double precision', 'double precision', 'bigint', 'bigint', 'integer'], 'private.upsert_route_cache exists');
 
@@ -166,11 +168,36 @@ SELECT throws_like(
     'H07: route_duration_seconds < 0 violates check constraint'
 );
 
--- H08: max 1 CONSUMED por delivery_request
-SELECT is(
-    (SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'delivery_quotes' AND indexname = 'idx_delivery_quotes_single_consumed'),
-    1::bigint,
-    'H08: Unique index idx_delivery_quotes_single_consumed exists'
+-- H08: Single CONSUMED quote per delivery_request enforcement test
+DO $$
+DECLARE
+    v_req_id UUID := gen_random_uuid();
+    v_quote_1 UUID := gen_random_uuid();
+BEGIN
+    INSERT INTO public.delivery_requests (
+        id, business_id, location_id, pickup_address_snapshot, dropoff_address_snapshot, recipient_name, recipient_phone, dropoff_location, package_type, created_by
+    ) VALUES (
+        v_req_id, 'b0000000-0000-4000-8000-000000000001'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid, '{}'::jsonb, '{}'::jsonb, 'Test Recipient', '+50588880000', extensions.ST_SetSRID(extensions.ST_MakePoint(-86.2, 12.1), 4326), 'PARCEL', 'a0000000-0000-4000-8000-000000000001'::uuid
+    );
+
+    INSERT INTO public.delivery_quotes (
+        id, delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount,
+        zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_provider, route_calculated_at, expires_at, consumed_at
+    ) VALUES (
+        v_quote_1, v_req_id, 'dd000000-0000-4000-8000-000000000001'::uuid, 'CONSUMED', 'NIO', 35, 10, 5, 0, 0, 0, 50, 1000, 120, 'GOOGLE_ROUTES', now(), now() + interval '300s', now()
+    );
+    PERFORM set_config('test.consumed_req_id', v_req_id::text, true);
+END $$;
+
+SELECT throws_like(
+    $$ INSERT INTO public.delivery_quotes (
+        delivery_request_id, pricing_version_id, status, currency, base_amount, distance_amount, time_amount,
+        zone_amount, demand_amount, discount_amount, quoted_total, route_distance_meters, route_duration_seconds, route_provider, route_calculated_at, expires_at, consumed_at
+    ) VALUES (
+        current_setting('test.consumed_req_id')::uuid, 'dd000000-0000-4000-8000-000000000001'::uuid, 'CONSUMED', 'NIO', 35, 10, 5, 0, 0, 0, 50, 1000, 120, 'GOOGLE_ROUTES', now(), now() + interval '300s', now()
+    ) $$,
+    '%idx_delivery_quotes_single_consumed%',
+    'H08: Inserting second CONSUMED quote for same delivery_request violates single-consumed unique partial index'
 );
 
 -- ============================================================================
@@ -328,51 +355,119 @@ SET base_fee = 35.00, per_km_rate = 12.00
 WHERE pricing_version_id = 'dd000000-0000-4000-8000-000000000001'::uuid;
 
 -- ============================================================================
--- 7. H22 - H25 Function Execution Permissions
+-- 7. Exhaustive ACL Permissions Testing (PUBLIC, anon, authenticated, service_role)
 -- ============================================================================
-SET LOCAL ROLE authenticated;
--- H22-H24: Authenticated direct RPC call denied
-SELECT throws_like(
-    $$ SELECT public.acquire_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'test', '00000000-4000-4000-8000-000000000002', 'fp', 30) $$,
-    '%permission denied%',
-    'H24: Authenticated cannot execute acquire_idempotency_lease'
-);
-
-SELECT throws_like(
-    $$ SELECT public.complete_idempotent_external_operation('a0000000-0000-4000-8000-000000000001'::uuid, 'test', '00000000-4000-4000-8000-000000000002', 'fp', gen_random_uuid(), 1, 200, '{}'::jsonb) $$,
-    '%permission denied%',
-    'H24: Authenticated cannot execute complete_idempotent_external_operation'
-);
-
-SELECT throws_like(
-    $$ SELECT public.abort_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'test', '00000000-4000-4000-8000-000000000002', gen_random_uuid(), 1) $$,
-    '%permission denied%',
-    'H24: Authenticated cannot execute abort_idempotency_lease'
-);
-
+-- 7.1 PUBLIC / Anon Permissions
 SET LOCAL ROLE anon;
+
 SELECT throws_like(
-    $$ SELECT public.acquire_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'test', '00000000-4000-4000-8000-000000000002', 'fp', 30) $$,
+    $$ SELECT public.acquire_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'acl_scope', '00000000-4000-4000-8000-000000000002', 'fp', 30) $$,
     '%permission denied%',
-    'H23: Anon cannot execute acquire_idempotency_lease'
+    'ACL anon: acquire_idempotency_lease denied'
 );
 
--- H25: Service role can execute lease flow
+SELECT throws_like(
+    $$ SELECT public.complete_idempotent_external_operation('a0000000-0000-4000-8000-000000000001'::uuid, 'acl_scope', '00000000-4000-4000-8000-000000000002', 'fp', gen_random_uuid(), 1, 200, '{}'::jsonb) $$,
+    '%permission denied%',
+    'ACL anon: complete_idempotent_external_operation denied'
+);
+
+SELECT throws_like(
+    $$ SELECT public.abort_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'acl_scope', '00000000-4000-4000-8000-000000000002', gen_random_uuid(), 1) $$,
+    '%permission denied%',
+    'ACL anon: abort_idempotency_lease denied'
+);
+
+SELECT throws_like(
+    $$ SELECT public.create_delivery_quote_atomic('a0000000-0000-4000-8000-000000000001'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid, 'Drop', 12.1, -86.2, 'R', '+50588880000', 'PARCEL', 0, 1000, 60, now(), '00000000-4000-4000-8000-000000000002', 'fp', gen_random_uuid(), 1) $$,
+    '%permission denied%',
+    'ACL anon: create_delivery_quote_atomic denied'
+);
+
+SELECT throws_like(
+    $$ SELECT public.create_delivery_requote_atomic('a0000000-0000-4000-8000-000000000001'::uuid, gen_random_uuid(), 1000, 60, now(), '00000000-4000-4000-8000-000000000002', 'fp', gen_random_uuid(), 1) $$,
+    '%permission denied%',
+    'ACL anon: create_delivery_requote_atomic denied'
+);
+
+-- 7.2 Authenticated Permissions
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = 'a0000000-0000-4000-8000-000000000001';
+
+SELECT throws_like(
+    $$ SELECT public.acquire_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'acl_scope', '00000000-4000-4000-8000-000000000002', 'fp', 30) $$,
+    '%permission denied%',
+    'ACL authenticated: acquire_idempotency_lease denied'
+);
+
+SELECT throws_like(
+    $$ SELECT public.complete_idempotent_external_operation('a0000000-0000-4000-8000-000000000001'::uuid, 'acl_scope', '00000000-4000-4000-8000-000000000002', 'fp', gen_random_uuid(), 1, 200, '{}'::jsonb) $$,
+    '%permission denied%',
+    'ACL authenticated: complete_idempotent_external_operation denied'
+);
+
+SELECT throws_like(
+    $$ SELECT public.abort_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'acl_scope', '00000000-4000-4000-8000-000000000002', gen_random_uuid(), 1) $$,
+    '%permission denied%',
+    'ACL authenticated: abort_idempotency_lease denied'
+);
+
+SELECT throws_like(
+    $$ SELECT public.create_delivery_quote_atomic('a0000000-0000-4000-8000-000000000001'::uuid, 'cc000000-0000-4000-8000-000000000001'::uuid, 'Drop', 12.1, -86.2, 'R', '+50588880000', 'PARCEL', 0, 1000, 60, now(), '00000000-4000-4000-8000-000000000002', 'fp', gen_random_uuid(), 1) $$,
+    '%permission denied%',
+    'ACL authenticated: create_delivery_quote_atomic denied'
+);
+
+SELECT throws_like(
+    $$ SELECT public.create_delivery_requote_atomic('a0000000-0000-4000-8000-000000000001'::uuid, gen_random_uuid(), 1000, 60, now(), '00000000-4000-4000-8000-000000000002', 'fp', gen_random_uuid(), 1) $$,
+    '%permission denied%',
+    'ACL authenticated: create_delivery_requote_atomic denied'
+);
+
+-- 7.3 service_role Permissions
 SET LOCAL ROLE service_role;
+
 SELECT is(
-    (SELECT (public.acquire_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'test_scope_h25', '00000000-4000-4000-8000-000000000002', 'fp_h25', 30))->>'action'),
+    (SELECT (public.acquire_idempotency_lease('a0000000-0000-4000-8000-000000000001'::uuid, 'test_scope_acl_sr', '00000000-4000-4000-8000-000000000002', 'fp_acl_sr', 30))->>'action'),
     'EXECUTE',
-    'H25: service_role can successfully acquire lease'
+    'ACL service_role: acquire_idempotency_lease allowed'
 );
 
 -- ============================================================================
--- 8. H26 - H30 Fencing Tokens, Lease Generation & Abort Lifecycle
+-- 8. H26 - H30 Fencing Tokens, Lease Generation, Abort & Expiration Lifecycle
 -- ============================================================================
--- H26: Actor NULL sin duplicados ambiguos en idempotency_reservations
-SELECT is(
-    (SELECT count(*) FROM pg_indexes WHERE schemaname = 'private' AND tablename = 'idempotency_reservations' AND indexname = 'uq_idempotency_reservations_actor_coalesce_key'),
-    1::bigint,
-    'H26: Unique index uq_idempotency_reservations_actor_coalesce_key exists'
+-- H26.1: Actor NULL uniqueness enforcement on private.idempotency_responses
+INSERT INTO private.idempotency_responses (
+    actor_user_id, scope, key, request_fingerprint, response_status, response_body, expires_at
+) VALUES (
+    NULL, 'null_actor_scope', '00000000-4000-4000-8000-000000000099', 'fp_null_1', 200, '{"ok":true}'::jsonb, now() + interval '1 hour'
+);
+
+SELECT throws_like(
+    $$ INSERT INTO private.idempotency_responses (
+        actor_user_id, scope, key, request_fingerprint, response_status, response_body, expires_at
+    ) VALUES (
+        NULL, 'null_actor_scope', '00000000-4000-4000-8000-000000000099', 'fp_null_2', 200, '{"ok":true}'::jsonb, now() + interval '1 hour'
+    ) $$,
+    '%idempotency_responses_null_actor_uniq_idx%',
+    'H26.1: Duplicate key for NULL actor in private.idempotency_responses violates uniqueness index'
+);
+
+-- H26.2: Actor NULL uniqueness enforcement on public.idempotency_keys
+INSERT INTO public.idempotency_keys (
+    actor_type, actor_user_id, external_actor_key, scope, key, request_fingerprint, response_status, response_body_ref, expires_at
+) VALUES (
+    'service', NULL, 'ext_key_1', 'null_actor_scope_pub', '00000000-4000-4000-8000-000000000099', 'fp_null_pub1', 200, 'private.idempotency_responses', now() + interval '1 hour'
+);
+
+SELECT throws_like(
+    $$ INSERT INTO public.idempotency_keys (
+        actor_type, actor_user_id, external_actor_key, scope, key, request_fingerprint, response_status, response_body_ref, expires_at
+    ) VALUES (
+        'service', NULL, 'ext_key_1', 'null_actor_scope_pub', '00000000-4000-4000-8000-000000000099', 'fp_null_pub2', 200, 'private.idempotency_responses', now() + interval '1 hour'
+    ) $$,
+    '%idempotency_keys_null_actor_uniq_idx%',
+    'H26.2: Duplicate key for external/NULL actor in public.idempotency_keys violates uniqueness index'
 );
 
 -- Setup a test lease for H27-H30
@@ -431,7 +526,7 @@ SELECT is(
         current_setting('test.valid_gen')::bigint,
         201,
         '{"status":"completed"}'::jsonb
-    ))->>'status'),
+    ))->>'response_status'),
     '201',
     'H28: Current fencing token successfully completes idempotent operation'
 );
@@ -463,6 +558,44 @@ SELECT is(
     ))->>'aborted'),
     'true',
     'H30: Aborting lease with valid token and generation succeeds'
+);
+
+-- H31: Expired lease loses ownership (cannot complete even if no other worker took over)
+DO $$
+DECLARE
+    v_exp_lease JSONB;
+BEGIN
+    v_exp_lease := public.acquire_idempotency_lease(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'expiry_test_scope',
+        '00000000-4000-4000-8000-000000000005',
+        'fp_expiry_test',
+        1
+    );
+    PERFORM set_config('test.exp_token', v_exp_lease->>'reservation_token', true);
+    PERFORM set_config('test.exp_gen', v_exp_lease->>'lease_generation', true);
+
+    -- Artificially expire lease in DB
+    UPDATE private.idempotency_reservations
+    SET lease_expires_at = now() - interval '10 seconds'
+    WHERE actor_user_id = 'a0000000-0000-4000-8000-000000000001'::uuid
+      AND scope = 'expiry_test_scope'
+      AND key = '00000000-4000-4000-8000-000000000005';
+END $$;
+
+SELECT throws_like(
+    $$ SELECT public.complete_idempotent_external_operation(
+        'a0000000-0000-4000-8000-000000000001'::uuid,
+        'expiry_test_scope',
+        '00000000-4000-4000-8000-000000000005',
+        'fp_expiry_test',
+        current_setting('test.exp_token')::uuid,
+        current_setting('test.exp_gen')::bigint,
+        200,
+        '{"done":true}'::jsonb
+    ) $$,
+    '%IDEMPOTENCY_LEASE_LOST%',
+    'H31: Expired lease loses ownership and cannot complete'
 );
 
 SELECT * FROM finish();

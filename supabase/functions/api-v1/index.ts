@@ -230,8 +230,9 @@ Deno.serve(async (req: Request) => {
         }
 
         // Map domain errors
-        let errCode = "BAD_REQUEST";
-        let errMsg = error.message.replace(/^[^:]+:\s*/, "");
+        let errCode = "INTERNAL_SERVER_ERROR";
+        let errMsg =
+          "An unexpected error occurred while processing the request";
 
         if (error.message.includes("BUSINESS_ALREADY_EXISTS")) {
           errCode = "BUSINESS_ALREADY_EXISTS";
@@ -312,7 +313,7 @@ Deno.serve(async (req: Request) => {
             "Pricing version or routing service is currently unavailable";
         } else if (error.message.includes("VALIDATION_ERROR")) {
           errCode = "VALIDATION_ERROR";
-          errMsg = error.message.replace(/^[^:]+:\s*/, "");
+          errMsg = "Invalid request payload or parameters";
         } else if (error.message.includes("INVALID_LOCATIONS")) {
           errCode = "INVALID_LOCATIONS";
           errMsg = "Specified business location does not exist";
@@ -1364,9 +1365,9 @@ Deno.serve(async (req: Request) => {
           );
         }
         return errorResponse(
-          "VALIDATION_ERROR",
-          msg.replace(/^[^:]+:\s*/, ""),
-          400,
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
         );
       }
 
@@ -1620,9 +1621,9 @@ Deno.serve(async (req: Request) => {
           );
         }
         return errorResponse(
-          "VALIDATION_ERROR",
-          msg.replace(/^[^:]+:\s*/, ""),
-          400,
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
         );
       }
 
@@ -1722,9 +1723,9 @@ Deno.serve(async (req: Request) => {
           );
         }
         return errorResponse(
-          "VALIDATION_ERROR",
-          msg.replace(/^[^:]+:\s*/, ""),
-          400,
+          "INTERNAL_SERVER_ERROR",
+          "An unexpected error occurred while processing the request",
+          500,
         );
       }
 

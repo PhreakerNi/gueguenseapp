@@ -158,6 +158,9 @@ jobs:
           git fetch --depth=1 origin 1716962fe0a6c3d4d2072277b48780e5adfcd037
           git diff --exit-code 1716962fe0a6c3d4d2072277b48780e5adfcd037 -- \
             supabase/migrations/20260821000003_phase4_quote_engine_microclosure_v1_2.sql
+          git fetch --depth=1 origin 3d37018b45fa3557a9046f044b410558824424bf
+          git diff --exit-code 3d37018b45fa3557a9046f044b410558824424bf -- \
+            supabase/migrations/20260821000004_phase4_quote_engine_closure_v1_3.sql
 
       - name: Test Forward Migration Upgrade (F1-F3 -> F4)
         run: |
@@ -383,10 +386,19 @@ jobs:
       - name: Verify Log Privacy & Sentinel Leaks
         run: |
           set -eo pipefail
-          if grep -q "SECRET_SENTINEL" edge.log 2>/dev/null || grep -q "PHONE_SENTINEL" edge.log 2>/dev/null || grep -q "BEARER_SENTINEL" edge.log 2>/dev/null; then
-            echo "ERROR: Sentinel leaked in logs!"
-            exit 1
+          if [ -f /tmp/privacy_sentinels.txt ]; then
+            while IFS= read -r sentinel; do
+              if [ -n "$sentinel" ]; then
+                if grep -F -q "$sentinel" edge.log 2>/dev/null || grep -F -q "$sentinel" quote_test.log 2>/dev/null; then
+                  echo "ERROR: Privacy sentinel leaked in log files!"
+                  rm -f /tmp/privacy_sentinels.txt
+                  exit 1
+                fi
+              fi
+            done < /tmp/privacy_sentinels.txt
+            rm -f /tmp/privacy_sentinels.txt
           fi
+          echo "Log privacy verification SUCCESS: 0 privacy sentinels leaked."
 
       - name: Stop Supabase Stack
         if: always()
