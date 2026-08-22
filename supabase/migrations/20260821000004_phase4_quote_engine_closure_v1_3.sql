@@ -863,6 +863,7 @@ BEGIN
         platform_revenue_estimate,
         route_distance_meters,
         route_duration_seconds,
+        route_provider,
         route_polyline,
         route_calculated_at,
         expires_at,
@@ -883,6 +884,7 @@ BEGIN
         NULL,
         p_distance_meters,
         p_duration_seconds,
+        'GOOGLE_ROUTES',
         NULL,
         v_calc_at,
         v_expires_at,
@@ -949,7 +951,7 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 7. Atomic Requote Creation with Fencing Token Verification
+-- 7. Atomic Requote RPC with Fencing Token (Server-Only, Service Role)
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.create_delivery_requote_atomic(
     p_actor_id UUID,
@@ -995,6 +997,10 @@ BEGIN
 
     IF p_quote_id IS NULL THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: quote_id is required';
+    END IF;
+
+    IF p_reservation_token IS NULL OR p_lease_generation IS NULL THEN
+        RAISE EXCEPTION 'INVALID_ARGUMENT: reservation_token and lease_generation are required';
     END IF;
 
     v_scope := 'requote_quote:' || p_quote_id::text;
@@ -1106,6 +1112,7 @@ BEGIN
         platform_revenue_estimate,
         route_distance_meters,
         route_duration_seconds,
+        route_provider,
         route_polyline,
         route_calculated_at,
         expires_at,
@@ -1126,6 +1133,7 @@ BEGIN
         NULL,
         p_distance_meters,
         p_duration_seconds,
+        'GOOGLE_ROUTES',
         NULL,
         v_calc_at,
         v_expires_at,
