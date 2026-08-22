@@ -662,10 +662,10 @@ describe("Phase 5: Delivery Engine HTTP Integration Test Suite", () => {
 
     // Insert artificially IN_FLIGHT lease
     await dbPool.query(`
-      INSERT INTO private.idempotency_records (
-        actor_user_id, scope, idempotency_key, request_fingerprint, status, reservation_token, lease_generation, expires_at
+      INSERT INTO private.idempotency_reservations (
+        actor_user_id, scope, key, request_fingerprint, status, reservation_token, lease_generation, lease_expires_at, expires_at
       ) VALUES (
-        '${ownerAUserId}', 'create_delivery', '${key}', '${fingerprint}', 'IN_FLIGHT', '${generateUuidV4()}', 1, now() + interval '30 seconds'
+        '${ownerAUserId}', 'create_delivery', '${key}', '${fingerprint}', 'PENDING', '${generateUuidV4()}', 1, now() + interval '30 seconds', now() + interval '24 hours'
       );
     `);
 

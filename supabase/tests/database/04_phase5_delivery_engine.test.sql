@@ -269,7 +269,7 @@ BEGIN
     -- Acquire lease
     v_lease := public.acquire_idempotency_lease(
         'a5000000-0000-4000-8000-000000000001'::uuid,
-        'create_delivery:f5000000-0000-4000-8000-000000000001',
+        'create_delivery',
         'a1000000-0000-4000-8000-000000000001',
         'fp_test_delivery_create',
         30
